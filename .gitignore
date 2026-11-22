@@ -1,0 +1,21 @@
+# Local tools, caches and credentials
+/.tools/
+/.cache/
+/.secrets/
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Local database files and backup exports
+/backups/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.dump
+*.backup
