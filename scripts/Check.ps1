@@ -26,6 +26,7 @@ try {
         'scripts/Setup.ps1'
         'scripts/Check.ps1'
         'scripts/toolchain.json'
+        'docs/verification/.codex/config.toml'
         'docs/verification/codex-native-acceptance.md'
         'docs/verification/codex-native-fixture.md'
         'README.md'

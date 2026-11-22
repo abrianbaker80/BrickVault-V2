@@ -5,21 +5,20 @@ This M0 exercise tests whether the Codex sidebar in VS Code Insiders can select 
 ## One-time preparation by the coordinator
 
 1. Create a disposable, full local clone of the candidate, remove the disposable clone's `origin` and create local branch `m0/codex-native-canary` at the candidate commit. Confirm the remote list is empty and the working tree and index are clean. Record the baseline commit and hashes of all tracked files outside the clone.
-2. Open this clone in a separate VS Code Insiders window. The owner reviews any workspace-trust request. Confirm that the effective Codex configuration loads the project's `.codex/config.toml` and discovers the `architect`, `builder` and `reviewer` roles.
-3. Use the signed-in, included Codex plan and a workspace-write session with shell network access and permission escalation disabled. Limit workspace access to the clone. Keep credentials, connected services and production workspaces outside the exercise.
-4. In the isolated window, open the Command Palette and choose **Codex: New Chat in ChatGPT Sidebar**. Submit the following line in that chat. This completes the coordinator's preparation.
+2. Open the disposable clone's `docs/verification` directory as the workspace folder in a separate VS Code Insiders window. The owner reviews any workspace-trust request. From this directory Codex loads the repository's native role definitions and the verification directory's scoped `.codex/config.toml`. The scoped profile disables shell network access, permission escalation, and memory use and generation. Use the signed-in, included Codex plan.
+3. In that window's Command Palette, choose **Codex: New Chat in ChatGPT Sidebar**. If a composer permissions preset overrides the scoped configuration, select **Custom (config.toml)**. Submit the line below in that fresh chat. Full access fails the permission check.
 
 ```text
-You are the parent in this existing chat. Execute “In-chat exercise” in docs/verification/codex-native-acceptance.md here now using this chat's native project subagent tools. Skip preparation. If a required native tool or role is unavailable, identify it and stop.
+You are the parent in this existing chat. Before reading any file, verify from the effective session context that workspace-write is active, shell network access and permission escalation are disabled, and no active instruction directs an external memory, skill or history lookup. If any condition fails or cannot be verified, report it and stop. Otherwise execute “In-chat exercise” in codex-native-acceptance.md here now with native project roles. Keep all parent and child reads inside this clone.
 ```
 
 ## In-chat exercise
 
-The parent in the active sidebar chat executes these instructions directly. Do not open another chat, dispatch another client, control the UI through Computer Use or any other tool, or request desktop permissions. Use only this chat's native project subagents, local filesystem access in the clone and Git inspection throughout the exercise.
+The parent in the active sidebar chat executes these instructions directly. Do not open another chat, dispatch another client, control the UI through Computer Use or any other tool, or request desktop permissions. Use only this chat's native project subagents, local filesystem access in the clone and Git inspection. Give every child the same isolation instructions. Each child must stop before reading files if its effective permissions or instructions conflict with the preconditions. Neither parent nor children may look up memories, skills, prior chats, session logs or history outside the clone.
 
-Use local filesystem and Git inspection to verify that the branch is `m0/codex-native-canary`, the remote list is empty, and the worktree and index are clean. Record the current commit as the baseline. Verify workspace-write is available. Stop on a failed precondition and report which check failed. Only `docs/verification/codex-native-fixture.md` may be edited. Do not stage, commit, push, merge, use the network or change any other file.
+Start in the verification workspace. Use `git rev-parse --show-toplevel` to resolve the clone root. Confirm that the current directory is its `docs/verification` folder, the branch is `m0/codex-native-canary`, the remote list is empty, and the entire worktree and index are clean. Record the current commit as the baseline. Stop on a failed precondition and report which check failed. Only `codex-native-fixture.md` in the current directory may be edited. Do not stage, commit, push, merge, use the network or change any other file.
 
-Use the native project subagent tools available in this chat. Select each role by its exact native name, one worker at a time. Wait for completion and close each worker before spawning the next. If a native tool is unavailable or a role selection fails, report the tool or role, the step and the observed failure, then stop.
+Use this chat's native tool to select each project role by its exact name. Keep one worker active at a time. For each dispatch, record the selected role and its native completion receipt. Advance only after the tool confirms successful terminal completion and the worker returns the requested result. An interim message or wait timeout requires checking that worker's status again. If the native selector is missing, a dispatch exceeds available capacity or a worker fails, stop and report the step, role and observed blocker.
 
 1. Spawn architect for a read-only check of scope and acceptance criteria.
 2. Spawn builder to append "This example uses fictional inventory." as a
@@ -34,9 +33,9 @@ Use the native project subagent tools available in this chat. Select each role b
    actual diff against baseline. Request a verdict on both required changes
    and confirmation that all other files and the index are clean.
 6. Report the role selections, findings, correction, final verdict and diff.
-   Propose appending "Native acceptance canary approved." to README.md as a
-   separate owner decision. End the turn asking for approval. Leave README.md
-   untouched.
+   Propose appending "Native acceptance canary approved." to the repository-root
+   `README.md` as a separate owner decision. End the turn asking for approval.
+   Leave that file untouched.
 
 ## Independent verification by the coordinator
 
