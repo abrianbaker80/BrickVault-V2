@@ -9,12 +9,14 @@ This M0 exercise tests whether the Codex sidebar in VS Code Insiders can select 
 3. In that window's Command Palette, choose **Codex: New Chat in ChatGPT Sidebar**. If a composer permissions preset overrides the scoped configuration, select **Custom (config.toml)**. Submit the line below in that fresh chat. Full access fails the permission check.
 
 ```text
-You are the parent in this existing chat. Before reading any file, verify from the effective session context that workspace-write is active, shell network access and permission escalation are disabled, and no active instruction directs an external memory, skill or history lookup. If any condition fails or cannot be verified, report it and stop. Otherwise execute “In-chat exercise” in codex-native-acceptance.md here now with native project roles. Keep all parent and child reads inside this clone.
+You are the parent in this existing chat. Before any tool call, read only the runtime instructions already displayed to you. They must show workspace-write, restricted shell network access and approval policy never. If a setting is missing or conflicts, or an instruction requires an external lookup, report it and stop. Make no discovery calls to inspect processes, the OS, the environment, global configuration, memory files or other sessions. Then run “In-chat exercise” in codex-native-acceptance.md here using native project roles. Give each child this same precheck and keep all reads inside the clone.
 ```
 
 ## In-chat exercise
 
-The parent in the active sidebar chat executes these instructions directly. Do not open another chat, dispatch another client, control the UI through Computer Use or any other tool, or request desktop permissions. Use only this chat's native project subagents, local filesystem access in the clone and Git inspection. Give every child the same isolation instructions. Each child must stop before reading files if its effective permissions or instructions conflict with the preconditions. Neither parent nor children may look up memories, skills, prior chats, session logs or history outside the clone.
+The parent runs this exercise directly in the active sidebar chat. Include the precheck in every child's assignment. Each participant uses only the runtime instructions already displayed in its own context before making its first tool call. Check for workspace-write, restricted shell network access and approval policy `never`. Stop if a setting is missing or conflicts, or a displayed instruction requires an external lookup. Do not query processes, the OS, environment variables, global configuration, memory files or other sessions to discover settings. The coordinator verifies the memory configuration separately.
+
+Use only this chat's native project subagents, local filesystem access in the clone and Git inspection. Neither parent nor children may look up memories, skills, prior chats, session logs or history outside the clone. Do not open another chat, dispatch another client, control the UI or request desktop permissions.
 
 Start in the verification workspace. Use `git rev-parse --show-toplevel` to resolve the clone root. Confirm that the current directory is its `docs/verification` folder, the branch is `m0/codex-native-canary`, the remote list is empty, and the entire worktree and index are clean. Record the current commit as the baseline. Stop on a failed precondition and report which check failed. Only `codex-native-fixture.md` in the current directory may be edited. Do not stage, commit, push, merge, use the network or change any other file.
 
@@ -38,6 +40,8 @@ Use this chat's native tool to select each project role by its exact name. Keep 
    Leave that file untouched.
 
 ## Independent verification by the coordinator
+
+Use the coordinator's configuration and session records to verify that the scoped profile disabled memory use and generation. Review the observed parent and child tool calls for reads outside the clone. A conflicting setting or an out-of-scope read fails the exercise. Keep those records outside the test chat.
 
 Check the role selections and completions in the sidebar or its associated native records. Confirm they used the role settings in the candidate. The first reviewer must identify the discrepancy independently and the fresh reviewer must verify the correction. Observe the parent asking separately about the README edit. Leave the request unanswered for this test.
 
