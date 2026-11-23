@@ -52,7 +52,7 @@ The statuses above describe each complete requirement. The isolated foundation u
 
 | ID | What the implementation and qualification exercise cover | Outstanding evidence or decision |
 | --- | --- | --- |
-| T01 | Local TLS sign-in, independent browser sessions, server persistence across restart, disconnected reads and paused writes. | Production Proxmox capacity, isolation, cost and commissioning require an infrastructure decision. A second physical workstation still needs qualification. |
+| T01 | Local TLS sign-in, independent browser sessions, server persistence across restart, disconnected reads and paused writes. | The private capacity and cost assessment is recorded. Independent backup storage, guest commissioning and access from a second physical workstation still need qualification. |
 | T02 | First-party reference entry, exact text identity, variant, known color zero, unknown values, provenance, mapping and rights restrictions. | Qualify this bounded first-party workflow against the reviewed release. Any external source requires its own rights and mapping evidence before import. |
 | T03 | Gateway and session controls, rotation of operator, gateway and session credentials, separate API/worker/migrator grants, signed-in scoped export and redaction checks. | Production secret custody and retention decisions still need evidence. Device credentials and dispatch await a selected device workflow. |
 | T04 | Logical snapshot, age encryption, fresh database, matching release and fact signatures, session exclusion and transactional migration failure exercise. | Record clean-target readback and measured restore time. Off-host recovery, WAL/PITR and production recovery objectives require an approved design and rehearsal. |

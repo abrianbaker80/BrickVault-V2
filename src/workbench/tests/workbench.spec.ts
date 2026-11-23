@@ -1,7 +1,9 @@
-import { test, expect, chromium, type Page } from '@playwright/test'
+import { expect, firefox, type Page } from '@playwright/test'
+import { test, prepareProfile } from './trusted'
 import AxeBuilder from '@axe-core/playwright'
 import { randomUUID } from 'node:crypto'
-import { mkdtempDisposable, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtempDisposable } from 'node:fs/promises'
+import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Workspace } from '../src/api'
@@ -58,7 +60,7 @@ test('private sign-in denies wrong credentials and anonymous reference writes', 
 })
 
 test('two independent sessions see reference values, source rights, audit and a worker diagnostic', async ({ page, browser, baseURL }, info) => {
-  const other = await browser.newContext({ baseURL, ignoreHTTPSErrors: true })
+  const other = await browser.newContext({ baseURL })
   try {
     const reader = await other.newPage()
     await signIn(page)
@@ -210,49 +212,72 @@ test('a delayed initial read and a lost service connection cannot appear as a co
   await connected(page)
 })
 
-test('the Workbench reflows at native 150 percent browser zoom', async ({ baseURL }, info) => {
+test('the Workbench reflows at native 150 percent Firefox zoom', async ({ baseURL }, info) => {
   await using scratch = await mkdtempDisposable(join(tmpdir(), 'brickvault-workbench-zoom-'))
-  const extension = join(scratch.path, 'extension')
-  await mkdir(extension)
-  await writeFile(join(extension, 'manifest.json'), JSON.stringify({
-    manifest_version: 3, name: 'Workbench zoom test', version: '1.0',
-    permissions: ['tabs'], background: { service_worker: 'zoom.js' }
-  }))
-  await writeFile(join(extension, 'zoom.js'), 'chrome.runtime.onInstalled.addListener(() => {})')
-  const context = await chromium.launchPersistentContext(join(scratch.path, 'profile'), {
-    baseURL, channel: 'chromium', viewport: null, ignoreHTTPSErrors: true,
-    args: ['--window-size=1280,720', '--load-extension=' + extension, '--disable-extensions-except=' + extension]
-  })
+  const profile = join(scratch.path, 'profile')
+  prepareProfile(profile)
+  const options = { baseURL, viewport: null, args: ['--width=1280', '--height=720'] }
+  const regular = await firefox.launchPersistentContext(profile, options)
+  let initialWidth: number
   try {
-    const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker')
-    const page = await context.newPage()
+    const page = regular.pages()[0]
     await signIn(page)
     await connected(page)
+    initialWidth = await page.evaluate(() => innerWidth * devicePixelRatio)
     await page.screenshot({ path: info.outputPath('catalog-desktop.png') })
-    const zoom = await worker.evaluate(async origin => {
-      const tabs = (globalThis as typeof globalThis & { chrome: { tabs: {
-        query(options: object): Promise<{id: number; url?: string}[]>
-        setZoom(id: number, factor: number): Promise<void>
-        getZoom(id: number): Promise<number>
-      } } }).chrome.tabs
-      const match = (await tabs.query({})).find(tab => tab.url?.startsWith(origin + '/'))!
-      await tabs.setZoom(match.id, 1.5)
-      return tabs.getZoom(match.id)
-    }, baseURL!)
-    expect(zoom).toBe(1.5)
-    await page.waitForFunction(() => window.devicePixelRatio >= 1.49 && innerWidth < 930)
+  } finally { await regular.close() }
+
+  // Set Firefox's persisted default full-page zoom in this disposable, closed profile.
+  // Firefox creates the preference database and applies its normal renderer zoom on restart.
+  const prefs = new DatabaseSync(join(profile, 'content-prefs.sqlite'))
+  try {
+    const id = prefs.prepare('INSERT INTO settings(name) VALUES(?)').run('browser.content.full-zoom').lastInsertRowid
+    prefs.prepare('INSERT INTO prefs(groupID,settingID,value,timestamp) VALUES(NULL,?,1.5,unixepoch())').run(id)
+  } finally { prefs.close() }
+  const zoomed = await firefox.launchPersistentContext(profile, options)
+  try {
+    const page = zoomed.pages()[0]
+    await page.goto('/')
+    await connected(page)
+    await page.waitForFunction(() => devicePixelRatio >= 1.49 && innerWidth < 930)
     await noOverflow(page)
-    const native = await context.newCDPSession(page)
-    try {
-      const capture = await native.send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false })
-      const png = Buffer.from(capture.data, 'base64')
-      const contentWidth = await page.evaluate(() => innerWidth)
-      expect(Math.abs(png.readUInt32BE(16) - contentWidth * zoom)).toBeLessThan(4)
-      await writeFile(info.outputPath('catalog-150pct.png'), png)
-    } finally { await native.detach() }
+    const image = await page.screenshot({ path: info.outputPath('catalog-150pct.png'), scale: 'device' })
+    expect(Math.abs(image.readUInt32BE(16) - initialWidth)).toBeLessThan(4)
     await page.getByRole('button', { name: 'New catalog item' }).click()
     await expect(page.getByLabel('Item number')).toBeFocused()
     await page.keyboard.press('Escape')
     await expect(page.getByRole('button', { name: 'New catalog item' })).toBeFocused()
-  } finally { await context.close() }
+  } finally { await zoomed.close() }
+})
+
+test('a clean Firefox profile rejects the private certificate', async ({ baseURL }) => {
+  const clean = await firefox.launch()
+  try {
+    const page = await clean.newPage()
+    await expect(page.goto(baseURL!)).rejects.toThrow(/SEC_ERROR_UNKNOWN_ISSUER|MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT/)
+  } finally { await clean.close() }
+})
+
+test('another workspace and unbound legacy commands remain held without dispatch', async ({ page }) => {
+  await signIn(page)
+  await connected(page)
+  const foreign = randomUUID()
+  const oldId = randomUUID()
+  const foreignId = randomUUID()
+  await page.evaluate(({ foreign, oldId, foreignId }) => {
+    const body = { commandId: foreignId, expectedRevision: 0, code: 'FOREIGN', name: 'Other workspace record' }
+    localStorage.setItem('brickvault.v2.pending.' + foreign + '.' + foreignId,
+      JSON.stringify({ workspaceId: foreign, kind: 'location', body }))
+    localStorage.setItem('brickvault.v1.pending.' + oldId,
+      JSON.stringify({ kind: 'location', body: { ...body, commandId: oldId } }))
+  }, { foreign, oldId, foreignId })
+  let writes = 0
+  page.on('request', req => { if (req.method() === 'POST') ++writes })
+  await page.reload()
+  await connected(page)
+  const held = page.getByRole('region', { name: 'Held commands' })
+  for (const id of [foreign, oldId, foreignId]) await expect(held).toContainText(id)
+  await expect(page.getByRole('button', { name: 'Retry command' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'New catalog item' })).toBeEnabled()
+  expect(writes).toBe(0)
 })

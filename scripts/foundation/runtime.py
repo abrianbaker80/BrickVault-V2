@@ -1,5 +1,7 @@
 """Supervise the private TLS gateway, API and worker for a disposable or operator-owned lab."""
 
+import base64
+import hashlib
 import contextlib
 import os
 from pathlib import Path
@@ -20,9 +22,11 @@ from instance import (
     DOTNET,
     EXT,
     NO_WINDOW,
+    Instance,
     RELEASE,
     UI,
     WIN,
+    child_env,
     password_hash,
     write_private,
 )
@@ -187,7 +191,7 @@ def supervise(s):
             config = s.path / "Caddyfile"
             write_private(config, caddyfile(s))
             gateway_env = {
-                **os.environ,
+                **child_env(),
                 "BV_OWNER_HASH": s.config["owner_hash"],
                 "BV_GATEWAY_TOKEN": s.config["gateway"],
                 "XDG_DATA_HOME": str(s.path / "caddy-data"),
@@ -229,18 +233,21 @@ def supervise(s):
 def ready(s):
     try:
         context = ssl.create_default_context(cafile=str(s.ca))
-        # GET session without a cookie is the readiness probe through both TLS and the authenticated gateway.
-        with urllib.request.urlopen(
-            s.origin + "/api/v1/session", context=context, timeout=2
-        ):
-            return False
-    except urllib.error.HTTPError as e:
-        return e.code == 401
+        request = urllib.request.Request(
+            s.origin + "/internal/ready",
+            headers={"X-BrickVault-Readiness": s.config["gateway"]},
+        )
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPSHandler(context=context),
+        )
+        with opener.open(request, timeout=3) as response:
+            return response.status == 204
     except (OSError, ValueError):
         return False
 
 
-def start(s):
+def _start(s):
     proc = None
     if not running(s):
         with (s.path / "supervisor.log").open("ab") as out:
@@ -270,7 +277,7 @@ def start(s):
     raise RuntimeError("Private foundation did not become ready.")
 
 
-def stop(s):
+def _stop(s):
     if running(s):
         (s.path / "stop.request").touch()
         for _ in range(160):
@@ -282,18 +289,57 @@ def stop(s):
     s.pg_stop()
 
 
+@contextlib.contextmanager
+def operation(s):
+    """Serialize operator transitions and complete any committed login rotation."""
+    deadline = time.monotonic() + 120
+    with contextlib.ExitStack() as stack:
+        while True:
+            try:
+                stack.enter_context(exclusive(s.path / "operator.lock"))
+                break
+            except (BlockingIOError, PermissionError):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        "Another foundation operation is still in progress."
+                    )
+                time.sleep(0.1)
+        current = Instance(s.path)
+        s.config, s.database = current.config, current.database
+        pending = s.path / "owner-login.next"
+        if pending.exists():
+            if hashlib.sha256(pending.read_bytes()).hexdigest() == s.config.get(
+                "loginDigest"
+            ):
+                os.replace(pending, s.path / "owner-login.txt")
+            else:
+                pending.unlink()
+        yield
+
+
+def start(s):
+    with operation(s):
+        _start(s)
+
+
+def stop(s):
+    with operation(s):
+        _stop(s)
+
+
 def rotate(s):
-    was_running = running(s)
-    if was_running:
-        stop(s)
-    # A staged recovery copy lets an operator finish an interrupted two-file rotation.
-    owner = secrets.token_urlsafe(24)
-    staged = s.path / "owner-login.next"
-    write_private(staged, "operator\n" + owner + "\n")
-    s.config["owner_hash"] = password_hash(owner)
-    s.config["session"] = __import__("base64").b64encode(os.urandom(32)).decode()
-    s.config["gateway"] = secrets.token_urlsafe(40)
-    s.save()
-    os.replace(staged, s.path / "owner-login.txt")
-    if was_running:
-        start(s)
+    with operation(s):
+        was_running = running(s)
+        if was_running:
+            _stop(s)
+        owner = secrets.token_urlsafe(24)
+        staged = s.path / "owner-login.next"
+        write_private(staged, "operator\n" + owner + "\n")
+        s.config["owner_hash"] = password_hash(owner)
+        s.config["session"] = base64.b64encode(os.urandom(32)).decode()
+        s.config["gateway"] = secrets.token_urlsafe(40)
+        s.config["loginDigest"] = hashlib.sha256(staged.read_bytes()).hexdigest()
+        s.save()
+        os.replace(staged, s.path / "owner-login.txt")
+        if was_running:
+            _start(s)

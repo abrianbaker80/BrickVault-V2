@@ -8,7 +8,7 @@ from pathlib import Path
 import setup
 from instance import Instance, init
 from recovery import activate, backup, restore
-from runtime import build, ready, rotate, running, start, stop, supervise
+from runtime import build, operation, ready, rotate, running, start, stop, supervise
 
 
 def main():
@@ -75,7 +75,8 @@ def main():
         elif args.action == "backup":
             if not args.file:
                 p.error("backup requires --file")
-            backup(s, args.file)
+            with operation(s):
+                backup(s, args.file)
             print("Encrypted backup written.")
         elif args.action == "activate":
             if not args.target:
@@ -85,16 +86,14 @@ def main():
         elif args.action == "restore":
             if not (args.file and args.target and args.identity):
                 p.error("restore requires --file, --identity and --target")
-            if running(s):
-                restore(s, args.file, args.identity, args.target)
-            else:
-                from runtime import exclusive
-
-                with exclusive(s.path / "supervisor.lock"):
+            with operation(s):
+                online = running(s)
+                if not online:
                     s.pg_start()
-                    try:
-                        restore(s, args.file, args.identity, args.target)
-                    finally:
+                try:
+                    restore(s, args.file, args.identity, args.target)
+                finally:
+                    if not online:
                         s.pg_stop()
             print("Isolated restore verified. Active database selection preserved.")
 

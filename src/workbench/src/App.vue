@@ -22,10 +22,12 @@ const route = () => {
   return hash === 'locations' || hash === 'activity' ? hash : 'catalog'
 }
 const page = ref<Page>(route())
-const { session, workspace, signedOut, readState, error, notice, pending, journalError, authBusy, submitting,
+const { session, workspace, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
   canSend, canCreate, refresh, signIn, signOut, create, send, expired } = useWorkbench()
 const password = ref('')
 const dialogKind = ref<'catalog' | 'location' | null>(null)
+const formWorkspace = ref('')
+watch(() => session.value?.workspaceId, () => { dialogKind.value = null })
 const heading = ref<HTMLElement>()
 const addButton = ref<HTMLButtonElement>()
 const status = computed(() => ({ loading: 'Loading', ready: 'Connected', disconnected: 'Disconnected', partial: 'Partial read' })[readState.value])
@@ -53,10 +55,12 @@ async function closeForm() {
   else heading.value?.focus()
 }
 async function submit(input: { kind: 'catalog'; fields: CatalogInput } | { kind: 'location'; fields: LocationInput }) {
-  await create(input)
+  await create(input, formWorkspace.value)
   if (notice.value || pending.value.length || !session.value) await closeForm()
 }
 function openForm() {
+  if (!session.value) return
+  formWorkspace.value = session.value.workspaceId
   error.value = ''
   notice.value = null
   dialogKind.value = page.value === 'catalog' ? 'catalog' : 'location'
@@ -118,6 +122,13 @@ function openForm() {
             <ul><li v-for="command in pending" :key="command.body.commandId">
               <div><strong>{{ command.body.name }}</strong><small>{{ command.body.commandId }}</small></div>
               <button :disabled="!canSend" @click="send(command)">Retry command</button>
+            </li></ul>
+          </section>
+          <section v-if="held.length" class="message recovery" aria-label="Held commands">
+            <h2>Held commands</h2><p>These commands require their original workspace. Review the original audit before recording the change again.</p>
+            <ul><li v-for="item in held" :key="item.commandId + item.workspaceId">
+              <div><strong>{{ item.workspaceId ? 'Other workspace ' + item.workspaceId : 'Original workspace unknown' }}</strong>
+                <small>Command {{ item.commandId }}</small></div>
             </li></ul>
           </section>
           <p v-if="!workspace && readState === 'loading'" role="status">Loading workspace…</p>

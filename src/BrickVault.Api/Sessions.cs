@@ -12,9 +12,13 @@ internal sealed class Sessions(NpgsqlDataSource db, GatewaySettings settings)
     private static readonly TimeSpan Lifetime = TimeSpan.FromHours(8);
     private readonly byte[] gatewayDigest = SHA256.HashData(Encoding.UTF8.GetBytes(settings.Token));
 
-    public bool TrustedGateway(HttpContext context)
+    public bool TrustedGateway(HttpContext context) => HasProof(context, "X-BrickVault-Gateway");
+
+    public bool TrustedReadiness(HttpContext context) => HasProof(context, "X-BrickVault-Readiness");
+
+    private bool HasProof(HttpContext context, string header)
     {
-        var supplied = context.Request.Headers["X-BrickVault-Gateway"];
+        var supplied = context.Request.Headers[header];
         return supplied.Count == 1 && CryptographicOperations.FixedTimeEquals(gatewayDigest,
             SHA256.HashData(Encoding.UTF8.GetBytes(supplied[0]!)));
     }
@@ -38,10 +42,10 @@ internal sealed class Sessions(NpgsqlDataSource db, GatewaySettings settings)
     }
 
     private byte[] Derive(string domain, string token) =>
-        HMACSHA256.HashData(settings.SessionKey, Encoding.ASCII.GetBytes(domain + "/" + token));
+        HMACSHA256.HashData(settings.SessionKey, Encoding.ASCII.GetBytes($"{domain}/{settings.WorkspaceId:D}/{token}"));
 
     private Session View(string token) =>
-        new("operator", WebEncoders.Base64UrlEncode(Derive("csrf", token)));
+        new("operator", WebEncoders.Base64UrlEncode(Derive("csrf", token)), settings.WorkspaceId);
 
     public async Task<Session> Login(HttpContext ctx, CancellationToken token)
     {

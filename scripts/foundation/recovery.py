@@ -87,7 +87,7 @@ def signatures(s, database, token=None):
         rows = s.sql(stmt, database, role="bv_migrator")
         sig = hashlib.sha256()
         count = 0
-        for row in rows.splitlines():
+        for row in rows.split("\n") if rows else ():
             data = row.encode("utf-8")
             sig.update(len(data).to_bytes(8, "big"))
             sig.update(data)
@@ -133,6 +133,9 @@ def backup(s, destination):
                 "profile": "foundation",
                 "api": "v1",
                 "schema": 2,
+                "workspaceId": str(
+                    uuid.UUID(s.config.get("workspaceId", s.config["id"]))
+                ),
                 "created": datetime.now(timezone.utc).isoformat(),
                 "dumpSha256": digest(dump),
                 "release": release_files(s),
@@ -207,6 +210,7 @@ def restore(s, source, identity, target):
             raise ValueError(
                 "Backup checksum or recovery release mismatch. Use the matching published release."
             )
+        lineage = str(uuid.UUID(m["workspaceId"]))
         s.create_db(target)
         execute(
             [
@@ -230,14 +234,16 @@ def restore(s, source, identity, target):
         receipts.mkdir(exist_ok=True)
         write_private(
             receipts / (target + ".json"),
-            json.dumps({"facts": m["facts"], "release": m["release"]}),
+            json.dumps(
+                {"facts": m["facts"], "release": m["release"], "workspaceId": lineage}
+            ),
         )
         return m
 
 
 def activate(s, target):
     """Select a verified restore on this stopped instance and retain its former database."""
-    from runtime import exclusive
+    from runtime import exclusive, operation
 
     target = label(target)
     receipt = s.path / "verified-restores" / (target + ".json")
@@ -245,7 +251,7 @@ def activate(s, target):
         raise ValueError(
             "Choose a database with a successful restore on this instance."
         )
-    with exclusive(s.path / "supervisor.lock"):
+    with operation(s), exclusive(s.path / "supervisor.lock"):
         proof = json.loads(receipt.read_text(encoding="utf-8"))
         s.pg_start()
         try:
@@ -256,6 +262,7 @@ def activate(s, target):
                 raise ValueError(
                     "Restore changed after verification. Select a fresh verified recovery target."
                 )
+            s.config["workspaceId"] = proof["workspaceId"]
             s.config["database"] = target
             s.save()
             s.database = target

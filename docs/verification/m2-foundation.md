@@ -24,13 +24,13 @@ Invoke-Foundation setup
 Invoke-Foundation build
 Push-Location ./src/workbench
 try {
-    if ($IsWindows) { npx playwright install chromium }
-    else { npx playwright install --with-deps chromium }
+    if ($IsWindows) { npx playwright install firefox }
+    else { npx playwright install --with-deps firefox }
 } finally { Pop-Location }
 Invoke-Foundation verify --port 49520
 ```
 
-`verify` creates two temporary clusters with separate credentials. Use a base port with the first three ports and ports six through eight above the base available on loopback. Verification exercises authenticated HTTPS, retries, worker recovery, permissions, migrations, xUnit, Chromium Workbench flows, credential rotation and a restore while the source is stopped. The HTTPS client verifies the instance CA. Playwright runs isolated browser contexts. A successful run includes a restore time and per-table counts. Attach the redacted results, OS and revision to the checkpoint. [Qualification entry point](../../scripts/foundation/verify.py) · [Playwright browser installation](https://playwright.dev/docs/browsers)
+`verify` creates two temporary clusters with separate credentials. Use a base port with the first three ports and ports six through eight above the base available on loopback. Verification exercises authenticated HTTPS, retries, worker recovery, permissions, migrations, xUnit, Firefox Workbench flows, credential rotation and a restore while the source is stopped. Both the HTTPS client and the browser verify the instance certificate. Each test browser profile receives the public CA for that instance. A successful run includes a restore time and per-table counts. Attach the redacted results, OS and revision to the checkpoint. [Qualification entry point](../../scripts/foundation/verify.py) · [Playwright browser installation](https://playwright.dev/docs/browsers)
 
 ## Start Workbench
 
@@ -45,7 +45,11 @@ Invoke-Foundation start --state $state
 Invoke-Foundation status --state $state
 ```
 
-`start` prints the HTTPS origin and `status` reports supervisor and gateway readiness. From the private state directory, import `caddy-store/pki/authorities/local/root.crt` as a trusted website authority in a dedicated lab browser profile. Import only that public certificate. Open the printed origin and enter the password from `owner-login.txt` in the sign-in form. Open the credential file privately. Keep it out of logs and issue attachments.
+`start` prints the HTTPS origin and `status` reports supervisor and gateway readiness. On Windows, run the command below to open Firefox with a dedicated Workbench profile. The launcher installs the instance's public certificate in that profile. For an existing Firefox installation on Ubuntu, pass the path of its actual executable with `--firefox`. Enter the password from the private state's `owner-login.txt` in the Workbench sign-in form.
+
+```powershell
+& $foundationPython ./scripts/foundation/browser.py open --state $state
+```
 
 1. Under **Catalog**, create an operator-authored item. Use a fictional number such as `0007`, variant `A` and known color ID `0`. Supply the source, condition, completeness, rights and mapping. A reference can preserve an unknown color or ambiguous mapping. Integration eligibility requires a confirmed mapping, acceptable rights and resolved color, condition and completeness.
 2. Under **Locations**, create a fictional location such as `DEMO-01`. Use **Activity → Inspect** to trace the command ID, revision, correlation ID and worker outcome. Sign in independently in a second browser profile, with the instance CA trusted there, and refresh to read the same records.
@@ -88,7 +92,7 @@ Invoke-Foundation status --state $destination
 
 Use a new archive filename and a fresh target database on every restore. Both initializations above copy the same published release. For recovery in a fresh checkout on the same OS/architecture, install the matching tools and place the contents of the retained release at `.tools/foundation/release` before initializing the destination. The destination generates its own operator, gateway, session, DB and TLS credentials. Use the **source** identity to decrypt its backup. The destination identity protects future backups from the recovered instance.
 
-Restore checks the archive, dump and release hashes, restores into a new database, reapplies grants, and compares counts and SHA-256 signatures for schema versions, catalog, locations, command receipts, audit, jobs and effects. Live sessions and worker heartbeat data are excluded. Activation selects the verified target while the instance is stopped. Trust the destination's public CA in a fresh browser profile, open the new origin, sign in with its new password and compare the records and audit. Stop both lab instances with `Invoke-Foundation stop --state $destination` and `Invoke-Foundation stop --state $state` when finished. The drill measures recovery of a logical snapshot. Off-host failover, point-in-time recovery and production RPO/RTO require separate evidence.
+Restore checks the archive, dump and release hashes, restores into a new database, reapplies grants, and compares counts and SHA-256 signatures for schema versions, catalog, locations, command receipts, audit, jobs and effects. Live sessions and worker heartbeat data are excluded. Activation checks the target again while the instance is stopped. The restored workspace retains its original identity so the browser can replay its pending commands. A separately initialized workspace has its own identity. Trust the destination's public CA in a fresh browser profile, open the new origin, sign in with its new password and compare the records and audit. Stop both lab instances with `Invoke-Foundation stop --state $destination` and `Invoke-Foundation stop --state $state` when finished. The drill measures recovery of a logical snapshot. Off-host failover, point-in-time recovery and production RPO/RTO require separate evidence.
 
 ## Compatibility and maintenance
 

@@ -93,7 +93,16 @@ internal sealed partial record LocationCommand : ReferenceCommand
     }
 }
 
-internal sealed record Session(string Actor, string CsrfToken);
+internal sealed record Session(string Actor, string CsrfToken, Guid WorkspaceId)
+{
+    public void RequireWorkspace(IHeaderDictionary headers)
+    {
+        var supplied = headers["X-Workspace-Id"];
+        if (supplied.Count != 1 || supplied[0] is not { Length: 36 } raw ||
+            !Guid.TryParseExact(raw, "D", out var id) || id != WorkspaceId)
+            throw new Fault(409, "workspace_mismatch", "This command belongs to a different or unconfirmed workspace.");
+    }
+}
 internal sealed record ApiError(string Code, string Message, Guid CorrelationId);
 internal sealed record Receipt(Guid CommandId, Guid EntityId, int Revision, string Kind, Guid CorrelationId);
 internal sealed record CatalogRow(Guid Id, int Revision, string ItemType, string ItemNumber, string? Variant,

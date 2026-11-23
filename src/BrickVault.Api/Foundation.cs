@@ -44,11 +44,14 @@ internal static class Foundation
             throw new StartupFault("invalid_session_key");
         if (!int.TryParse(Required("BV_HTTP_PORT"), out var port) || port is < 1 or > 65535)
             throw new StartupFault("invalid_loopback_listener_port");
-        return new GatewaySettings(origin, gatewayToken, sessionKey, new IPEndPoint(IPAddress.Loopback, port));
+        var workspace = Required("BV_WORKSPACE_ID");
+        if (!Guid.TryParseExact(workspace, "D", out var workspaceId) || workspace.Length != 36 || workspaceId == Guid.Empty)
+            throw new StartupFault("invalid_workspace_id");
+        return new GatewaySettings(origin, gatewayToken, sessionKey, new IPEndPoint(IPAddress.Loopback, port), workspaceId);
     }
 }
 
-internal sealed record GatewaySettings(string Origin, string Token, byte[] SessionKey, IPEndPoint Listener);
+internal sealed record GatewaySettings(string Origin, string Token, byte[] SessionKey, IPEndPoint Listener, Guid WorkspaceId);
 
 // Codes come only from program literals and fixed setting names. Never attach exception text or setting values.
 internal sealed class StartupFault(string code) : InvalidOperationException(code)

@@ -69,15 +69,22 @@ try
                 Fault known => known,
                 JsonException => new Fault(400, "invalid_json", "The request must match the version 1 JSON contract."),
                 BadHttpRequestException bad => new Fault(bad.StatusCode, "invalid_request", "The request could not be read."),
-                NpgsqlException or InvalidOperationException => new Fault(503, "foundation_unavailable",
+                NpgsqlException or TimeoutException or InvalidOperationException => new Fault(503, "foundation_unavailable",
                     "The foundation service is unavailable. Retry the same command after recovery."),
                 _ => new Fault(500, "request_failed", "The request could not be completed.")
             };
             // Log a classified outcome and generated identifier only. Exceptions, headers, paths and data can contain secrets.
             if (fault.Status >= 500) Console.Error.WriteLine($"foundation_request {fault.Code} correlation={correlation:D}");
             ctx.Response.StatusCode = fault.Status;
-            await ctx.Response.WriteAsJsonAsync(new ApiError(fault.Code, fault.Message, correlation), Wire.Json, ctx.RequestAborted);
+            if (ctx.Request.Path != "/internal/ready")
+                await ctx.Response.WriteAsJsonAsync(new ApiError(fault.Code, fault.Message, correlation), Wire.Json, ctx.RequestAborted);
         }
+    });
+    app.MapGet("/internal/ready", async (HttpContext c, CancellationToken ct) =>
+    {
+        if (!sessions.TrustedReadiness(c)) return Results.StatusCode(StatusCodes.Status403Forbidden);
+        await Migration.Check(db, ct);
+        return Results.NoContent();
     });
     var api = app.MapGroup("/api/v1");
     api.MapPost("/session", (HttpContext c, CancellationToken ct) => sessions.Login(c, ct));
@@ -129,6 +136,7 @@ catch (Exception e)
 
 static async Task<Receipt> Save<T>(HttpContext c, References references, CancellationToken ct) where T : ReferenceCommand
 {
+    ((Session)c.Items[typeof(Session)]!).RequireWorkspace(c.Request.Headers);
     if (!c.Request.HasJsonContentType()) throw new Fault(415, "json_required", "Use the application/json content type.");
     var request = await c.Request.ReadFromJsonAsync<T>(Wire.Json, ct) ?? throw Fault.Invalid();
     var receipt = await references.Save(request, (Guid)c.Items[typeof(Guid)]!, ct);

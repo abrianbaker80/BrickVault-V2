@@ -1,6 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { api, ApiFailure, explain, forget, readJournal, remember } from './api'
-import type { CatalogInput, Command, LocationInput, Session, Workspace } from './api'
+import type { CatalogInput, Command, Held, LocationInput, Session, Workspace } from './api'
 
 type ReadState = 'loading' | 'ready' | 'disconnected' | 'partial'
 export function useWorkbench() {
@@ -11,6 +11,7 @@ export function useWorkbench() {
   const error = ref('')
   const notice = ref<{ message: string; correlationId: string } | null>(null)
   const pending = shallowRef<Command[]>([])
+  const held = shallowRef<Held[]>([])
   const journalError = ref('')
   const authBusy = ref(false)
   const submitting = ref(false)
@@ -18,8 +19,11 @@ export function useWorkbench() {
   let timer: number | undefined
 
   function loadPending() {
+    if (!session.value) return
     try {
-      pending.value = readJournal()
+      const journal = readJournal(session.value.workspaceId)
+      pending.value = journal.commands
+      held.value = journal.held
       journalError.value = ''
     } catch {
       journalError.value = 'Command recovery storage is unavailable or damaged. New commands are paused.'
@@ -29,6 +33,8 @@ export function useWorkbench() {
     ++generation
     session.value = null
     workspace.value = null
+    pending.value = []
+    held.value = []
     signedOut.value = true
     readState.value = 'ready'
     notice.value = null
@@ -48,6 +54,11 @@ export function useWorkbench() {
     try {
       const authenticated = await api.session()
       if (current !== generation) return
+      if (session.value?.workspaceId !== authenticated.workspaceId) {
+        workspace.value = null
+        notice.value = null
+        readState.value = 'loading'
+      }
       session.value = authenticated
       signedOut.value = false
       loadPending()
@@ -123,7 +134,7 @@ export function useWorkbench() {
   const canCreate = computed(() => canSend.value && !pending.value.length)
 
   async function send(command: Command) {
-    if (!canSend.value || !session.value) return
+    if (!canSend.value || !session.value || command.workspaceId !== session.value.workspaceId) return
     ++generation
     submitting.value = true
     notice.value = null
@@ -137,7 +148,11 @@ export function useWorkbench() {
       await refresh()
     } catch (reason) {
       if (expired(reason)) return
-      if (reason instanceof ApiFailure && reason.detail && [400, 409, 422].includes(reason.status)) {
+      if (reason instanceof ApiFailure && reason.detail?.code === 'workspace_mismatch') {
+        await refresh()
+        error.value = 'The workspace changed. The original command is held for its issuing workspace.'
+      } else if (reason instanceof ApiFailure && reason.detail &&
+          ['invalid_reference', 'duplicate_reference', 'revision_conflict'].includes(reason.detail.code)) {
         forget(command)
         loadPending()
         error.value = explain(reason)
@@ -151,13 +166,13 @@ export function useWorkbench() {
     }
   }
 
-  async function create(input: { kind: 'catalog'; fields: CatalogInput } | { kind: 'location'; fields: LocationInput }) {
+  async function create(input: { kind: 'catalog'; fields: CatalogInput } | { kind: 'location'; fields: LocationInput }, workspaceId: string) {
     loadPending()
-    if (!canCreate.value) return
+    if (!canCreate.value || workspaceId !== session.value?.workspaceId) return
     const identity = { commandId: crypto.randomUUID(), expectedRevision: 0 }
     const command: Command = input.kind === 'catalog'
-      ? { kind: 'catalog', body: { ...input.fields, ...identity } }
-      : { kind: 'location', body: { ...input.fields, ...identity } }
+      ? { workspaceId, kind: 'catalog', body: { ...input.fields, ...identity } }
+      : { workspaceId, kind: 'location', body: { ...input.fields, ...identity } }
     try {
       remember(command)
       loadPending()
@@ -168,6 +183,6 @@ export function useWorkbench() {
     await send(command)
   }
 
-  return { session, workspace, signedOut, readState, error, notice, pending, journalError, authBusy, submitting,
+  return { session, workspace, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
     canSend, canCreate, refresh, signIn, signOut, create, send, expired }
 }

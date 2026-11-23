@@ -1,7 +1,6 @@
 """Private state, PostgreSQL and process identities for one isolated foundation."""
 
 import base64
-import csv
 import json
 import os
 from pathlib import Path
@@ -23,6 +22,34 @@ PRIMARY = "bv_m2_primary"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if WIN else 0
 
 
+def child_env():
+    # Give long-lived private processes only the OS settings they need to run.
+    allowed = {
+        "PATH",
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "HOME",
+        "USERPROFILE",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "LANG",
+        "LC_ALL",
+        "TZ",
+        "PROCESSOR_ARCHITECTURE",
+        "NUMBER_OF_PROCESSORS",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+    }
+    return {
+        name: value for name, value in os.environ.items() if name.upper() in allowed
+    }
+
+
 def private_dir(path):
     path = Path(path).resolve()
     if ROOT == path or ROOT in path.parents:
@@ -31,20 +58,15 @@ def private_dir(path):
         )
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     if WIN:
-        sid = next(
-            csv.reader(
-                subprocess.check_output(
-                    ["whoami", "/user", "/fo", "csv", "/nh"], text=True
-                ).splitlines()
-            )
-        )[-1]
         subprocess.run(
             [
-                "icacls",
-                str(path),
-                "/inheritance:r",
-                "/grant:r",
-                "*" + sid + ":(OI)(CI)F",
+                "pwsh",
+                "-NoProfile",
+                "-NonInteractive",
+                "-File",
+                Path(__file__).with_name("Protect-Directory.ps1"),
+                "-LiteralPath",
+                path,
             ],
             check=True,
             stdout=subprocess.DEVNULL,
@@ -66,7 +88,7 @@ def write_private(path, text):
         temp.unlink(missing_ok=True)
 
 
-def execute(args, *, env=None, content=None, quiet=False, cwd=None):
+def execute(args, *, env=None, content=None, cwd=None):
     result = subprocess.run(
         args,
         input=content,
@@ -109,8 +131,9 @@ class Instance:
 
     def sql_env(self, role):
         return {
-            **os.environ,
+            **child_env(),
             "PGHOST": "127.0.0.1",
+            "PGHOSTADDR": "127.0.0.1",
             "PGPORT": str(self.port + 2),
             "PGUSER": role,
             "PGPASSWORD": self.config["roles"][role],
@@ -137,7 +160,7 @@ class Instance:
 
     def app_env(self, role, database=None):
         environment = {
-            **os.environ,
+            **child_env(),
             "DOTNET_ROOT": str(DOTNET.parent),
             "ASPNETCORE_ENVIRONMENT": "Development",
             "DOTNET_ENVIRONMENT": "Development",
@@ -158,6 +181,9 @@ class Instance:
         }
         if role == "bv_api":
             environment.update(
+                BV_WORKSPACE_ID=str(
+                    uuid.UUID(self.config.get("workspaceId", self.config["id"]))
+                ),
                 BV_GATEWAY_TOKEN=self.config["gateway"],
                 BV_SESSION_KEY=self.config["session"],
             )

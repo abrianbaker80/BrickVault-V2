@@ -122,6 +122,16 @@
         "operationId": "saveCatalog",
         "parameters": [
           {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "description": "The authenticated workspaceId captured when the operator prepared the command. Use that same value for every retry. A missing or mismatched workspace returns 409 workspace_mismatch.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
             "name": "X-CSRF-Token",
             "in": "header",
             "required": true,
@@ -168,6 +178,16 @@
       "post": {
         "operationId": "saveLocation",
         "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "description": "The authenticated workspaceId captured when the operator prepared the command. Use that same value for every retry. A missing or mismatched workspace returns 409 workspace_mismatch.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "name": "X-CSRF-Token",
             "in": "header",
@@ -543,11 +563,17 @@
           },
           "csrfToken": {
             "type": "string"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identity of the authenticated workspace, preserved through restore."
           }
         },
         "required": [
           "actor",
-          "csrfToken"
+          "csrfToken",
+          "workspaceId"
         ],
         "additionalProperties": false
       },
