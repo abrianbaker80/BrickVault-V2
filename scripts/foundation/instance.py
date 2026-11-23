@@ -323,6 +323,15 @@ def password_hash(password):
     return execute([BIN / ("caddy" + EXT), "hash-password"], content=password + "\n")
 
 
+def probe_listener(host, port):
+    # Match server bind semantics. On POSIX a closed reusable socket may still be in TIME_WAIT.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        option = socket.SO_EXCLUSIVEADDRUSE if WIN else socket.SO_REUSEADDR
+        probe.setsockopt(socket.SOL_SOCKET, option, 1)
+        probe.bind((host, port))
+        probe.listen(1)
+
+
 def init(
     directory, recovery, port, *, release=RELEASE, lan_origin=None, recipient=None
 ):
@@ -338,10 +347,8 @@ def init(
     if lan_origin is not None:
         lan_endpoint(lan_origin, port)
     for number in range(port, port + 3):
-        with socket.socket() as probe:
-            probe.bind(
-                ("0.0.0.0" if number == port and lan_origin else "127.0.0.1", number)
-            )
+        host = "0.0.0.0" if number == port and lan_origin else "127.0.0.1"
+        probe_listener(host, number)
     release = Path(release).resolve()
     if not (release / "BrickVault.Api.dll").is_file():
         raise ValueError("Build the release before initializing an instance.")

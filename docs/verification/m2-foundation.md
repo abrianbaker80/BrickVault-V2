@@ -27,10 +27,10 @@ try {
     if ($IsWindows) { npx playwright install firefox }
     else { npx playwright install --with-deps firefox }
 } finally { Pop-Location }
-Invoke-Foundation verify --port 49520
+Invoke-Foundation verify --port 25440
 ```
 
-`verify` creates two temporary clusters with separate credentials. Use a base port with the first three ports and ports six through eight above the base available on loopback. Verification exercises authenticated HTTPS, retries, worker recovery, permissions, migrations, xUnit, Firefox Workbench flows, credential rotation and a restore while the source is stopped. Both the HTTPS client and the browser verify the instance certificate. Each test browser profile receives the public CA for that instance. A successful run includes a restore time and per-table counts. Attach the redacted results, OS and revision to the checkpoint. [Qualification entry point](../../scripts/foundation/verify.py) · [Playwright browser installation](https://playwright.dev/docs/browsers)
+`verify` uses nine consecutive ports. It assigns three each to the source, off-host recovery drill and second-instance restore. Choose an available range below the host's ephemeral TCP port range. Verification exercises authenticated HTTPS, retries, worker recovery, permissions, migrations, xUnit, Firefox Workbench flows, credential rotation and a restore while the source is stopped. Both the HTTPS client and the browser verify the instance certificate. Each test browser profile receives the public CA for that instance. A successful run includes a restore time and per-table counts. Attach the redacted results, OS and revision to the checkpoint. [Qualification entry point](../../scripts/foundation/verify.py) · [Playwright browser installation](https://playwright.dev/docs/browsers)
 
 ## Start Workbench
 

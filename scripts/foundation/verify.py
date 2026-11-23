@@ -1,6 +1,7 @@
 """Exercise the normal HTTPS service, worker, migrations and encrypted restore in an isolated lab."""
 
 import base64
+import errno
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 import http.cookiejar
@@ -31,6 +32,7 @@ from instance import (
     execute,
     init,
     lan_endpoint,
+    probe_listener,
 )
 from recovery import activate, backup, restore
 from runtime import (
@@ -352,7 +354,38 @@ def qualify_guest(s, lab):
         stop(s)
 
 
+def qualify_listener_probe():
+    with socket.socket() as listener:
+        if not WIN:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+        for host in ("127.0.0.1", "0.0.0.0"):
+            try:
+                probe_listener(host, port)
+            except OSError as exc:
+                if exc.errno != errno.EADDRINUSE and not (
+                    WIN and exc.errno == errno.EACCES
+                ):
+                    raise
+            else:
+                raise AssertionError("A live TCP listener passed the port probe.")
+        if not WIN:
+            with socket.create_connection(("127.0.0.1", port), timeout=3) as client:
+                accepted, _ = listener.accept()
+                accepted.close()  # Server closes first and retains the TIME_WAIT connection.
+                require(
+                    client.recv(1) == b"",
+                    "Server did not close the qualification connection.",
+                )
+    probe_listener("127.0.0.1", port)
+
+
 def verify(port):
+    if not 1024 <= port <= 65527:
+        raise ValueError("Qualification needs nine consecutive unprivileged ports.")
+    qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
         runtime_dir = lab / "runtime"
@@ -620,7 +653,7 @@ def verify(port):
             expected_failure(lambda: restore(s, archive, wrong, "bv_m2_broken"))
             from verify_offhost import verify_offhost
 
-            verify_offhost(s, lab, port + 6, before, Browser)
+            verify_offhost(s, lab, port + 3, before, Browser)
             qualify_gateway_error(s)
             recipient = s.config["recipient"]
             bad_recipient = recipient[:-1] + ("p" if recipient[-1] != "p" else "q")
