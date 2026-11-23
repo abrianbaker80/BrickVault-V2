@@ -6,17 +6,27 @@ import secrets
 import subprocess
 import sys
 
-from instance import Instance, write_private
+from instance import Instance, init, write_private
 from recovery import digest
 from runtime import start, stop
 from setup import rclone_program
+
+
+def rejected(command):
+    if (
+        subprocess.run(
+            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        ).returncode
+        == 0
+    ):
+        raise AssertionError("An invalid off-host operation succeeded.")
 
 
 def verify_offhost(source, lab, port, expected, client_type):
     folder = lab / "offhost-drill"
     folder.mkdir(mode=0o700)
     provider = folder / "provider"
-    provider.mkdir()
+    provider.write_text("Provider temporarily unavailable", encoding="utf-8")
     config = folder / "profile.conf"
     write_private(config, "[sample]\ntype = alias\nremote = " + str(provider) + "\n")
     write_private(folder / "password", secrets.token_urlsafe(32))
@@ -69,10 +79,30 @@ def verify_offhost(source, lab, port, expected, client_type):
         "--mirror",
         mirror,
     ]
-    subprocess.run(publish, check=True)
-    (receipt,) = receipts.glob("*.json")
-    point = receipt.stem
-    subprocess.run([*publish, "--resume", point], check=True)
+    rejected(publish)
+    (pending,) = receipts.glob("*.pending.json")
+    point = pending.name.removesuffix(".pending.json")
+    receipt = receipts / (point + ".json")
+    if receipt.exists() or mirror.exists():
+        raise AssertionError("An interrupted transfer was recorded as complete.")
+    provider.unlink()
+    provider.mkdir()
+    other_route = folder / "distinct-route.json"
+    settings = json.loads(route.read_text())
+    settings["remote"] = "sample:other"
+    write_private(other_route, json.dumps(settings))
+    retry = [*publish, "--resume", point]
+    wrong_route = retry.copy()
+    wrong_route[wrong_route.index("--transport") + 1] = other_route
+    rejected(wrong_route)
+    alternate = init(folder / "unrelated-instance", folder / "unrelated-keys", port)
+    wrong_source = retry.copy()
+    wrong_source[wrong_source.index("--state") + 1] = alternate.path
+    rejected(wrong_source)
+    if any(provider.iterdir()) or receipt.exists() or not pending.is_file():
+        raise AssertionError("A mismatched retry sent or finalized a recovery point.")
+    subprocess.run(retry, check=True)
+    subprocess.run(retry, check=True)
     copies = list(provider.rglob("*.age"))
     if (
         len(copies) != 1
@@ -85,25 +115,35 @@ def verify_offhost(source, lab, port, expected, client_type):
     stop(source)
     target = folder / "recovered"
     key = lab / "recovery" / (source.config["id"] + ".agekey")
-    subprocess.run(
-        [
-            *cli,
-            "recover",
-            "--receipt",
-            receipt,
-            "--identity",
-            key,
-            "--state",
-            target,
-            "--recovery",
-            folder / "new-keys",
-            "--port",
-            str(port),
-            "--transport",
-            route,
-        ],
-        check=True,
-    )
+    recover = [
+        *cli,
+        "recover",
+        "--receipt",
+        receipt,
+        "--identity",
+        key,
+        "--state",
+        target,
+        "--recovery",
+        folder / "new-keys",
+        "--port",
+        str(port),
+        "--transport",
+        route,
+    ]
+    damaged = folder / "wrong-receipt" / receipt.name
+    damaged.parent.mkdir()
+    contents = json.loads(receipt.read_text())
+    contents["sha256"] = "0" * 64
+    write_private(damaged, json.dumps(contents))
+    incorrect = recover.copy()
+    incorrect[incorrect.index("--receipt") + 1] = damaged
+    rejected(incorrect)
+    if target.exists() or (folder / "new-keys").exists():
+        raise AssertionError(
+            "Failure to verify trusted receipt changed destination state."
+        )
+    subprocess.run(recover, check=True)
     restored = Instance(target)
     try:
         start(restored)

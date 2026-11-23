@@ -2,7 +2,9 @@
 
 import argparse
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 import ntpath
 import os
@@ -136,8 +138,29 @@ def operating_system():
     return [sys.platform, "x64" if machine in ("amd64", "x86_64") else machine]
 
 
-@contextmanager
-def transport(descriptor, scratch):
+@dataclass(frozen=True)
+class TransportRoute:
+    descriptor: Path
+    config: Path
+    base: str
+    password_command: str
+
+    def publication_context(self, instance):
+        # Rclone may legitimately refresh encrypted token bytes. Identify the selected
+        # private route without exposing its local paths or reading those credentials.
+        values = [
+            os.path.normcase(str(self.descriptor)),
+            os.path.normcase(str(self.config)),
+            self.base,
+            str(uuid.UUID(instance.config["id"])),
+            str(uuid.UUID(instance.config.get("workspaceId", instance.config["id"]))),
+        ]
+        return hashlib.sha256(
+            json.dumps(values, ensure_ascii=True).encode("utf-8")
+        ).hexdigest()
+
+
+def read_transport(descriptor):
     descriptor = outside_checkout(descriptor)
     route = json.loads(descriptor.read_text(encoding="utf-8"))
     if not isinstance(route, dict) or any(
@@ -157,9 +180,14 @@ def transport(descriptor, scratch):
         portable_path(prefix)
     base = match[1] + ":" + (prefix + "/" if prefix else "") + "BrickVault-V2/"
     config = outside_checkout(route["config"])
+    return TransportRoute(descriptor, config, base, route["password_command"])
+
+
+@contextmanager
+def transport(route, scratch):
     isolated = scratch / "transfer.conf"
     # rclone can refresh its active config. Only an encrypted copy ever enters this scratch directory.
-    with config.open("rb") as source:
+    with route.config.open("rb") as source:
         if not re.search(rb"(?m)^RCLONE_ENCRYPT_V0:\r?$", source.read(256)):
             raise RecoveryError(
                 "A password-protected rclone configuration is required."
@@ -174,7 +202,7 @@ def transport(descriptor, scratch):
         str(isolated),
         "--ask-password=false",
         "--password-command",
-        route["password_command"],
+        route.password_command,
         "--retries",
         "3",
         "--low-level-retries",
@@ -201,7 +229,7 @@ def transport(descriptor, scratch):
             )
 
     try:
-        yield base, transfer
+        yield route.base, transfer
     finally:
         isolated.unlink(missing_ok=True)
 
@@ -217,10 +245,11 @@ def release_manifest(instance, folder):
             instance.pg_stop()
 
 
-def make_set(instance, receipt_dir, point):
+def make_set(instance, receipt_dir, point, route):
     with tempfile.TemporaryDirectory(dir=instance.path) as temporary:
         folder = Path(temporary)
         with operation(instance):
+            context = route.publication_context(instance)
             database = release_manifest(instance, folder)
             meta = {
                 "format": FORMAT,
@@ -269,6 +298,7 @@ def make_set(instance, receipt_dir, point):
     receipt = {
         "format": FORMAT,
         "point": point,
+        "publicationContext": context,
         "sha256": digest(file),
         "bytes": file.stat().st_size,
     }
@@ -301,32 +331,45 @@ def publish(args):
         paths.append(outside_checkout(args.mirror))
     disjoint(*paths)
     managed_dir(receipts, "receipts")
+    route = read_transport(args.transport)
+    instance = Instance(source)
     if args.resume:
         point = validate_point(args.resume)
     else:
         point = (
             datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex
         )
-        make_set(Instance(source), receipts, point)
+        make_set(instance, receipts, point, route)
     print("Prepared recovery point " + point, flush=True)
     pending = receipts / (point + ".pending.json")
     final = receipts / (point + ".json")
     receipt = read_receipt(final if final.exists() else pending, point)
     local = receipts / (point + ".age")
-    verify_file(local, receipt)
+    # An unbound first-format receipt remains suitable for recovery by its trusted digest.
+    # Publication requires the captured workspace and route, even after a previous success.
+    with operation(instance):
+        if receipt.get("publicationContext") != route.publication_context(instance):
+            raise RecoveryError(
+                "This point is unbound or belongs to a different source or transport. Capture a new point for this destination."
+            )
+        verify_file(local, receipt)
+        publish_verified_copy(route, receipts, local, receipt, args.mirror)
+    write_private(final, json.dumps(receipt, sort_keys=True))
+    pending.unlink(missing_ok=True)
+    print("Verified published recovery point " + point)
+
+
+def publish_verified_copy(route, receipts, local, receipt, mirror):
     with tempfile.TemporaryDirectory(dir=receipts) as temp:
         scratch = Path(temp)
-        with transport(args.transport, scratch) as (base, transfer):
-            remote = base + point + ".age"
+        with transport(route, scratch) as (base, transfer):
+            remote = base + receipt["point"] + ".age"
             transfer(local, remote)
             received = scratch / "provider-readback.age"
             transfer(remote, received)
             verify_file(received, receipt)
-    if args.mirror:
-        mirror_set(args.mirror, local, receipt)
-    write_private(final, json.dumps(receipt, sort_keys=True))
-    pending.unlink(missing_ok=True)
-    print("Verified published recovery point " + point)
+    if mirror:
+        mirror_set(mirror, local, receipt)
 
 
 def unpack_release(archive_file, scratch, point):
@@ -406,7 +449,7 @@ def recover(args):
     state.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=state.parent) as temporary:
         scratch = private_dir(temporary)
-        with transport(args.transport, scratch) as (base, transfer):
+        with transport(read_transport(args.transport), scratch) as (base, transfer):
             transfer(base + point + ".age", scratch / "remote.age")
         verify_file(scratch / "remote.age", receipt)
         execute(
