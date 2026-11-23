@@ -2,7 +2,7 @@
 
 BrickVault V2 is a planned inventory and fulfillment system for a LEGO resale operation. BrickVault will manage stock, reservations and publishing decisions. BrickLink will remain the sales storefront.
 
-**Only M0 engineering setup is authorized.** The repository contains the architecture, project roles and checks for reviewing changes. Application development starts in a separately authorized milestone. The owner accepts each milestone.
+**The owner accepted the M0 engineering checkpoint.** The repository contains the architecture, project roles and checks for reviewing changes. M1 requires separate authorization. [2d88409](https://github.com/abrianbaker80/BrickVault-V2/commit/2d88409b5fb556316888d1282c08968ba5619c70)
 
 ## M0 setup
 
@@ -20,7 +20,7 @@ git clone https://github.com/abrianbaker80/BrickVault-V2.git
 Set-Location BrickVault-V2
 ```
 
-To validate an open pull request, switch to its candidate branch. Once the checkpoint merges, use `main`. Run both scripts from the repository root.
+Use `main` for the merged checkpoint or switch to an open pull request’s candidate branch to validate it. Run both scripts from the repository root.
 
 ```powershell
 pwsh -NoProfile -File ./scripts/Setup.ps1
