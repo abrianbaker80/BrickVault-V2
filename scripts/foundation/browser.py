@@ -10,7 +10,7 @@ import ssl
 import subprocess
 import tempfile
 
-from instance import Instance, private_dir
+from instance import Instance, child_env, private_dir
 from runtime import start
 from setup import WIN, fetch
 
@@ -19,13 +19,41 @@ def provision(profile, ca, firefox):
     """Create a new NSS SQL database. Never modify a preexisting browser profile."""
     profile = Path(profile).resolve()
     profile.mkdir(mode=0o700, parents=True, exist_ok=False)
+    if not WIN:
+        # Use the distribution's matched NSS binaries to build Firefox's standard SQL database.
+        certutil = shutil.which("certutil")
+        if not certutil:
+            raise RuntimeError(
+                "Install Ubuntu libnss3-tools through the foundation setup."
+            )
+        database = ["-d", "sql:" + str(profile)]
+        subprocess.run(
+            [certutil, "-N", "--empty-password", *database], env=child_env(), check=True
+        )
+        subprocess.run(
+            [
+                certutil,
+                "-A",
+                "-n",
+                "BrickVault private workspace",
+                "-t",
+                "C,,",
+                "-a",
+                "-i",
+                ca,
+                *database,
+            ],
+            env=child_env(),
+            check=True,
+        )
+        return
     binary = Path(firefox).resolve()
-    library = binary.with_name("nss3.dll" if WIN else "libnss3.so")
+    library = binary.with_name("nss3.dll")
     der = ssl.PEM_cert_to_DER_cert(Path(ca).read_text(encoding="ascii"))
 
     # Use the Firefox distribution's own stable NSS API, also used by certutil.
-    # Windows resolves NSS companions from the distribution. Linux packages set RUNPATH.
-    dll_dir = os.add_dll_directory(str(library.parent)) if WIN else None
+    # Windows resolves NSS companions from the same Firefox installation.
+    dll_dir = os.add_dll_directory(str(library.parent))
     try:
         nss = c.CDLL(str(library))
         ptr, integer, string = c.c_void_p, c.c_int, c.c_char_p
@@ -96,8 +124,7 @@ def provision(profile, ca, firefox):
                 free_slot(slot)
             checked(shutdown())
     finally:
-        if dll_dir:
-            dll_dir.close()
+        dll_dir.close()
 
 
 def operator_firefox():
@@ -134,6 +161,7 @@ def operator_firefox():
             "/TaskbarShortcut=false",
         ],
         check=True,
+        env=child_env(),
     )
     if not dedicated.is_file():
         raise RuntimeError(
@@ -202,6 +230,7 @@ def main():
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=child_env(desktop=True),
     )
     print("Opened the private Workbench in its dedicated Firefox profile.")
 

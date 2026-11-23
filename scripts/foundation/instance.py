@@ -22,7 +22,7 @@ PRIMARY = "bv_m2_primary"
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if WIN else 0
 
 
-def child_env():
+def child_env(*, desktop=False):
     # Give long-lived private processes only the OS settings they need to run.
     allowed = {
         "PATH",
@@ -40,11 +40,23 @@ def child_env():
         "LANG",
         "LC_ALL",
         "TZ",
+        "SYSTEMDRIVE",
         "PROCESSOR_ARCHITECTURE",
         "NUMBER_OF_PROCESSORS",
         "PROGRAMFILES",
         "PROGRAMFILES(X86)",
     }
+    if desktop:
+        allowed.update(
+            (
+                "DISPLAY",
+                "XAUTHORITY",
+                "WAYLAND_DISPLAY",
+                "XDG_RUNTIME_DIR",
+                "DBUS_SESSION_BUS_ADDRESS",
+                "XDG_SESSION_TYPE",
+            )
+        )
     return {
         name: value for name, value in os.environ.items() if name.upper() in allowed
     }
@@ -69,6 +81,7 @@ def private_dir(path):
                 path,
             ],
             check=True,
+            env=child_env(),
             stdout=subprocess.DEVNULL,
         )
     else:
@@ -96,7 +109,7 @@ def execute(args, *, env=None, content=None, cwd=None):
         text=True,
         encoding="utf-8",
         errors="replace",
-        env=env,
+        env=child_env() if env is None else env,
         cwd=cwd,
         creationflags=NO_WINDOW,
     )
@@ -193,6 +206,7 @@ class Instance:
         cmd = PG_BIN / ("pg_ctl" + EXT)
         if subprocess.run(
             [cmd, "status", "-D", self.cluster],
+            env=child_env(),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         ).returncode:
@@ -209,6 +223,7 @@ class Instance:
                     "-t",
                     "40",
                 ],
+                env=child_env(),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -221,6 +236,7 @@ class Instance:
         if (
             subprocess.run(
                 [cmd, "status", "-D", self.cluster],
+                env=child_env(),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             ).returncode

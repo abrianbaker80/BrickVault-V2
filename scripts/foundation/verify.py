@@ -18,7 +18,7 @@ import uuid
 
 from instance import BIN, DOTNET, EXT, ROOT, UI, WIN, Instance, execute, init
 from recovery import activate, backup, restore
-from runtime import ready, rotate, start, stop
+from runtime import end, ready, readiness_token, rotate, start, start_gateway, stop
 
 
 def require(ok, reason):
@@ -150,6 +150,66 @@ def migration_test(s):
     )
 
 
+def qualify_runtime_start(s):
+    """Observe the real environment passed to pg_ctl and the background supervisor."""
+    launch = subprocess.Popen
+    observed = set()
+
+    def inspect_launch(args, **kwargs):
+        name = Path(args[0]).stem.lower()
+        if name == "pg_ctl" or "supervise" in args:
+            env = kwargs.get("env")
+            require(
+                env is not None and "BV_ENV_SENTINEL" not in env,
+                "Runtime child inherited ambient settings.",
+            )
+            observed.add("supervisor" if "supervise" in args else name)
+        return launch(args, **kwargs)
+
+    with patch.dict(os.environ, {"BV_ENV_SENTINEL": "parent-only"}), patch(
+        "subprocess.Popen", side_effect=inspect_launch
+    ):
+        s.pg_start()
+        start(s)
+    require(
+        observed == {"pg_ctl", "supervisor"},
+        "Expected runtime launches were not inspected.",
+    )
+
+
+def qualify_gateway_error(s):
+    """Exercise a normal readiness check with the backend stopped and inspect its actual log."""
+    gateway = start_gateway(s)
+    try:
+        ctx = ssl.create_default_context(cafile=str(s.ca))
+        client = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=ctx)
+        )
+        request = urllib.request.Request(
+            s.origin + "/internal/ready",
+            headers={"Authorization": "Bearer " + readiness_token(s)},
+        )
+
+        def outcome():
+            try:
+                with client.open(request, timeout=2) as response:
+                    return response.status
+            except urllib.error.HTTPError as err:
+                err.close()
+                return err.code
+            except OSError:
+                return None
+
+        poll(outcome, lambda status: status == 502)
+    finally:
+        end(gateway)
+    log = (s.path / "gateway.log").read_text(encoding="utf-8", errors="replace")
+    require(
+        readiness_token(s) not in log and s.config["gateway"] not in log,
+        "Private probe leaked credentials through a gateway failure.",
+    )
+
+
 def verify(port):
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
@@ -174,7 +234,7 @@ def verify(port):
                 "Ambient process configuration escaped isolation.",
             )
         try:
-            start(s)
+            qualify_runtime_start(s)
             password = (s.path / "owner-login.txt").read_text().splitlines()[1]
             original_keys = [s.config["gateway"], s.config["session"], password]
             s.pg_stop()
@@ -417,6 +477,7 @@ def verify(port):
             execute([BIN / ("age-keygen" + EXT), "-o", wrong])
             expected_failure(lambda: restore(s, archive, wrong, "bv_m2_broken"))
             stop(s)
+            qualify_gateway_error(s)
             rescue = init(lab / "second-runtime", lab / "second-recovery", port + 6)
             target = "bv_m2_restore_qualified"
             try:

@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import hmac
 import contextlib
 import os
 from pathlib import Path
@@ -84,6 +85,19 @@ def caddyfile(s):
 {s.origin} {{
     bind 127.0.0.1
     tls internal
+    @ready {{
+        method GET
+        path /internal/ready
+        header Authorization "Bearer {{$BV_READY_TOKEN}}"
+    }}
+    handle @ready {{
+        reverse_proxy 127.0.0.1:{s.port+1} {{
+            header_up -Authorization
+            header_up -X-BrickVault-Actor
+            header_up X-BrickVault-Gateway {{$BV_GATEWAY_TOKEN}}
+            header_up X-BrickVault-Readiness {{$BV_GATEWAY_TOKEN}}
+        }}
+    }}
     @signin {{
         method POST
         path /api/v1/session
@@ -103,6 +117,7 @@ def caddyfile(s):
         reverse_proxy 127.0.0.1:{s.port+1} {{
             header_up -Authorization
             header_up -X-BrickVault-Actor
+            header_up -X-BrickVault-Readiness
             header_up X-BrickVault-Gateway {{$BV_GATEWAY_TOKEN}}
         }}
     }}
@@ -160,6 +175,39 @@ def end(proc):
             proc.wait(8)
 
 
+def readiness_token(s):
+    return hmac.digest(
+        s.config["gateway"].encode("ascii"), b"foundation/readiness", "sha256"
+    ).hex()
+
+
+def start_gateway(s):
+    config = s.path / "Caddyfile"
+    write_private(config, caddyfile(s))
+    gateway_env = {
+        **child_env(),
+        "BV_READY_TOKEN": readiness_token(s),
+        "BV_OWNER_HASH": s.config["owner_hash"],
+        "BV_GATEWAY_TOKEN": s.config["gateway"],
+        "XDG_DATA_HOME": str(s.path / "caddy-data"),
+        "XDG_CONFIG_HOME": str(s.path / "caddy-config"),
+        "APPDATA": str(s.path / "caddy-config"),
+    }
+    return launch(
+        [
+            BIN / ("caddy" + EXT),
+            "run",
+            "--config",
+            config,
+            "--adapter",
+            "caddyfile",
+        ],
+        s.path,
+        gateway_env,
+        s.path / "gateway.log",
+    )
+
+
 def supervise(s):
     with exclusive(s.path / "supervisor.lock"):
         stopfile = s.path / "stop.request"
@@ -188,29 +236,7 @@ def supervise(s):
                 )
 
             worker = start_worker()
-            config = s.path / "Caddyfile"
-            write_private(config, caddyfile(s))
-            gateway_env = {
-                **child_env(),
-                "BV_OWNER_HASH": s.config["owner_hash"],
-                "BV_GATEWAY_TOKEN": s.config["gateway"],
-                "XDG_DATA_HOME": str(s.path / "caddy-data"),
-                "XDG_CONFIG_HOME": str(s.path / "caddy-config"),
-                "APPDATA": str(s.path / "caddy-config"),
-            }
-            gateway = launch(
-                [
-                    BIN / ("caddy" + EXT),
-                    "run",
-                    "--config",
-                    config,
-                    "--adapter",
-                    "caddyfile",
-                ],
-                s.path,
-                gateway_env,
-                s.path / "gateway.log",
-            )
+            gateway = start_gateway(s)
             while not stopfile.exists():
                 if api.poll() is not None or gateway.poll() is not None:
                     raise RuntimeError(
@@ -235,7 +261,7 @@ def ready(s):
         context = ssl.create_default_context(cafile=str(s.ca))
         request = urllib.request.Request(
             s.origin + "/internal/ready",
-            headers={"X-BrickVault-Readiness": s.config["gateway"]},
+            headers={"Authorization": "Bearer " + readiness_token(s)},
         )
         opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
@@ -259,6 +285,7 @@ def _start(s):
                     "--state",
                     s.path,
                 ],
+                env=child_env(),
                 stdin=subprocess.DEVNULL,
                 stdout=out,
                 stderr=out,

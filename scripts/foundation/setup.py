@@ -59,18 +59,23 @@ def extract_binaries(archive, names):
             with tarfile.open(archive) as z:
                 z.extractall(tmp, filter="data")
         for name in names:
-            (source,) = (entry for entry in Path(tmp).rglob(name + EXT) if entry.is_file())
+            (source,) = (
+                entry for entry in Path(tmp).rglob(name + EXT) if entry.is_file()
+            )
             shutil.copy2(source, BIN / source.name)
 
 
 def install_linux_pg():
     prefix = TOOLS / "foundation/pgsql"
     pg = prefix / "bin/postgres"
-    if pg.exists() and subprocess.check_output(
-        [pg, "--version"], text=True
-    ).strip().endswith(" " + PG):
-        return
-    packages = ["build-essential", "bison", "flex", "zlib1g-dev", "libssl-dev"]
+    packages = [
+        "build-essential",
+        "bison",
+        "flex",
+        "zlib1g-dev",
+        "libssl-dev",
+        "libnss3-tools",
+    ]
     status = subprocess.run(
         ["dpkg-query", "-W", "-f=${db:Status-Status}\\n", *packages],
         capture_output=True,
@@ -90,6 +95,10 @@ def install_linux_pg():
             ],
             check=True,
         )
+    if pg.exists() and subprocess.check_output(
+        [pg, "--version"], text=True
+    ).strip().endswith(" " + PG):
+        return
     archive = fetch(
         f"https://ftp.postgresql.org/pub/source/v{PG}/postgresql-{PG}.tar.bz2",
         "441dfae4280cae3e0425e5f876f80559fb0731c140f1aae22b3e5a54d0411bfd",
