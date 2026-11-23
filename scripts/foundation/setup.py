@@ -59,7 +59,7 @@ def extract_binaries(archive, names):
             with tarfile.open(archive) as z:
                 z.extractall(tmp, filter="data")
         for name in names:
-            (source,) = Path(tmp).rglob(name + EXT)
+            (source,) = (entry for entry in Path(tmp).rglob(name + EXT) if entry.is_file())
             shutil.copy2(source, BIN / source.name)
 
 
