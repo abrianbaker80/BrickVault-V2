@@ -173,14 +173,14 @@ function orderAction(o: Order) {
       return pickForm(o)
     case 'pack':
       return stateAction(
-        'advance',
+        'confirm-pack',
         'Move the complete tote into parcel P-401',
         'Compare the line against the tote, check the count, and seal the parcel. Packed stock stays physically on hand.',
         'Confirm packed'
       )
     case 'label':
       return stateAction(
-        'advance',
+        'queue-label',
         'Parcel P-401 is sealed',
         'Queue its simulated parcel label. The order stays reserved until carrier handoff.',
         'Queue parcel label'
@@ -189,7 +189,7 @@ function orderAction(o: Order) {
       return (
         `<div class="op-warning"><strong>Handoff blocked · print pending</strong><p>A queue acknowledgement cannot confirm paper output. Check the parcel label before continuing.</p></div>` +
         stateAction(
-          'advance',
+          'confirm-print',
           'Match label LBL-401 to parcel P-401',
           'Confirm the printed reference on the parcel.',
           'Confirm printed label'
@@ -203,7 +203,7 @@ function orderAction(o: Order) {
     </form>`
     case 'shipped':
       return `<div class="op-result"><span class="op-result-icon" aria-hidden="true">✓</span><div><h3>Fulfillment complete</h3><p>The parcel has left custody and the order reservation has been released.</p></div></div>
-      <details class="op-details"><summary>Process a full return</summary>${stateAction('advance', 'Receive the returned parcel', 'Receive every unit into the returns tray. Returned units are unavailable until inspected.', 'Receive returned units')}</details>`
+      <details class="op-details"><summary>Process a full return</summary>${stateAction('receive-return', 'Receive the returned parcel', 'Receive every unit into the returns tray. Returned units are unavailable until inspected.', 'Receive returned units')}</details>`
     case 'return':
       return `<div class="op-warning"><strong>Held for inspection</strong><p>Returned units are in the returns tray. Verify their condition and final bin before release.</p></div>
       <form class="op-form" data-op="return" novalidate><label>Return bin<input id="return-bin" name="bin" placeholder="A-07" autocomplete="off"></label>

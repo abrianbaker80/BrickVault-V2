@@ -207,9 +207,9 @@ const transitions: Partial<Record<OrderStage, [OrderStage, string, string, strin
   ]
 }
 
-export function advanceOrder(order: Order): Outcome {
-  const transition = transitions[order.stage]
-  if (!transition) return { message: 'Complete the current task before continuing.' }
+export function advanceOrder(order: Order, expectedStage: OrderStage): Outcome {
+  const transition = transitions[expectedStage]
+  if (!transition || order.stage !== expectedStage) return { message: 'This task no longer applies to the current order stage.' }
   const [stage, title, detail, next] = transition
   order.stage = stage
   order.events.unshift({ title, detail })

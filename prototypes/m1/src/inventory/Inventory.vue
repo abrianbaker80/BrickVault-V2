@@ -6,7 +6,7 @@ import {
   batches,
   displayDialog,
   locations,
-  metricRows,
+  inventoryMetrics,
   onHand,
   readModes,
   readText,
@@ -38,6 +38,7 @@ const search = ref<HTMLInputElement | null>(null)
 const inspected = computed(() => s.value.lots.find((l) => l.id === s.value.inspected))
 const rows = computed(() => s.value.visible.map((id) => s.value.lots.find((l) => l.id === id)!))
 const canAct = computed(() => authoritative(s.value))
+const metrics = computed(() => inventoryMetrics(s.value))
 const filtered = computed(() =>
   Boolean(s.value.query || s.value.location || s.value.condition || s.value.batch || s.value.status)
 )
@@ -70,11 +71,14 @@ function closeInspector() {
 
 <template>
   <div class="iv-root">
-    <div class="iv-metrics" aria-label="Inventory totals">
-      <div v-for="m in metricRows(s)" :key="m.label" class="iv-metric">
-        <span>{{ m.label }}</span>
-        <div>
-          <strong>{{ m.display }}</strong> <small>{{ m.unit }}</small>
+    <div role="group" :aria-label="metrics.label">
+      <p v-if="s.read !== 'Normal'" class="iv-metrics-note" role="status">{{ metrics.label }}</p>
+      <div class="iv-metrics">
+        <div v-for="m in metrics.rows" :key="m.label" class="iv-metric">
+          <span>{{ m.label }}</span>
+          <div>
+            <strong>{{ m.display }}</strong> <small>{{ m.unit }}</small>
+          </div>
         </div>
       </div>
     </div>

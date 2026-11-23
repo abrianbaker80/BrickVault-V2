@@ -41,6 +41,7 @@ export function mountOperations(host: HTMLElement, view: OperationView): () => v
   frame.append(message, content)
   host.replaceChildren(frame)
   let dialog: HTMLDialogElement | undefined
+  let pointerTask: Element | null = null
 
   function render() {
     content.innerHTML =
@@ -53,9 +54,18 @@ export function mountOperations(host: HTMLElement, view: OperationView): () => v
 
   function report(outcome: Outcome, moveFocus = true) {
     if (outcome.invalid) {
+      for (const field of content.querySelectorAll('[aria-describedby~="op-message"]')) {
+        field.removeAttribute('aria-invalid')
+        const remaining = field.getAttribute('aria-describedby')!.split(/\s+/).filter((id) => id && id !== 'op-message')
+        if (remaining.length) field.setAttribute('aria-describedby', remaining.join(' '))
+        else field.removeAttribute('aria-describedby')
+      }
       const input = content.querySelector<HTMLInputElement>('#' + outcome.invalid)
       input?.setAttribute('aria-invalid', 'true')
-      input?.setAttribute('aria-describedby', 'op-message')
+      if (input) {
+        const descriptions = [input.getAttribute('aria-describedby'), 'op-message'].filter(Boolean)
+        input.setAttribute('aria-describedby', descriptions.join(' '))
+      }
       input?.focus()
       if (input?.type === 'text') input.select()
     } else {
@@ -78,6 +88,10 @@ export function mountOperations(host: HTMLElement, view: OperationView): () => v
       if (notice) outcome = { ...outcome, message: outcome.message + ' ' + notice }
     }
     report(outcome)
+  }
+
+  function confirmStage(stage: 'pack' | 'label' | 'printing' | 'handoff' | 'shipped') {
+    recordOrderStep(stage, advanceOrder(records.order, stage))
   }
 
   function onUpdate(outcome?: Outcome, targetView?: OperationView) {
@@ -113,7 +127,7 @@ export function mountOperations(host: HTMLElement, view: OperationView): () => v
             invalid: 'handoff-parcel'
           })
         } else if (records.order.stage === 'handoff') {
-          recordOrderStep('handoff', advanceOrder(records.order))
+          confirmStage('handoff')
         }
         break
       case 'return':
@@ -154,9 +168,21 @@ export function mountOperations(host: HTMLElement, view: OperationView): () => v
     current.showModal()
   }
 
+  function onMouseDown(event: MouseEvent) {
+    // Keep focus on the intended next field if a later press in the same gesture hits the replaced task.
+    if (event.detail === 1) pointerTask = content.firstElementChild
+    else if (event.detail > 1 && pointerTask !== content.firstElementChild) event.preventDefault()
+  }
+
   function onClick(event: MouseEvent) {
-    const button =
-      event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button[data-op]') : null
+    const target = event.target
+    if (!(target instanceof Element)) return
+    // The second click can land on a different control after the first replaces the task.
+    if (event.detail > 1 && target.closest('button, summary, input[type=checkbox], label:has(input[type=checkbox])')) {
+      event.preventDefault()
+      return
+    }
+    const button = target.closest<HTMLButtonElement>('button[data-op]')
     if (!button || button.disabled || !frame.contains(button)) return
     switch (button.dataset.op) {
       case 'reverse-receipt':
@@ -168,8 +194,17 @@ export function mountOperations(host: HTMLElement, view: OperationView): () => v
       case 'amend':
         recordOrderStep('amend', amendOrder(records.order))
         break
-      case 'advance':
-        recordOrderStep(records.order.stage, advanceOrder(records.order))
+      case 'confirm-pack':
+        confirmStage('pack')
+        break
+      case 'queue-label':
+        confirmStage('label')
+        break
+      case 'confirm-print':
+        confirmStage('printing')
+        break
+      case 'receive-return':
+        confirmStage('shipped')
         break
       case 'read':
         startRead()
@@ -194,7 +229,17 @@ export function mountOperations(host: HTMLElement, view: OperationView): () => v
     }
   }
 
+  function onKeyDown(event: KeyboardEvent) {
+    if (!event.repeat) return
+    const target = event.target
+    const spaceActivates =
+      event.key === ' ' && target instanceof Element && target.closest('button, summary, input[type=checkbox]')
+    if (event.key === 'Enter' || spaceActivates) event.preventDefault()
+  }
+
+  frame.addEventListener('mousedown', onMouseDown)
   frame.addEventListener('click', onClick)
+  frame.addEventListener('keydown', onKeyDown)
   frame.addEventListener('submit', onSubmit)
   frame.addEventListener('change', onChange)
   listeners.add(onUpdate)
@@ -206,7 +251,9 @@ export function mountOperations(host: HTMLElement, view: OperationView): () => v
   return () => {
     listeners.delete(onUpdate)
     dialog?.close()
+    frame.removeEventListener('mousedown', onMouseDown)
     frame.removeEventListener('click', onClick)
+    frame.removeEventListener('keydown', onKeyDown)
     frame.removeEventListener('submit', onSubmit)
     frame.removeEventListener('change', onChange)
     frame.remove()

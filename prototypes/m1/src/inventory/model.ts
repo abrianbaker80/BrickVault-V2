@@ -276,11 +276,14 @@ export type Register = {
   compact: boolean
 }
 
-function results(s: Register): string[] {
+function readLots(s: Register): Lot[] {
   if (s.read === 'Failed' || s.read === 'Empty' || s.read === 'Loading') return []
+  return s.read === 'Partial' ? s.lots.slice(0, 4) : s.lots
+}
+
+function results(s: Register): string[] {
   const query = s.query.toLowerCase().trim()
-  const source = s.read === 'Partial' ? s.lots.slice(0, 4) : s.lots
-  return source
+  return readLots(s)
     .filter(
       (l) =>
         (!s.condition || l.condition === s.condition) &&
@@ -444,16 +447,27 @@ export const readText: Record<ReadMode, string> = {
   Failed: 'Inventory could not be read. Stock quantities are unknown.'
 }
 
-export function metricRows(s: Register) {
+export function inventoryMetrics(s: Register) {
   const unavailableRead = s.read === 'Failed' || s.read === 'Loading'
-  const lots = s.read === 'Partial' ? s.lots.slice(0, 4) : s.read === 'Empty' ? [] : s.lots
+  const lots = readLots(s)
+  const labels: Record<ReadMode, string> = {
+    Normal: 'Inventory totals',
+    Loading: 'Loading inventory · Totals unknown',
+    Failed: 'Inventory read failed · Totals unknown',
+    Empty: 'Verified empty inventory · 0 lots',
+    Partial: 'Partial inventory subtotal · ' + lots.length + ' verified lots',
+    Stale: 'Stale inventory totals · Last successful read at 09:42 UTC'
+  }
   const values = [
     { label: 'On hand', value: lots.reduce((n, l) => n + onHand(l), 0), unit: 'units' },
     { label: 'Sellable', value: lots.reduce((n, l) => n + sellable(l), 0), unit: 'units' },
     { label: 'Reserved', value: lots.reduce((n, l) => n + l.reserved, 0), unit: 'units' },
     { label: 'Unavailable', value: lots.reduce((n, l) => n + l.unavailable, 0), unit: 'units' }
   ]
-  return values.map((m) => ({ ...m, display: unavailableRead ? '—' : String(m.value) }))
+  return {
+    label: labels[s.read],
+    rows: values.map((m) => ({ ...m, display: unavailableRead ? '—' : String(m.value) }))
+  }
 }
 
 export function registerInteractions(host: HTMLElement, api: Controller) {

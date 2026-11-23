@@ -83,6 +83,11 @@ for (const engine of engines)
           ['Stale', 12]
         ] as const) {
           await read.selectOption(mode)
+          if (mode === 'Partial') {
+            const totals = page.getByRole('group', { name: 'Partial inventory subtotal · 4 verified lots' })
+            await expect(totals).toContainText('4 verified lots')
+            await expect(totals.locator('.iv-metric strong').first()).toHaveText('229')
+          }
           await expect(table.locator('tbody tr')).toHaveCount(rows)
           await expect(button(page, 'Preview recount')).toBeDisabled()
           if (mode === 'Failed' || mode === 'Empty') {

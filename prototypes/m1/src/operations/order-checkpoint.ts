@@ -12,7 +12,7 @@ function replayStep(order: Order, step: string): boolean {
   if (step === 'amend') return Boolean(amendOrder(order).next)
   if (step !== order.stage) return false
   if (step === 'return') return Boolean(verifyReturn(order, 'A-07', true).next)
-  return Boolean(advanceOrder(order).next)
+  return Boolean(advanceOrder(order, step).next)
 }
 
 export function restoreOrderCheckpoint(): OrderSession {

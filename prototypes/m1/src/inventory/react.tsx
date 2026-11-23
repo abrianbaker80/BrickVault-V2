@@ -8,7 +8,7 @@ import {
   createRegister,
   displayDialog,
   locations,
-  metricRows,
+  inventoryMetrics,
   onHand,
   readModes,
   readText,
@@ -119,6 +119,7 @@ function Inventory({ api, host }: { api: Controller; host: HTMLElement }) {
   const inspected = s.lots.find((l) => l.id === s.inspected)
   const rows = s.visible.map((id) => s.lots.find((l) => l.id === id)!)
   const canAct = authoritative(s)
+  const metrics = inventoryMetrics(s)
   const filtered = Boolean(s.query || s.location || s.condition || s.batch || s.status)
   const showReadState = s.read !== 'Normal'
   useEffect(() => registerInteractions(host, api), [host, api])
@@ -141,15 +142,18 @@ function Inventory({ api, host }: { api: Controller; host: HTMLElement }) {
   }
   return (
     <div className="iv-root">
-      <div className="iv-metrics" aria-label="Inventory totals">
-        {metricRows(s).map((m) => (
-          <div className="iv-metric" key={m.label}>
-            <span>{m.label}</span>
-            <div>
-              <strong>{m.display}</strong> <small>{m.unit}</small>
+      <div role="group" aria-label={metrics.label}>
+        {showReadState && <p className="iv-metrics-note" role="status">{metrics.label}</p>}
+        <div className="iv-metrics">
+          {metrics.rows.map((m) => (
+            <div className="iv-metric" key={m.label}>
+              <span>{m.label}</span>
+              <div>
+                <strong>{m.display}</strong> <small>{m.unit}</small>
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
       <div className={'iv-workspace' + (inspected && !s.compact ? ' has-inspector' : '')}>
         <section className="iv-register" aria-labelledby="iv-register-title">

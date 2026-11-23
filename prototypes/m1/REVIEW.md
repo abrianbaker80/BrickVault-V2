@@ -55,12 +55,12 @@ The architecture register’s earlier weighted assessment favored React by 0.10 
 
 | Framework entry | JS gzip size | First register paint, median (range) | Search result paint, median (range) |
 |---|---:|---:|---:|
-| React | 68.9 KiB | 99 ms (94–108) | 92 ms (85–105) |
-| Vue | 28.0 KiB | 86 ms (82–91) | 102 ms (89–112) |
+| React | 69.0 KiB | 86 ms (80–96) | 98 ms (84–106) |
+| Vue | 28.1 KiB | 73 ms (69–84) | 98 ms (92–102) |
 
 At 1440 × 900, Workbench showed 9 complete inventory rows and Ledger showed 8. At 1280 × 720 the counts were 6 and 5. At 900 × 760 they were 7 and 6. The starting order and lot details were identical.
 
-Local verification passed 27 browser tests, TypeScript checking, production and standalone builds. The suite includes both directions, both frameworks, independent scope and custody assertions, a keyboard-only route and an offline open with network disabled. GitHub Actions runs the same acceptance suite and uploads the standalone file.
+Local verification passed 32 browser tests, TypeScript checking, production and standalone builds. The suite includes both directions, both frameworks, independent scope and custody assertions, a keyboard-only route and an offline open with network disabled. Independent inspection identified two ways one physical activation could record multiple order confirmations, an obsolete field-error description, and ambiguous partial stock totals. Regression tests verify that holding Enter after the last scan and double-clicking Pack each record one step, validation follows the currently invalid field, and the four-lot subtotal is explicitly identified. GitHub Actions runs the suite and uploads the standalone file. [Partial stock](evidence/partial-stock.png) · [Correction preview](evidence/recovery-preview.png)
 
 The local run used the production build, Chromium on Windows, one workstation and loopback. Nine fresh browser contexts per framework alternated engine order. First register paint measures navigation start to the second animation frame after the first lot button appears. Exact-ID search measures input to the second frame after the expected result, including an intentional 80 ms read delay. Bundle sizes are gzip-compressed bytes for the framework-specific entry, excluding shared shell, model, images and styles. Compare repeated measurements within this run. [Raw samples and geometry](evidence/measurements.json) · [Observation script](tools/observe.mjs)
 

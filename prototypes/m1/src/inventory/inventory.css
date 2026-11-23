@@ -37,6 +37,20 @@
   border: 1px solid var(--line);
   border-radius: 11px;
 }
+.iv-metrics-note {
+  color: var(--ink);
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 8px 8px 0 0;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.iv-metrics-note + .iv-metrics {
+  border-top: 0;
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}
 .iv-metric {
   min-width: 0;
   padding: 0 clamp(12px, 2.1cqi, 30px);

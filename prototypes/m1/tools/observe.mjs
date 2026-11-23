@@ -55,6 +55,20 @@ for (const width of [1440, 1280, 900]) {
     await page.close()
   }
 }
+const exceptions = await browser.newPage({ viewport: { width: 1280, height: 720 } })
+await open(exceptions, 'workbench', 'react')
+await exceptions.getByLabel('Read simulation').selectOption('Partial')
+await exceptions.getByRole('group', { name: 'Partial inventory subtotal · 4 verified lots' }).waitFor()
+await exceptions.evaluate(() => scrollTo(0, 0))
+await exceptions.screenshot({ path: join(evidence, 'partial-stock.png') })
+await exceptions.goto(origin + '/?design=ledger&view=recovery')
+await exceptions.getByRole('button', { name: 'Read observations' }).click()
+await exceptions.getByRole('button', { name: 'Review mismatch' }).click()
+await exceptions.getByRole('dialog').waitFor()
+await exceptions.evaluate(() => document.fonts.ready)
+await exceptions.screenshot({ path: join(evidence, 'recovery-preview.png') })
+await exceptions.close()
+
 const samples = { react: [], vue: [] }
 for (let run = 0; run < 9; run++) {
   for (const engine of run % 2 ? ['vue', 'react'] : ['react', 'vue']) {
@@ -159,7 +173,9 @@ try {
           const session = await context.newCDPSession(page)
           try {
             const capture = await session.send('Page.captureScreenshot', {
-              format: 'png', fromSurface: true, captureBeyondViewport: false
+              format: 'png',
+              fromSurface: true,
+              captureBeyondViewport: false
             })
             const png = Buffer.from(capture.data, 'base64')
             const surfaceWidth = png.readUInt32BE(16)
@@ -167,7 +183,9 @@ try {
               throw Error('Native capture did not include the full zoomed viewport: ' + surfaceWidth)
             }
             await writeFile(join(evidence, design + '-150pct.png'), png)
-          } finally { await session.detach() }
+          } finally {
+            await session.detach()
+          }
         }
         results.push({ design, engine, zoom: actual, ...geometry })
       }
