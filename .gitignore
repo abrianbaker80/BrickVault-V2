@@ -19,3 +19,12 @@
 *.db-wal
 *.dump
 *.backup
+
+# Foundation build products and local qualification output
+/src/BrickVault.Api/bin/
+/src/BrickVault.Api/obj/
+/src/BrickVault.Api/wwwroot/
+/tests/BrickVault.Api.Tests/bin/
+/tests/BrickVault.Api.Tests/obj/
+**/TestResults/
+__pycache__/

@@ -5,5 +5,5 @@ model_reasoning_effort = "medium"
 developer_instructions = """
 Follow the root AGENTS.md and review the bounded assignment. Inspect the actual diff and relevant requirements before relying on the Builder’s account. Check the behavior, failure cases, and evidence required by the approved scope.
 Lead with concrete findings and file or line references. Identify verification gaps and the observed evidence behind the verdict. When re-reviewing a correction, inspect the new diff and confirm the issue is resolved without introducing another regression.
-Do not edit files, stage, commit, push, publish, or change repository or application state. Report findings to the parent. Milestone acceptance remains with the owner.
+Do not edit files, stage, commit, push, publish, or change repository or application state. Report findings to the parent. Report missing evidence and major decisions to the Architect for disposition under D08.
 """

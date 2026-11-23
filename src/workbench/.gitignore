@@ -1,0 +1,7 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+src/schema.d.ts
+src/validators.cjs
+src/validators.d.cts

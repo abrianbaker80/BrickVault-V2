@@ -1,8 +1,10 @@
 # BrickVault V2
 
-BrickVault V2 is a planned inventory and fulfillment system for a LEGO resale operation. BrickVault will manage stock, reservations and publishing decisions. BrickLink will remain the sales storefront.
+BrickVault V2 is an inventory and fulfillment system in development for a LEGO resale operation. The M2 foundation runs a private Workbench where one operator can register catalog items and locations, inspect their audit history and trace background work. The planned inventory system will manage stock, reservations and publication to BrickLink.
 
-**The owner accepted M1 and selected Workbench for navigation and visual design and Vue 3 with TypeScript for the frontend.** The review guide lets you try Workbench and Ledger and compare their React and Vue inventory registers. M2 requires separate owner authorization. [M1 review guide](prototypes/m1/REVIEW.md) · [Accepted M1 comparison](https://github.com/abrianbaker80/BrickVault-V2/commit/d5a3264dcf3650bbf91fb98a132bb31b74c9fb92)
+**Run the M2 foundation on Windows x64 or Ubuntu 24.04 x64.** The runbook covers a clean build, first sign-in, an isolated PostgreSQL restore and the qualification command. Use operator-authored fictional reference data. Production hosting and data migration remain open decisions. [Setup, operation and recovery](docs/verification/m2-foundation.md) · [M2 issue #6](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
+
+The owner accepted M1 and selected Workbench for navigation and visual design and Vue 3 with TypeScript for the frontend. The review guide lets you try Workbench and Ledger and compare their React and Vue inventory registers. [M1 review guide](prototypes/m1/REVIEW.md) · [Accepted M1 comparison](https://github.com/abrianbaker80/BrickVault-V2/commit/d5a3264dcf3650bbf91fb98a132bb31b74c9fb92)
 
 The owner previously accepted the M0 engineering checkpoint for the repository, project roles and verification tools. [M0 checkpoint](https://github.com/abrianbaker80/BrickVault-V2/commit/2d88409b5fb556316888d1282c08968ba5619c70)
 
@@ -49,7 +51,7 @@ Setup downloads the pinned Gitleaks release and verifies the archive and executa
 
 Link the candidate pull request, exact reviewed commit, local checks, independent review and hosted CI in the milestone issue. A reviewer who shares the maintainer's GitHub login can record the independent verdict against the exact diff. The owner can require a formal approval from a separate eligible GitHub account.
 
-Before merging feature work, verify that GitHub enforces pull requests and the current `M0 repository checks` status check on `main`, with force pushes and deletion blocked. Use the standard public-repository runner for this workflow. After an authorized merge, fetch and compare local `main`, `origin/main` and GitHub's default branch. Keep the milestone and issue open until the owner accepts the checkpoint.
+Before merging feature work, verify that GitHub enforces pull requests and all required checks on `main`, with force pushes and deletion blocked. Use the standard public-repository runner. After a protected merge, fetch and compare local `main`, `origin/main` and GitHub's default branch. Close a checkpoint when the evidence meets its requirements. Bring major decisions to the owner.
 
 ## Maintaining the tools
 
