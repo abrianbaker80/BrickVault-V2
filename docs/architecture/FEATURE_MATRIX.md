@@ -27,11 +27,13 @@
 
 ## M1 · Design choices and owner visual approval
 
+U01–U03 passed independent review on the fictional comparison. The owner selects the layout and framework and accepts the milestone. [Reviewed prototype](https://github.com/abrianbaker80/BrickVault-V2/commit/61fac3d617ecc712b8a035491a954fde72fff217) · [M1 pull request](https://github.com/abrianbaker80/BrickVault-V2/pull/5)
+
 | ID | Scope | Status | Depends on | Capability | Evidence required |
 | --- | --- | --- | --- | --- | --- |
-| U01 | Mandatory | Built | G03 | Bounded React/TypeScript versus Vue/TypeScript comparison, plus two distinct logo-inspired visual directions with equivalent realistic tasks. | Use identical representative inventory data, design constraints and interaction tests for the two frameworks. Compare usability, visual quality, maintainability, performance, accessibility and development efficiency. The owner reviews the comparison and selects frontend and design before production UI. |
-| U02 | Mandatory | Built | U01 | Approve navigation, typography, colors/themes, density, forms, tables, lot inspector, selection and bulk actions. | Keyboard-only walk locates the correct lot, opens details, selects explicit IDs, previews impact and cancels. Verify focus restoration, zoom, small window, contrast, noncolor status and errors. Owner approves before major production UI. |
-| U03 | Mandatory | Built | U01 | Define loading, empty, partial, stale, failed, uncertain and recovery states for each critical workspace. | Illustrate distinct zero/failed reads, stale superseded filter, a partial batch, loss after send and safe refresh. Demonstrate the order detail itself shows what blocks the next action. |
+| U01 | Mandatory | Reviewed | G03 | Bounded React/TypeScript versus Vue/TypeScript comparison, plus two distinct logo-inspired visual directions with equivalent realistic tasks. | Use identical representative inventory data, design constraints and interaction tests for the two frameworks. Compare usability, visual quality, maintainability, performance, accessibility and development efficiency. The owner reviews the comparison and selects frontend and design before production UI. |
+| U02 | Mandatory | Reviewed | U01 | Approve navigation, typography, colors/themes, density, forms, tables, lot inspector, selection and bulk actions. | Keyboard-only walk locates the correct lot, opens details, selects explicit IDs, previews impact and cancels. Verify focus restoration, zoom, small window, contrast, noncolor status and errors. Owner approves before major production UI. |
+| U03 | Mandatory | Reviewed | U01 | Define loading, empty, partial, stale, failed, uncertain and recovery states for each critical workspace. | Illustrate distinct zero/failed reads, stale superseded filter, a partial batch, loss after send and safe refresh. Demonstrate the order detail itself shows what blocks the next action. |
 
 ## M2 · Persistent application and operations foundation
 

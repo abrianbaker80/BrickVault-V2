@@ -74,4 +74,4 @@ At a register width below 920 CSS pixels, inspecting a lot opens a scrollable mo
 
 ## Decision
 
-The owner selects **Workbench or Ledger** for navigation and visual design and **Vue or React** for the frontend. The issue records the selection and milestone acceptance after owner review. The interactive sample establishes design evidence using fictional data. M2 has its own authorization gate.
+The owner selects **Workbench or Ledger** for navigation and visual design and **Vue or React** for the frontend. The independent Reviewer cleared the corrected order confirmations, field validation and partial totals. The pull request tracks CI and the downloadable offline preview. The issue records the selection and milestone acceptance after owner review. [M1 pull request](https://github.com/abrianbaker80/BrickVault-V2/pull/5) The interactive sample establishes design evidence using fictional data. M2 has its own authorization gate.
