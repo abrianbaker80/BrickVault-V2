@@ -9,6 +9,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import tempfile
 import uuid
 
 from setup import ROOT, TOOLS, BIN, WIN, EXT
@@ -125,6 +126,28 @@ def label(name):
     return name
 
 
+def lan_endpoint(origin, expected_port=None):
+    """Accept a canonical HTTPS DNS origin suitable for a Caddy site address."""
+    label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    match = re.fullmatch(
+        rf"https://((?:{label}\.)+[a-z](?:[a-z0-9-]{{0,61}}[a-z0-9])?):([1-9][0-9]{{0,4}})",
+        origin if isinstance(origin, str) else "",
+    )
+    if not match:
+        raise ValueError("Use a lowercase HTTPS DNS origin with an explicit port.")
+    hostname, port = match[1], int(match[2])
+    if (
+        len(hostname) > 253
+        or hostname.endswith(".localhost")
+        or not 1024 <= port <= 65533
+        or expected_port not in (None, port)
+    ):
+        raise ValueError(
+            "The LAN DNS origin must use the instance's unprivileged HTTPS port."
+        )
+    return hostname, port
+
+
 class Instance:
     def __init__(self, directory):
         self.path = Path(directory).resolve()
@@ -134,9 +157,18 @@ class Instance:
         if self.config["format"] != 1:
             raise ValueError("Unsupported foundation configuration format.")
         self.port = self.config["port"]
-        self.origin = f"https://localhost:{self.port}"
+        if "lanOrigin" in self.config:
+            lan_endpoint(self.config["lanOrigin"], self.port)
         self.database = label(self.config["database"])
         self.cluster = self.path / "pgdata"
+
+    @property
+    def origin(self):
+        return self.config.get("lanOrigin", f"https://localhost:{self.port}")
+
+    @property
+    def gateway_bind(self):
+        return "0.0.0.0" if "lanOrigin" in self.config else "127.0.0.1"
 
     @property
     def ca(self):
@@ -290,42 +322,58 @@ def password_hash(password):
     return execute([BIN / ("caddy" + EXT), "hash-password"], content=password + "\n")
 
 
-def init(directory, recovery, port, *, release=RELEASE):
+def init(
+    directory, recovery, port, *, release=RELEASE, lan_origin=None, recipient=None
+):
     directory = Path(directory).resolve()
-    recovery = Path(recovery).resolve()
-    if (
-        directory == recovery
-        or directory in recovery.parents
-        or recovery in directory.parents
-    ):
+    if (recipient is None) == (recovery is None):
         raise ValueError(
-            "Use separate, non-overlapping directories for runtime and independent recovery."
+            "Choose a recovery identity directory or an external public age recipient."
         )
     if directory.exists() and any(directory.iterdir()):
         raise ValueError("New instance requires an empty dedicated directory.")
     if not 1024 <= port <= 65533:
-        raise ValueError(
-            "Choose three available consecutive unprivileged loopback ports."
-        )
+        raise ValueError("Choose three available consecutive unprivileged ports.")
+    if lan_origin is not None:
+        lan_endpoint(lan_origin, port)
     for number in range(port, port + 3):
         with socket.socket() as probe:
-            probe.bind(("127.0.0.1", number))
+            probe.bind(
+                ("0.0.0.0" if number == port and lan_origin else "127.0.0.1", number)
+            )
     release = Path(release).resolve()
     if not (release / "BrickVault.Api.dll").is_file():
         raise ValueError("Build the release before initializing an instance.")
-    if recovery.exists() and any(
-        not (entry.is_file() and re.fullmatch(r"[0-9a-f]{32}\.agekey", entry.name))
-        for entry in recovery.iterdir()
-    ):
-        raise ValueError(
-            "Use a dedicated key directory with only foundation recovery identities."
-        )
-    private_dir(directory)
-    private_dir(recovery)
     uid = uuid.uuid4().hex
-    keyfile = recovery / (uid + ".agekey")
-    execute([BIN / ("age-keygen" + EXT), "-o", keyfile])
-    recipient = execute([BIN / ("age-keygen" + EXT), "-y", keyfile])
+    if recipient is not None:
+        if not re.fullmatch(r"age1[a-z0-9]{58}", recipient):
+            raise ValueError("Supply a public X25519 age recipient.")
+        with tempfile.TemporaryDirectory() as scratch:
+            probe = private_dir(scratch) / "probe.age"
+            execute([BIN / ("age" + EXT), "-r", recipient, "-o", probe], content="")
+        private_dir(directory)
+    else:
+        recovery = Path(recovery).resolve()
+        if (
+            directory == recovery
+            or directory in recovery.parents
+            or recovery in directory.parents
+        ):
+            raise ValueError(
+                "Use separate, non-overlapping directories for runtime and independent recovery."
+            )
+        if recovery.exists() and any(
+            not (entry.is_file() and re.fullmatch(r"[0-9a-f]{32}\.agekey", entry.name))
+            for entry in recovery.iterdir()
+        ):
+            raise ValueError(
+                "Use a dedicated key directory with only foundation recovery identities."
+            )
+        private_dir(directory)
+        private_dir(recovery)
+        keyfile = recovery / (uid + ".agekey")
+        execute([BIN / ("age-keygen" + EXT), "-o", keyfile])
+        recipient = execute([BIN / ("age-keygen" + EXT), "-y", keyfile])
     password = secrets.token_urlsafe(24)
     config = {
         "format": 1,
@@ -341,6 +389,8 @@ def init(directory, recovery, port, *, release=RELEASE):
             for r in ("bv_cluster_admin", "bv_migrator", "bv_api", "bv_worker")
         },
     }
+    if lan_origin is not None:
+        config["lanOrigin"] = lan_origin
     write_private(directory / "instance.json", json.dumps(config, indent=2) + "\n")
     write_private(directory / "owner-login.txt", "operator\n" + password + "\n")
     shutil.copytree(release, directory / "release")

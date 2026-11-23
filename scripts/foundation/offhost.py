@@ -87,6 +87,21 @@ def validate_point(point):
     return point
 
 
+def point_time(point):
+    return datetime.strptime(validate_point(point)[:16], "%Y%m%dT%H%M%SZ").replace(
+        tzinfo=timezone.utc
+    )
+
+
+def failure_reason(error):
+    # RecoveryError messages are written for operators. OS/subprocess exceptions may include private arguments.
+    if isinstance(error, RecoveryError):
+        return str(error)
+    if isinstance(error, subprocess.CalledProcessError):
+        return f"Command exited with status {error.returncode}."
+    return type(error).__name__
+
+
 def read_receipt(file, point):
     receipt = json.loads(file.read_text(encoding="utf-8"))
     if (
@@ -257,7 +272,9 @@ def make_set(instance, receipt_dir, point, route, mirror):
     with tempfile.TemporaryDirectory(dir=instance.path) as temporary:
         folder = Path(temporary)
         with operation(instance):
-            context = route.publication_context(instance, mirror)
+            context = route.publication_context(instance, mirror) if route else None
+            source_id = instance.config["id"]
+            workspace_id = instance.config.get("workspaceId", source_id)
             database = release_manifest(instance, folder)
             meta = {
                 "format": FORMAT,
@@ -307,6 +324,8 @@ def make_set(instance, receipt_dir, point, route, mirror):
         "format": FORMAT,
         "point": point,
         "publicationContext": context,
+        "sourceInstance": source_id,
+        "workspaceId": workspace_id,
         "sha256": digest(file),
         "bytes": file.stat().st_size,
     }
@@ -463,12 +482,17 @@ def recover(args):
     state.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=state.parent) as temporary:
         scratch = private_dir(temporary)
-        with transport(capture_transport(args.transport, scratch), scratch) as (
-            base,
-            transfer,
-        ):
-            transfer(base + point + ".age", scratch / "remote.age")
-        verify_file(scratch / "remote.age", receipt)
+        encrypted = scratch / "remote.age"
+        if getattr(args, "file", None):
+            local = outside_checkout(args.file)
+            shutil.copyfile(local, encrypted)
+        else:
+            with transport(capture_transport(args.transport, scratch), scratch) as (
+                base,
+                transfer,
+            ):
+                transfer(base + point + ".age", encrypted)
+        verify_file(encrypted, receipt)
         execute(
             [
                 BIN / ("age" + EXT),
@@ -544,7 +568,14 @@ def main():
     receive.add_argument("--port", type=int, required=True)
     for command in (send, receive):
         command.add_argument("--state", type=Path, required=True)
-        command.add_argument("--transport", type=Path, required=True)
+    send.add_argument("--transport", type=Path, required=True)
+    source = receive.add_mutually_exclusive_group(required=True)
+    source.add_argument("--transport", type=Path)
+    source.add_argument(
+        "--file",
+        type=Path,
+        help="Already downloaded encrypted point with its independent trusted receipt.",
+    )
     args = parser.parse_args()
     try:
         if args.action == "publish":

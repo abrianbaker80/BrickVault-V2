@@ -1,0 +1,31 @@
+[Unit]
+Description=BrickVault private Workbench, database and reference worker
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=brickvault
+Group=brickvault
+WorkingDirectory=/opt/brickvault-v2
+Environment=HOME=/var/lib/brickvault-v2
+Environment=PYTHONDONTWRITEBYTECODE=1
+StateDirectory=brickvault-v2
+StateDirectoryMode=0700
+ExecStart=/usr/bin/python3 /opt/brickvault-v2/scripts/foundation/manage.py supervise --state /var/lib/brickvault-v2/instance
+Restart=on-failure
+RestartSec=5s
+KillMode=mixed
+TimeoutStopSec=90s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

@@ -4,10 +4,12 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 import http.cookiejar
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import ssl
 import subprocess
 import tempfile
@@ -16,9 +18,31 @@ import urllib.error
 import urllib.request
 import uuid
 
-from instance import BIN, DOTNET, EXT, ROOT, UI, WIN, Instance, execute, init
+from browser import main as open_browser, remote_connection
+from instance import (
+    BIN,
+    DOTNET,
+    EXT,
+    ROOT,
+    UI,
+    WIN,
+    Instance,
+    child_env,
+    execute,
+    init,
+    lan_endpoint,
+)
 from recovery import activate, backup, restore
-from runtime import end, ready, readiness_token, rotate, start, start_gateway, stop
+from runtime import (
+    configure_lan,
+    end,
+    ready,
+    readiness_token,
+    rotate,
+    start,
+    start_gateway,
+    stop,
+)
 
 
 def require(ok, reason):
@@ -166,8 +190,9 @@ def qualify_runtime_start(s):
             observed.add("supervisor" if "supervise" in args else name)
         return launch(args, **kwargs)
 
-    with patch.dict(os.environ, {"BV_ENV_SENTINEL": "parent-only"}), patch(
-        "subprocess.Popen", side_effect=inspect_launch
+    with (
+        patch.dict(os.environ, {"BV_ENV_SENTINEL": "parent-only"}),
+        patch("subprocess.Popen", side_effect=inspect_launch),
     ):
         s.pg_start()
         start(s)
@@ -208,6 +233,123 @@ def qualify_gateway_error(s):
         readiness_token(s) not in log and s.config["gateway"] not in log,
         "Private probe leaked credentials through a gateway failure.",
     )
+
+
+def qualify_guest(s, lab):
+    hostname = "workbench.example.test"
+    origin = f"https://{hostname}:{s.port}"
+    original = s.origin
+    require(
+        s.gateway_bind == "127.0.0.1" and original == f"https://localhost:{s.port}",
+        "Default instance did not use a loopback gateway.",
+    )
+    for bad in (
+        origin + "/",
+        origin + "?a=b",
+        origin.replace(hostname, "127.0.0.1"),
+        origin.replace(hostname, "owner@" + hostname),
+        origin.replace("https:", "http:"),
+    ):
+        expected_failure(lambda: lan_endpoint(bad, s.port))
+    configure_lan(s, origin)
+    require(
+        s.gateway_bind == "0.0.0.0",
+        "The explicit LAN profile did not bind the guest gateway.",
+    )
+    descriptor = lab / "connection.json"
+    lookup = socket.getaddrinfo
+
+    def resolve(host, *args, **kwargs):
+        # Only this qualification process maps the fictional client DNS name to the synthetic guest.
+        return lookup("127.0.0.1" if host == hostname else host, *args, **kwargs)
+
+    try:
+        start(s)
+        require(
+            ready(s),
+            "The supervisor did not verify its canonical certificate on loopback.",
+        )
+        config = json.loads(
+            execute(
+                [
+                    BIN / ("caddy" + EXT),
+                    "adapt",
+                    "--config",
+                    s.path / "Caddyfile",
+                    "--adapter",
+                    "caddyfile",
+                ],
+                env={
+                    **child_env(),
+                    "BV_GATEWAY_TOKEN": "fixture",
+                    "BV_READY_TOKEN": "fixture",
+                    "BV_OWNER_HASH": "fixture",
+                },
+            )
+        )
+        (server,) = config["apps"]["http"]["servers"].values()
+        routes = server["routes"][0]["handle"][0]["routes"]
+        require(
+            routes[0]["handle"][0].get("abort")
+            and "127.0.0.1/8" in routes[0]["match"][0]["not"][0]["remote_ip"]["ranges"],
+            "The gateway did not reject external peers before forwarding requests.",
+        )
+        ca = s.ca.read_text(encoding="ascii")
+        pin = hashlib.sha256(ssl.PEM_cert_to_DER_cert(ca)).hexdigest()
+        route = {"origin": origin, "ca": str(s.ca), "caSha256": "0" * 64}
+        descriptor.write_text(json.dumps(route), encoding="utf-8")
+        expected_failure(lambda: remote_connection(descriptor))
+        route["caSha256"] = pin
+        descriptor.write_text(json.dumps(route), encoding="utf-8")
+        with (
+            patch("socket.getaddrinfo", resolve),
+            patch.dict(os.environ, {"no_proxy": "*", "NO_PROXY": "*"}),
+        ):
+            checked_origin, profile_id, trusted_ca = remote_connection(descriptor)
+            require(
+                checked_origin == origin
+                and ssl.PEM_cert_to_DER_cert(trusted_ca)
+                == ssl.PEM_cert_to_DER_cert(ca),
+                "The workstation selected a different endpoint or root.",
+            )
+            firefox, profile = lab / "firefox", lab / "browser" / profile_id
+            with (
+                patch(
+                    "sys.argv",
+                    [
+                        "browser.py",
+                        "remote",
+                        "--connection",
+                        str(descriptor),
+                        "--firefox",
+                        str(firefox),
+                    ],
+                ),
+                patch(
+                    "browser.start",
+                    side_effect=AssertionError("Started a workstation backend."),
+                ),
+                patch("browser.trusted_profile", return_value=profile) as provision,
+                patch("browser.subprocess.Popen") as launch,
+            ):
+                open_browser()
+            provision.assert_called_once_with(
+                lab / "browser", profile_id, trusted_ca, firefox
+            )
+            require(
+                launch.call_args.args[0]
+                == [firefox, "--no-remote", "--profile", profile, origin],
+                "The workstation launched a different profile or origin.",
+            )
+            client = Browser(s)
+            client.login((s.path / "owner-login.txt").read_text().splitlines()[1])
+            client.call("session", "DELETE", headers={"Origin": original}, expected=403)
+            client.call(
+                "session", "DELETE", headers={"X-CSRF-Token": "invalid"}, expected=403
+            )
+            client.call("workspace")
+    finally:
+        stop(s)
 
 
 def verify(port):
@@ -480,7 +622,23 @@ def verify(port):
 
             verify_offhost(s, lab, port + 6, before, Browser)
             qualify_gateway_error(s)
-            rescue = init(lab / "second-runtime", lab / "second-recovery", port + 6)
+            recipient = s.config["recipient"]
+            bad_recipient = recipient[:-1] + ("p" if recipient[-1] != "p" else "q")
+            expected_failure(
+                lambda: init(
+                    lab / "rejected-guest", None, port + 6, recipient=bad_recipient
+                )
+            )
+            require(
+                not (lab / "rejected-guest").exists(),
+                "An invalid recipient provisioned guest state.",
+            )
+            rescue = init(lab / "second-runtime", None, port + 6, recipient=recipient)
+            require(
+                rescue.config["recipient"] == recipient
+                and not any(rescue.path.rglob("*.agekey")),
+                "The instance did not retain exclusive external recovery key custody.",
+            )
             target = "bv_m2_restore_qualified"
             try:
                 start(rescue)
@@ -540,6 +698,7 @@ def verify(port):
 
             finally:
                 stop(rescue)
+            qualify_guest(rescue, lab)
             for host in (s, rescue):
                 sensitive_values = [
                     *original_keys,

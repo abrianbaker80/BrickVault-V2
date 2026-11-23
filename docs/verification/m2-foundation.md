@@ -1,6 +1,6 @@
 # M2 foundation runbook
 
-A single operator can sign in to the local HTTPS Workbench, save catalog and location references and inspect the resulting audit and worker records in PostgreSQL. Use original, fictional reference material. M2 covers an isolated development instance. Production commissioning, off-host recovery objectives and live provider or device operations have separate gates. [Feature requirements T01–T06](../architecture/FEATURE_MATRIX.md#m2--persistent-application-and-operations-foundation) · [M2 checkpoint](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
+A single operator can sign in to the local HTTPS Workbench, save catalog and location references and inspect the resulting audit and worker records in PostgreSQL. Use original, fictional reference material. M2 supports a local development instance and the dedicated private server. The server hosts the gateway, API, worker and database. Each workstation needs its own trusted browser connection. Business-data cutover, production recovery objectives and live provider or device operations have separate gates. [Feature requirements T01–T06](../architecture/FEATURE_MATRIX.md#m2--persistent-application-and-operations-foundation) · [M2 checkpoint](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
 
 ## Build a clean checkout
 
@@ -66,6 +66,27 @@ Invoke-Foundation rotate --state $state
 
 Sessions expire after eight hours. The worker purges expired session rows. Audit, command and job evidence persists with the instance. Unconfirmed browser commands survive browser restart in the profile. Resolve them before retiring the profile. Restrict runtime files, the browser profile, backups, build archives and diagnostics to the operator. The lab has no customer or shipping records. Their production retention schedule, backup deletion rules and recovery key custody require decisions before collection.
 
+## Run Workbench on the private server
+
+Give the guest a stable private DNS or mDNS name and permit the HTTPS port from authorized workstations in its firewall. Restrict administration to the management network. Install the pinned tools, reviewed Linux release and repository scripts under `/opt/brickvault-v2` as root. Create the dedicated operating system account `brickvault` with a private home at `/var/lib/brickvault-v2`. Generate the age identity on the recovery workstation. Deliver only its public recipient to the guest.
+
+Run these commands in a Linux shell after setting `WORKBENCH_ORIGIN` to the canonical HTTPS origin (including port 49480) and `PUBLIC_RECIPIENT` to the age public recipient. Keep the administrator's code and release files read-only to the service account.
+
+```sh
+cd /opt/brickvault-v2
+sudo -H -u brickvault python3 scripts/foundation/manage.py init \
+  --state /var/lib/brickvault-v2/instance --port 49480 \
+  --lan-origin "$WORKBENCH_ORIGIN" --recipient "$PUBLIC_RECIPIENT"
+sudo install -m 0644 scripts/foundation/systemd/brickvault-workbench.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now brickvault-workbench.service
+sudo -H -u brickvault python3 scripts/foundation/manage.py status --state /var/lib/brickvault-v2/instance
+```
+
+Deliver the gateway's public CA from `instance/caddy-store/pki/authorities/local/root.crt` over the authenticated administration channel. Calculate its SHA-256 over the DER certificate and verify it on the workstation. In a private workstation directory, save the CA and a `connection.json` containing `origin`, `ca` (the certificate path) and `caSha256` (the lowercase DER digest). Open Workbench with `python scripts/foundation/browser.py remote --connection <connection.json>`. The launcher trusts this CA within the dedicated Firefox profile. Deliver the operator password separately. Only the HTTPS gateway accepts application traffic from the LAN. PostgreSQL and the API listen on loopback.
+
+Use systemd to start and stop the supervised service. Before a credential rotation or other maintenance requiring a stopped instance, stop the unit, use the management command, then restart the unit and verify readiness and sign-in. Capture a fresh recovery point before a migration or bulk change. [Nightly backup operations](m2-hosted-backups.md)
+
 ## Back up and restore to a second instance
 
 With the source running, record the catalog, location and audit entries to compare. Recovery requires the encrypted archive, its original age decryption identity, and the **exact release directory** from the source instance. The dump manifest stores hashes of every published release file, including the UI. Rebuilding the same commit can yield different bytes. Save the release directory, source revision and dependency/tool pins with the recovery materials. Keep the private age identity separate from the archive.
@@ -120,7 +141,7 @@ Invoke-Foundation stop --state $state
 Invoke-Foundation start --state $destination
 ```
 
-The qualification command exercises publication, retry and fresh recovery with a local rclone test destination. Issue #6 contains the separate external-storage rehearsal result. Production scheduling, freshness monitoring, retention and a full guest recovery objective belong to the hosting checkpoint. [M2 checkpoint](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
+The qualification command exercises publication, retry and fresh recovery with a local rclone test destination. Issue #6 contains the separate external-storage rehearsal result. The dedicated server has a nightly schedule and freshness monitoring. Record retention decisions and a timed full-guest rebuild before production cutover. [M2 checkpoint](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
 
 ## Compatibility and maintenance
 
