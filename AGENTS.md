@@ -4,7 +4,7 @@ Work in the independent BrickVault V2 repository. Before editing or using GitHub
 
 ## Scope and authority
 
-Read the [master plan](docs/architecture/MASTER_PLAN.md), [feature matrix](docs/architecture/FEATURE_MATRIX.md) and [decision register](docs/architecture/DECISIONS.md). Only M0 is authorized. The owner accepts milestones and authorizes later milestones, consequential product or accounting decisions, major visual design, paid features and changes to protected controls. Escalate a decision with the recommendation, alternatives, consequences, affected requirements and exact action awaiting approval.
+Read the [master plan](docs/architecture/MASTER_PLAN.md), [feature matrix](docs/architecture/FEATURE_MATRIX.md) and [decision register](docs/architecture/DECISIONS.md). The owner accepted M0 and M1. Workbench governs operator navigation and visual design, and Vue 3 with TypeScript is the selected frontend. The owner accepts milestones and authorizes later milestones, consequential product or accounting decisions, major visual design, paid features and changes to protected controls. Escalate a decision with the recommendation, alternatives, consequences, affected requirements and exact action awaiting approval.
 
 Keep V1, its data, infrastructure, hardware and installed application outside the V2 build and test environment. Production deployment, migrations and marketplace writes need separate authorization. Use fictional examples in public materials. Keep credentials, customer records, real store figures, local paths and private session traces out of files, issues, PRs and logs.
 
@@ -28,4 +28,4 @@ Manage routine authorized GitHub and documentation work. Open or reuse the miles
 
 Use feature branches and pull requests. Verify current required checks and the effective protections before any authorized merge. Keep `main` protected against direct pushes, deletion and force pushes. Treat a failed or unenforceable gate as an open checkpoint requirement. Preserve the candidate and describe what blocks it. Use the [M0 setup](README.md#m0-setup) for local verification.
 
-After an authorized merge, fetch and reconcile the local, remote-tracking and GitHub `main` commits. Record the verified outcome and outstanding evidence. Keep the issue and milestone open until the owner accepts M0, and wait for separate authorization before starting M1.
+After an authorized merge, fetch and reconcile the local, remote-tracking and GitHub `main` commits. Record the verified outcome and outstanding evidence. Keep the current issue and milestone open until owner acceptance. M2 requires separate authorization.

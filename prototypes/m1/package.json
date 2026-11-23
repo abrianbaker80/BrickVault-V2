@@ -1,0 +1,35 @@
+{
+  "name": "brickvault-m1-review",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.14.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "check": "vue-tsc --noEmit",
+    "build": "npm run check && vite build && node tools/portable.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "5.3.0",
+    "@fontsource/dm-serif-text": "5.3.0",
+    "lucide-static": "1.77.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "vue": "3.5.46"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.65.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "@vitejs/plugin-vue": "6.0.11",
+    "typescript": "6.0.3",
+    "vite": "8.3.8",
+    "vue-tsc": "3.3.14"
+  }
+}

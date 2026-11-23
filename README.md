@@ -2,7 +2,9 @@
 
 BrickVault V2 is a planned inventory and fulfillment system for a LEGO resale operation. BrickVault will manage stock, reservations and publishing decisions. BrickLink will remain the sales storefront.
 
-**The owner accepted the M0 engineering checkpoint.** The repository contains the architecture, project roles and checks for reviewing changes. M1 requires separate authorization. [2d88409](https://github.com/abrianbaker80/BrickVault-V2/commit/2d88409b5fb556316888d1282c08968ba5619c70)
+**The owner accepted M1 and selected Workbench for navigation and visual design and Vue 3 with TypeScript for the frontend.** The review guide lets you try Workbench and Ledger and compare their React and Vue inventory registers. M2 requires separate owner authorization. [M1 review guide](prototypes/m1/REVIEW.md) · [Accepted M1 comparison](https://github.com/abrianbaker80/BrickVault-V2/commit/d5a3264dcf3650bbf91fb98a132bb31b74c9fb92)
+
+The owner previously accepted the M0 engineering checkpoint for the repository, project roles and verification tools. [M0 checkpoint](https://github.com/abrianbaker80/BrickVault-V2/commit/2d88409b5fb556316888d1282c08968ba5619c70)
 
 ## M0 setup
 
