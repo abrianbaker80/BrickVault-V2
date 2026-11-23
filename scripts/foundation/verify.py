@@ -476,7 +476,9 @@ def verify(port):
             wrong = lab / "recovery" / "different.agekey"
             execute([BIN / ("age-keygen" + EXT), "-o", wrong])
             expected_failure(lambda: restore(s, archive, wrong, "bv_m2_broken"))
-            stop(s)
+            from verify_offhost import verify_offhost
+
+            verify_offhost(s, lab, port + 6, before, Browser)
             qualify_gateway_error(s)
             rescue = init(lab / "second-runtime", lab / "second-recovery", port + 6)
             target = "bv_m2_restore_qualified"

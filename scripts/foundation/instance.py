@@ -290,7 +290,7 @@ def password_hash(password):
     return execute([BIN / ("caddy" + EXT), "hash-password"], content=password + "\n")
 
 
-def init(directory, recovery, port):
+def init(directory, recovery, port, *, release=RELEASE):
     directory = Path(directory).resolve()
     recovery = Path(recovery).resolve()
     if (
@@ -310,7 +310,8 @@ def init(directory, recovery, port):
     for number in range(port, port + 3):
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", number))
-    if not (RELEASE / "BrickVault.Api.dll").is_file():
+    release = Path(release).resolve()
+    if not (release / "BrickVault.Api.dll").is_file():
         raise ValueError("Build the release before initializing an instance.")
     if recovery.exists() and any(
         not (entry.is_file() and re.fullmatch(r"[0-9a-f]{32}\.agekey", entry.name))
@@ -342,7 +343,7 @@ def init(directory, recovery, port):
     }
     write_private(directory / "instance.json", json.dumps(config, indent=2) + "\n")
     write_private(directory / "owner-login.txt", "operator\n" + password + "\n")
-    shutil.copytree(RELEASE, directory / "release")
+    shutil.copytree(release, directory / "release")
     inst = Instance(directory)
     pw = directory / "initdb.pw"
     write_private(pw, config["roles"]["bv_cluster_admin"] + "\n")

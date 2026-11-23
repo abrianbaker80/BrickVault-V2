@@ -8,6 +8,8 @@
 
 - Independent review verified workspace-bound retries, certificate trust scoped to the Workbench browser, database-aware readiness, credential rotation, and recovery into an independent cluster. The production hosting decision remains open. [Review record](https://github.com/abrianbaker80/BrickVault-V2/pull/7#issuecomment-7092744733)
 
+- Added an off-host recovery point containing both the encrypted database and its exact release. Publication verifies a fresh provider download. Recovery restores into a new instance with its own credentials and identity for future backups.
+
 ## M1 design and framework comparison accepted
 
 - Added two interactive visual directions with fictional inventory, receiving, fulfillment and recovery records. Both native inventory registers share the same task tests. [M1 review](prototypes/m1/REVIEW.md)
