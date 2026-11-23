@@ -21,6 +21,7 @@ from instance import Instance, write_private
 from offhost import (
     FORMAT,
     HEX,
+    POINT,
     RecoveryError,
     capture_transport,
     failure_reason,
@@ -275,6 +276,40 @@ def publish_point(points, point, route, context, settings):
     return receipt
 
 
+def inspect_exports(points, settings, status, context):
+    """Rotate through a bounded number of historical exports after completing today's capture."""
+    export = settings.get("mirrorExport")
+    if not export:
+        return
+    limit = settings.get("exportAuditLimit", 8)
+    if type(limit) is not int or not 1 <= limit <= 128:
+        raise RecoveryError("The export audit limit must be between 1 and 128.")
+    names = sorted(
+        folder.name for folder in points.iterdir() if POINT.fullmatch(folder.name)
+    )
+    cursor = status.get("exportAuditCursor", "")
+    ordered = [name for name in names if name > cursor] + [
+        name for name in names if name <= cursor
+    ]
+    failures = status.setdefault("exportErrors", {})
+    for point in ordered[:limit]:
+        folder = points / point
+        status["exportAuditCursor"] = point
+        if (folder / "pending.json").exists():
+            continue
+        try:
+            receipt = read_receipt(folder / (point + ".json"), point)
+            if receipt.get("publicationContext") == context:
+                export_point(folder / (point + ".age"), receipt, export)
+            failures.pop(point, None)
+        except (OSError, ValueError, KeyError, RecoveryError) as exc:
+            failures[point] = failure_reason(exc)
+    if failures:
+        raise RecoveryError(
+            f"{len(failures)} historical mirror export(s) require attention."
+        )
+
+
 def run(settings, directory, *, before_change=False):
     points = directory / "points"
     points.mkdir(mode=0o700, exist_ok=True)
@@ -326,6 +361,8 @@ def run(settings, directory, *, before_change=False):
                         verifiedContext=context,
                     )
                     (points / point / "pending.json").unlink()
+                update_status(directory, status, activity="verify-mirror-exports")
+                inspect_exports(points, settings, status, context)
                 pending_count = sum(1 for _ in points.glob("*/pending.json"))
                 update_status(
                     directory,
@@ -364,6 +401,7 @@ def health(directory, max_age):
                     "verifiedAt",
                     "retainedPending",
                     "lastError",
+                    "exportErrors",
                 )
             }
             | {"fresh": fresh}

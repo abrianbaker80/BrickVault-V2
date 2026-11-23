@@ -59,7 +59,16 @@ def matching_receipt(file, receipt):
     if file.is_symlink():
         raise RecoveryError("A receipt path is a symbolic link.")
     current = read_receipt(file, receipt["point"])
-    if current["sha256"] != receipt["sha256"] or current["bytes"] != receipt["bytes"]:
+    fields = (
+        "format",
+        "point",
+        "sha256",
+        "bytes",
+        "sourceInstance",
+        "workspaceId",
+        "publicationContext",
+    )
+    if any(current.get(field) != receipt.get(field) for field in fields):
         raise RecoveryError("Existing receipt conflicts with the verified point.")
 
 

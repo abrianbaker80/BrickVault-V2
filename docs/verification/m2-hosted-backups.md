@@ -50,14 +50,14 @@ Use an owner-only local JSON file with `state` (a dedicated private directory), 
 
 ## Prove recovery on another Linux machine
 
-Use a fresh controller directory for every download. The actual archive is fetched again from the configured cloud destination and checked against the controller's independently retained receipt.
+On a separate supported Linux machine, install the matching foundation tools. Use the public signing-key and lineage file held in recovery custody, together with independent provider access. The following command discovers the newest signed point in the provider and authenticates the returned archive and signed receipt in a fresh private directory. For a manual provider download, the same files can be verified offline. [Signed cloud recovery instructions](m2-cloud-receipts.md)
 
 ```sh
-python3 /opt/brickvault-v2-backup/scripts/foundation/nightly.py download \
-  --config /etc/brickvault-v2-backup/controller.json --output "$fresh_download"
+python3 scripts/foundation/cloud_receipt.py download \
+  --transport "$recovery_transport" --trust "$public_trust" --output "$download"
 ```
 
-Transfer the downloaded archive and receipt to private recovery storage. On a separate supported Linux machine, install the matching foundation tools. Set `$point` to the downloaded point name, `$download` to its directory and `$identity` to the independently held age identity. Choose a fresh instance directory, a separate recovery-key directory and three available consecutive loopback ports.
+Set `$point` to the authenticated point name and `$identity` to the independently held age identity. Choose a fresh instance directory, a separate recovery-key directory and three available consecutive loopback ports.
 
 ```sh
 python3 scripts/foundation/offhost.py recover \

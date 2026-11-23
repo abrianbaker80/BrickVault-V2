@@ -161,27 +161,75 @@ class NightlyChecks(unittest.TestCase):
         os.name == "posix" and hasattr(os, "geteuid") and os.geteuid() == 0,
         "requires a Linux controller account",
     )
-    def test_controller_repairs_existing_export_bytes_from_an_independent_source(self):
+    def test_controller_repairs_historical_export_while_capturing_a_new_point(self):
         import grp
 
         root = self.directory / "export"
         root.mkdir(mode=0o750)
-        source = self.directory / "source.age"
+        export = {"directory": str(root), "group": grp.getgrgid(os.getgid()).gr_name}
+        settings = self.settings | {"mirrorExport": export, "exportAuditLimit": 1}
+        old = (nightly.utcnow() - timedelta(days=1)).strftime(
+            "%Y%m%dT%H%M%SZ-"
+        ) + uuid.uuid4().hex
+        old_dir = self.directory / "points" / old
+        old_dir.mkdir(parents=True)
+        receipt = self.receipt | {"point": old, "publicationContext": "test-context"}
+        source = old_dir / (old + ".age")
         source.write_bytes(self.content)
-        config = {"directory": str(root), "group": grp.getgrgid(os.getgid()).gr_name}
-        backup_mirror.export_point(source, self.receipt, config)
-        file = root / self.point / (self.point + ".age")
+        (old_dir / (old + ".json")).write_text(json.dumps(receipt))
+        backup_mirror.export_point(source, receipt, export)
+        file = root / old / (old + ".age")
         file.write_bytes(b"damaged")
         self.assertEqual(source.read_bytes(), self.content)
-        backup_mirror.export_point(source, self.receipt, config)
-        self.assertEqual(file.read_bytes(), self.content)
-        self.assertEqual(
-            [f.read_bytes() for f in (self.directory / "quarantine").iterdir()],
-            [b"damaged"],
-        )
-        file.unlink()
-        backup_mirror.export_point(source, self.receipt, config)
-        self.assertEqual(file.read_bytes(), self.content)
+
+        def capture(points, settings, context):
+            directory = points / self.point
+            directory.mkdir()
+            return self.receive(directory)
+
+        with (
+            patch.object(nightly, "capture_transport"),
+            patch.object(nightly, "binding", return_value="test-context"),
+            patch.object(nightly, "capture", side_effect=capture) as captures,
+            patch.object(nightly, "publish_verified_copy"),
+            patch.object(nightly, "publish_signed"),
+            redirect_stdout(io.StringIO()),
+        ):
+            nightly.run(settings, self.directory)
+            self.assertEqual(file.read_bytes(), self.content)
+            self.assertEqual(
+                [f.read_bytes() for f in (old_dir / "quarantine").iterdir()],
+                [b"damaged"],
+            )
+            self.assertEqual(
+                (root / self.point / (self.point + ".age")).read_bytes(), self.content
+            )
+            self.assertEqual(
+                nightly.status_data(self.directory)["exportAuditCursor"], old
+            )
+            file.unlink()
+            settings["exportAuditLimit"] = 8
+            nightly.run(settings, self.directory)
+            self.assertEqual(file.read_bytes(), self.content)
+            local_receipt = root / old / (old + ".json")
+            conflict = json.dumps(receipt | {"sourceInstance": str(uuid.uuid4())})
+            local_receipt.write_text(conflict)
+            self.point = nightly.utcnow().strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex
+            self.receipt["point"] = self.point
+            with self.assertRaises(RecoveryError):
+                nightly.run(settings, self.directory, before_change=True)
+            self.assertEqual(local_receipt.read_text(), conflict)
+            self.assertEqual(
+                nightly.status_data(self.directory)["lastPoint"], self.point
+            )
+            self.assertIn(old, nightly.status_data(self.directory)["exportErrors"])
+            self.assertEqual(
+                (root / self.point / (self.point + ".age")).read_bytes(), self.content
+            )
+            local_receipt.write_text(json.dumps(receipt))
+            nightly.run(settings, self.directory)
+            self.assertEqual(nightly.status_data(self.directory)["exportErrors"], {})
+            self.assertEqual(captures.call_count, 2)
 
     def test_workstation_preserves_last_verified_point_after_repeated_failures(self):
         config = {
