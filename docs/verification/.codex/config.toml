@@ -10,3 +10,6 @@ memories = false
 [memories]
 use_memories = false
 generate_memories = false
+
+[skills]
+include_instructions = false
