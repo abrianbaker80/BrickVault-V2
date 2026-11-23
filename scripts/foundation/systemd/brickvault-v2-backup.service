@@ -16,5 +16,5 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/brickvault-v2-backup /var/lib/brickvault-v2-mirror-export
+ReadWritePaths=/var/lib/brickvault-v2-backup -/var/lib/brickvault-v2-mirror-export
 Environment=PYTHONDONTWRITEBYTECODE=1

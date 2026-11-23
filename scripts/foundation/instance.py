@@ -45,6 +45,7 @@ def child_env(*, desktop=False):
         "PROCESSOR_ARCHITECTURE",
         "NUMBER_OF_PROCESSORS",
         "PROGRAMFILES",
+        "PROGRAMDATA",
         "PROGRAMFILES(X86)",
     }
     if desktop:

@@ -1,0 +1,5 @@
+# Keep application-initiated connections on the guest. Established client and SSH replies can leave.
+add table inet brickvault_egress
+add chain inet brickvault_egress output { type filter hook output priority filter; policy accept; }
+flush chain inet brickvault_egress output
+add rule inet brickvault_egress output meta skuid "brickvault" oifname != "lo" ct state new counter reject with icmpx type admin-prohibited

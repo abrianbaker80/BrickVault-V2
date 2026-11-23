@@ -1,7 +1,8 @@
 [Unit]
 Description=BrickVault private Workbench, database and reference worker
 Wants=network-online.target
-After=network-online.target
+Requires=brickvault-egress.service
+After=network-online.target brickvault-egress.service
 
 [Service]
 Type=simple

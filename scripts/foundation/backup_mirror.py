@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 
 from instance import child_env, write_private
 from offhost import (
@@ -27,8 +28,43 @@ from offhost import (
 from runtime import exclusive
 
 
+def verify_or_repair(file, receipt, produce, quarantine):
+    """Verify every existing archive. Preserve damaged bytes before atomic replacement."""
+    if file.is_symlink():
+        raise RecoveryError("An archive path is a symbolic link.")
+    if file.exists():
+        try:
+            verify_file(file, receipt)
+            return False
+        except RecoveryError:
+            pass
+    with tempfile.TemporaryDirectory(dir=file.parent) as temporary:
+        candidate = Path(temporary) / "received.age"
+        produce(candidate)
+        verify_file(candidate, receipt)
+        if file.exists():
+            quarantine.mkdir(mode=0o700, parents=True, exist_ok=True)
+            preserved = quarantine / (file.name + "." + uuid.uuid4().hex + ".damaged")
+            with file.open("rb") as source, preserved.open("xb") as target:
+                shutil.copyfileobj(source, target)
+                target.flush()
+                os.fsync(target.fileno())
+            os.replace(candidate, file)
+        else:
+            os.link(candidate, file)
+    return True
+
+
+def matching_receipt(file, receipt):
+    if file.is_symlink():
+        raise RecoveryError("A receipt path is a symbolic link.")
+    current = read_receipt(file, receipt["point"])
+    if current["sha256"] != receipt["sha256"] or current["bytes"] != receipt["bytes"]:
+        raise RecoveryError("Existing receipt conflicts with the verified point.")
+
+
 def export_point(source, receipt, target):
-    """Publish an immutable, read-only export for the dedicated mirror account on the controller."""
+    """Offer an independent verified ciphertext copy to the read-only mirror account."""
     import grp
 
     group = grp.getgrnam(target["group"]).gr_gid
@@ -42,29 +78,33 @@ def export_point(source, receipt, target):
         raise RecoveryError(
             "Use a root-owned mirror export directory with no group or public writes."
         )
+
+    def copy_encrypted(destination):
+        shutil.copyfile(source, destination)
+        os.chown(destination, 0, group)
+        destination.chmod(0o640)
+
     point = validate_point(receipt["point"])
     final = root / point
     if final.exists():
-        current = read_receipt(final / (point + ".json"), point)
-        if (
-            current["sha256"] != receipt["sha256"]
-            or current["bytes"] != receipt["bytes"]
-        ):
-            raise RecoveryError(
-                "Existing encrypted mirror export conflicts with the verified point."
-            )
+        matching_receipt(final / (point + ".json"), receipt)
+        verify_or_repair(
+            final / (point + ".age"),
+            receipt,
+            copy_encrypted,
+            source.parent / "quarantine",
+        )
         return
     with tempfile.TemporaryDirectory(dir=root) as temporary:
         staged = Path(temporary) / "point"
         staged.mkdir()
         encrypted = staged / (point + ".age")
-        # Both directories are on the controller's backup filesystem. One inode holds the ciphertext.
-        os.link(source, encrypted)
+        copy_encrypted(encrypted)
+        verify_file(encrypted, receipt)
         receipt_file = staged / (point + ".json")
         write_private(receipt_file, json.dumps(receipt, sort_keys=True))
-        for file in (receipt_file, encrypted):
-            os.chown(file, 0, group)
-            file.chmod(0o640)
+        os.chown(receipt_file, 0, group)
+        receipt_file.chmod(0o640)
         os.chown(staged, 0, group)
         staged.chmod(0o750)
         staged.rename(final)
@@ -85,6 +125,39 @@ def serve(directory):
             shutil.copyfileobj(file, sys.stdout.buffer)
     else:
         raise RecoveryError("Unknown mirror request.")
+
+
+def sync_point(ssh, target, state, receipt):
+    point = validate_point(receipt["point"])
+    if (
+        receipt.get("format") != FORMAT
+        or not HEX.fullmatch(str(receipt.get("sha256")))
+        or type(receipt.get("bytes")) is not int
+        or receipt["bytes"] <= 0
+    ):
+        raise RecoveryError("Mirror response contained an invalid receipt.")
+    metadata = target / (point + ".json")
+    if metadata.exists():
+        matching_receipt(metadata, receipt)
+
+    def download(destination):
+        with destination.open("xb") as output:
+            subprocess.run(
+                [*ssh, "get " + point],
+                env=child_env(),
+                stdin=subprocess.DEVNULL,
+                stdout=output,
+                stderr=subprocess.DEVNULL,
+                check=True,
+                timeout=3600,
+            )
+
+    copied = verify_or_repair(
+        target / (point + ".age"), receipt, download, state / "quarantine"
+    )
+    if not metadata.exists():
+        write_private(metadata, json.dumps(receipt, sort_keys=True))
+    return copied
 
 
 def catch_up(config):
@@ -121,63 +194,34 @@ def catch_up(config):
             )
             copied = 0
             latest = None
-            cache = state / "verified-files.json"
-            checked = json.loads(cache.read_text()) if cache.exists() else {}
+            failed = []
             for line in response.stdout.splitlines():
-                receipt = json.loads(line)
-                point = validate_point(receipt["point"])
-                if (
-                    receipt.get("format") != FORMAT
-                    or not HEX.fullmatch(str(receipt.get("sha256")))
-                    or type(receipt.get("bytes")) is not int
-                    or receipt["bytes"] <= 0
-                ):
-                    raise RecoveryError("Mirror response contained an invalid receipt.")
-                file = target / (point + ".age")
-                meta = target / (point + ".json")
-                if not file.exists():
-                    with tempfile.TemporaryDirectory(dir=target) as temporary:
-                        scratch = Path(temporary) / "received.age"
-                        with scratch.open("xb") as output:
-                            subprocess.run(
-                                [*ssh, "get " + point],
-                                env=child_env(),
-                                stdin=subprocess.DEVNULL,
-                                stdout=output,
-                                stderr=subprocess.DEVNULL,
-                                check=True,
-                                timeout=3600,
-                            )
-                        verify_file(scratch, receipt)
-                        os.link(scratch, file)
-                    copied += 1
-                stamp = file.stat()
-                mark = [receipt["sha256"], stamp.st_size, stamp.st_mtime_ns]
-                if checked.get(point) != mark:
-                    verify_file(file, receipt)
-                    checked[point] = mark
-                if meta.exists():
-                    saved = read_receipt(meta, point)
-                    if (
-                        saved["sha256"] != receipt["sha256"]
-                        or saved["bytes"] != receipt["bytes"]
-                    ):
-                        raise RecoveryError(
-                            "Local receipt conflicts with the controller."
-                        )
-                else:
-                    write_private(meta, json.dumps(receipt, sort_keys=True))
-                latest = point
-            if latest is None:
+                try:
+                    receipt = json.loads(line)
+                    copied += int(sync_point(ssh, target, state, receipt))
+                    latest = receipt["point"]
+                except (
+                    OSError,
+                    RecoveryError,
+                    ValueError,
+                    KeyError,
+                    subprocess.SubprocessError,
+                ) as exc:
+                    failed.append(failure_reason(exc))
+            if latest is None and not failed:
                 raise RecoveryError("No verified controller points are available yet.")
-            write_private(cache, json.dumps(checked, sort_keys=True))
-            status.update(
-                state="verified-local",
-                point=latest,
-                verifiedAt=datetime.now(timezone.utc).isoformat(),
-                copied=copied,
-                cloudSyncVerified=False,
-            )
+            if latest:
+                status.update(
+                    point=latest,
+                    verifiedAt=datetime.now(timezone.utc).isoformat(),
+                    copied=copied,
+                    cloudSyncVerified=False,
+                )
+            if failed:
+                raise RecoveryError(
+                    f"{len(failed)} mirror point(s) require attention. {failed[0]}"
+                )
+            status["state"] = "verified-local"
             write_private(status_file, json.dumps(status))
         except Exception as exc:
             status.update(state="failed", lastError=failure_reason(exc))

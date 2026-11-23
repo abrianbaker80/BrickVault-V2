@@ -16,6 +16,7 @@ import uuid
 from zoneinfo import ZoneInfo
 
 from backup_mirror import export_point
+from cloud_receipt import download_signed, publish_signed
 from instance import Instance, write_private
 from offhost import (
     FORMAT,
@@ -29,7 +30,6 @@ from offhost import (
     point_time,
     publish_verified_copy,
     read_receipt,
-    transport,
     validate_point,
     verify_file,
 )
@@ -128,7 +128,20 @@ def capture_command(settings):
 
 
 def binding(settings, route):
+    mirror = settings.get("mirrorExport")
+    mirror_identity = None
+    if mirror is not None:
+        folder = Path(mirror["directory"])
+        group = mirror["group"]
+        if not folder.is_absolute() or not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_-]*", group
+        ):
+            raise RecoveryError(
+                "Use an absolute authorized mirror export path and a named reader group."
+            )
+        mirror_identity = [os.path.normcase(str(folder.resolve())), group]
     values = [
+        mirror_identity,
         str(uuid.UUID(settings["sourceId"])),
         str(uuid.UUID(settings["workspaceId"])),
         settings["hostKeyAlias"],
@@ -242,7 +255,7 @@ def same_day(point):
     )
 
 
-def publish_point(points, point, route, context, export):
+def publish_point(points, point, route, context, settings):
     folder = points / point
     receipt = read_receipt(folder / "pending.json", point)
     if receipt.get("publicationContext") != context:
@@ -252,10 +265,13 @@ def publish_point(points, point, route, context, export):
     local = folder / (point + ".age")
     verify_file(local, receipt)
     publish_verified_copy(route, folder, local, receipt, None)
+    publish_signed(
+        route, folder, receipt, settings["receiptSigningKey"], settings["receiptTrust"]
+    )
     receipt["verifiedAt"] = utcnow().isoformat()
     write_private(folder / (point + ".json"), json.dumps(receipt, sort_keys=True))
-    if export:
-        export_point(local, receipt, export)
+    if settings.get("mirrorExport"):
+        export_point(local, receipt, settings["mirrorExport"])
     return receipt
 
 
@@ -284,9 +300,7 @@ def run(settings, directory, *, before_change=False):
                         != context
                     ):
                         continue  # Retain earlier ciphertext without publishing it to a changed destination.
-                    receipt = publish_point(
-                        points, point, route, context, settings.get("mirrorExport")
-                    )
+                    receipt = publish_point(points, point, route, context, settings)
                     update_status(
                         directory,
                         status,
@@ -303,9 +317,7 @@ def run(settings, directory, *, before_change=False):
                     update_status(directory, status, activity="capture-guest")
                     point = capture(points, settings, context)
                     update_status(directory, status, activity="verify-provider")
-                    receipt = publish_point(
-                        points, point, route, context, settings.get("mirrorExport")
-                    )
+                    receipt = publish_point(points, point, route, context, settings)
                     update_status(
                         directory,
                         status,
@@ -363,26 +375,9 @@ def health(directory, max_age):
 
 def download(settings, directory, output, point):
     point = validate_point(point or status_data(directory)["lastPoint"])
-    folder = directory / "points" / point
-    receipt = read_receipt(folder / (point + ".json"), point)
-    provider_root = outside_checkout(output)
-    if provider_root.exists():
-        raise RecoveryError("Download requires a fresh output directory.")
-    provider_root.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=provider_root.parent) as temp:
-        scratch = Path(temp)
-        recovered = scratch / "download"
-        recovered.mkdir(mode=0o700)
-        with transport(
-            capture_transport(Path(settings["transport"]), scratch), scratch
-        ) as (base, transfer):
-            archive = recovered / (point + ".age")
-            transfer(base + point + ".age", archive)
-        verify_file(archive, receipt)
-        write_private(
-            recovered / (point + ".json"), json.dumps(receipt, sort_keys=True)
-        )
-        recovered.rename(provider_root)
+    with tempfile.TemporaryDirectory(dir=directory) as temporary:
+        route = capture_transport(Path(settings["transport"]), Path(temporary))
+        download_signed(route, output, point, settings["receiptTrust"])
     print("Verified fresh provider download " + point)
 
 

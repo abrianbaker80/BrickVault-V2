@@ -68,7 +68,7 @@ Sessions expire after eight hours. The worker purges expired session rows. Audit
 
 ## Run Workbench on the private server
 
-Give the guest a stable private DNS or mDNS name and permit the HTTPS port from authorized workstations in its firewall. Restrict administration to the management network. Install the pinned tools, reviewed Linux release and repository scripts under `/opt/brickvault-v2` as root. Create the dedicated operating system account `brickvault` with a private home at `/var/lib/brickvault-v2`. Generate the age identity on the recovery workstation. Deliver only its public recipient to the guest.
+Give the guest a stable private DNS or mDNS name and permit the HTTPS port from authorized workstations in its firewall. Restrict administration to the management network. Install nftables from the signed guest package repository. Install the pinned tools, reviewed Linux release and repository scripts under `/opt/brickvault-v2` as root. Create the dedicated operating system account `brickvault` with a private home at `/var/lib/brickvault-v2`. Generate the age identity on the recovery workstation. Deliver only its public recipient to the guest.
 
 Run these commands in a Linux shell after setting `WORKBENCH_ORIGIN` to the canonical HTTPS origin (including port 49480) and `PUBLIC_RECIPIENT` to the age public recipient. Keep the administrator's code and release files read-only to the service account.
 
@@ -77,15 +77,15 @@ cd /opt/brickvault-v2
 sudo -H -u brickvault python3 scripts/foundation/manage.py init \
   --state /var/lib/brickvault-v2/instance --port 49480 \
   --lan-origin "$WORKBENCH_ORIGIN" --recipient "$PUBLIC_RECIPIENT"
-sudo install -m 0644 scripts/foundation/systemd/brickvault-workbench.service /etc/systemd/system/
+sudo install -m 0644 scripts/foundation/systemd/brickvault-egress.service scripts/foundation/systemd/brickvault-workbench.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now brickvault-workbench.service
 sudo -H -u brickvault python3 scripts/foundation/manage.py status --state /var/lib/brickvault-v2/instance
 ```
 
-Deliver the gateway's public CA from `instance/caddy-store/pki/authorities/local/root.crt` over the authenticated administration channel. Calculate its SHA-256 over the DER certificate and verify it on the workstation. In a private workstation directory, save the CA and a `connection.json` containing `origin`, `ca` (the certificate path) and `caSha256` (the lowercase DER digest). Open Workbench with `python scripts/foundation/browser.py remote --connection <connection.json>`. The launcher trusts this CA within the dedicated Firefox profile. Deliver the operator password separately. Only the HTTPS gateway accepts application traffic from the LAN. PostgreSQL and the API listen on loopback.
+Deliver the gateway's public CA from `instance/caddy-store/pki/authorities/local/root.crt` over the authenticated administration channel. Calculate its SHA-256 over the DER certificate and verify it on the workstation. In a private workstation directory, save the CA and a `connection.json` containing `origin`, `ca` (the certificate path) and `caSha256` (the lowercase DER digest). Open Workbench with `python scripts/foundation/browser.py remote --connection <connection.json>`. The launcher trusts this CA within the dedicated Firefox profile. Deliver the operator password separately. Only the HTTPS gateway accepts application traffic from the LAN. PostgreSQL and the API listen on loopback. A dedicated nftables chain limits new connections from the application account to loopback. Established workstation replies and operating system updates continue normally.
 
-Use systemd to start and stop the supervised service. Before a credential rotation or other maintenance requiring a stopped instance, stop the unit, use the management command, then restart the unit and verify readiness and sign-in. Capture a fresh recovery point before a migration or bulk change. [Nightly backup operations](m2-hosted-backups.md)
+Use systemd to start and stop the supervised service. Before a credential rotation or other maintenance requiring a stopped instance, stop the unit, use the management command, then restart the unit and verify readiness and sign-in. Capture a fresh recovery point before a migration or bulk change. [Nightly backup operations](m2-hosted-backups.md) · [Recovery after controller loss](m2-cloud-receipts.md)
 
 ## Back up and restore to a second instance
 
