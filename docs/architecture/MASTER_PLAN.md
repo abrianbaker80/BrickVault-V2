@@ -1,6 +1,6 @@
 # BrickVault V2 master plan
 
-The owner accepted M0 and M1 and approved a public source repository with fresh history. The deployed application, store data and private supporting records remain restricted. D01–D07 define the approved direction. Release scope remains provisional under D03. M2–M9 require separate authorization.
+The owner accepted M0 and M1, approved public source with fresh history and authorized the isolated M2 technical foundation. Runtime data and private supporting records remain restricted. D01–D08 govern the work. D03 leaves the production release scope provisional.
 
 ## Recommendation
 
@@ -56,7 +56,7 @@ Before freezing the initial production release, the Architect reviews the follow
 
 Before provisioning any V2 server, measure Proxmox CPU/RAM/storage headroom and contention, document network/DNS/TLS and fixed provider egress, isolation and secrets, independent backup/restore, power/storage/hosting costs and owner approval. M0 provisions no guest.
 
-The browser uses authenticated, same-origin typed HTTPS APIs. Commands carry a stable request ID, expected business revision and precise target IDs; reads carry scope, as-of time and completeness. The server contains Catalog/Receiving, Stock/Cost, Orders/Fulfillment, Pricing and Marketplace modules. Only stock transactions move units. The BrickLink adapter owns OAuth, protocol interpretation, observations, budget and external receipts. The worker and HTTP module share transactional state. An order notification is an optional hint. Polling remains operational without exposing any public callback endpoint.
+M2 serves the Vue Workbench and versioned API from the same HTTPS origin. Reference commands carry a stable request ID, target and expected revision. Register reads return scope, as-of time and completeness. Catalog, location, command receipt, audit and background work share PostgreSQL transactions. The planned receiving, stock/cost, orders/fulfillment, pricing and marketplace modules build on that foundation. Under the planned contract, only stock transactions move units. The BrickLink adapter owns OAuth, protocol interpretation, observations, budget and external receipts. An order notification is an optional hint alongside polling.
 
 Limit the private app to a private network/VPN with TLS, one owner identity (passkey or independently authenticated private reverse proxy), session expiry, CSRF/origin checks and separate device credentials. No browser or hardware utility gets direct DB or BrickLink credentials. Keep authenticated production and simulator endpoints segregated by environment, deployment and secret access; never rely on a UI switch to protect production. Log correlation IDs and redacted errors. Restricted order/shipping fields expire under a reviewed policy. Backup keys and restore credentials require an independent recovery path.
 
@@ -93,7 +93,7 @@ Carry the accepted interactions into production qualification. Check long names 
 
 ## Milestones and acceptance
 
-Phase 0 recorded the architecture review. The owner accepted M0 and M1. The numbered Builder milestones below intentionally bring Git and integration contracts forward. A status of **Planned** grants no authority to begin. Dependencies are acceptance dependencies except for explicitly approved non-production contract work. The feature matrix allocates individual requirements. All gates include independent inspection, actual test evidence and the GitHub checkpoint described in the decision register.
+Phase 0 recorded the architecture review. The owner accepted M0 and M1. M2 is in progress. M3 and later milestones are planned. The Architect sequences work within the approved plan according to its dependencies. Routine transitions require a documented evidence checkpoint. Major decisions follow D08. The feature matrix allocates individual requirements. Checkpoints include independent inspection, actual test evidence and the GitHub record described in the decision register.
 
 | Milestone / dependencies | Complete workflow and focused evidence | Failure, owner gate and stop |
 |---|---|---|
@@ -122,7 +122,9 @@ Phase 0 recorded the architecture review. The owner accepted M0 and M1. The numb
 | Physical custody at transition and ancillary V1 workflows | Recount/review designated high-risk lots and any active pick/packed parcel. Approve a retention or replacement plan for every used capability before retirement. |
 | Repository protection and project-scoped orchestration | Verify enforceable rules and a successful required check on the public repository. Witness the full Insiders sidebar delegation, correction, review and approval-pause exercise. |
 
-**Current authority.** The owner accepted M1 at the reviewed comparison checkpoint. Starting M2, provisioning production infrastructure, changing V1, running migrations and performing live marketplace operations each require separate authorization. [Accepted M1 comparison](https://github.com/abrianbaker80/BrickVault-V2/commit/d5a3264dcf3650bbf91fb98a132bb31b74c9fb92) · [Owner decision](https://github.com/abrianbaker80/BrickVault-V2/issues/4#issuecomment-7091249610)
+## M2 execution checkpoint
+
+The isolated M2 Workbench covers sign-in, persistent operator-authored catalog and location records, audit and job diagnostics, encrypted logical backup and restore to a fresh database. T01–T06 identify where independent evidence or production decisions remain due. Production Proxmox commissioning requires measured capacity, network isolation, recovery design and cost. Licensed catalog acquisition, physical device jobs, live provider operations, migration of V1 data and cutover retain their respective gates. [Foundation runbook](../verification/m2-foundation.md) · [Feature matrix](FEATURE_MATRIX.md) · [M2 issue #6](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
 
 ## M0 execution checkpoint
 
