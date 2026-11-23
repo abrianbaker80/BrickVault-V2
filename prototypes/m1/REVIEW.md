@@ -1,6 +1,6 @@
 # M1 design and framework review
 
-**Recommendation for the operator workspace:** Workbench navigation and Vue 3 with TypeScript. The darker side rail keeps the active task visible as the register scrolls. Workbench fits another complete lot on screen at each tested desktop width. Vue rendered the same register, passed the same tasks and shipped a smaller framework-specific bundle. The owner can select either layout with either framework. [M1 issue #4](https://github.com/abrianbaker80/BrickVault-V2/issues/4)
+**The owner selected Workbench for navigation and visual design and Vue 3 with TypeScript for the frontend.** The Workbench side rail keeps the active task visible as the register scrolls, and Workbench fits another complete lot on screen at each tested desktop width. Vue rendered the same register, passed the same tasks and shipped a smaller framework-specific bundle. Both layouts and both framework implementations remain available in the comparison. [M1 issue #4](https://github.com/abrianbaker80/BrickVault-V2/issues/4)
 
 | Workbench | Ledger |
 |---|---|
@@ -9,9 +9,9 @@
 
 ## Open the review
 
-Open the **brickvault-offline-preview** artifact from the M1 pull request’s passing workflow run, extract it and open `portable.html`. The file contains both frameworks, all illustrations, typefaces and four fictional scenarios. Open **Review guide** in the app for the test routes and a reset. The framework selector applies to Inventory. Switching layouts preserves the current task.
+Open the **brickvault-offline-preview** artifact from the M1 pull request’s passing workflow run, extract it and open `portable.html`. The preview opens in Workbench with Vue selected for Inventory. The file contains both frameworks, all illustrations, typefaces and four fictional scenarios. Open **Review guide** in the app for the test routes and a reset. The framework selector applies to Inventory. Switching layouts preserves the current task.
 
-To build the same preview from the candidate branch, use Node 24.14 or later and run these commands from `prototypes/m1`.
+To build the same preview from the repository, use Node 24.14 or later and run these commands from `prototypes/m1`.
 
 ```sh
 npm ci
@@ -70,8 +70,8 @@ The local run used the production build, Chromium on Windows, one workstation an
 | 900 × 760 | [Register](evidence/workbench-900.png) · [Inspector](evidence/workbench-inspector-900.png) | [Register](evidence/ledger-900.png) · [Inspector](evidence/ledger-inspector-900.png) |
 | 150% native Chromium zoom | [Workbench](evidence/workbench-150pct.png) | [Ledger](evidence/ledger-150pct.png) |
 
-At a register width below 920 CSS pixels, inspecting a lot opens a scrollable modal so every detail and action remains reachable. At 150% zoom the 1280 × 720 browser window provided an 839 × 415 CSS-pixel content area on the test host. Both engines and layouts opened the inspector, restored row focus and kept document width inside the viewport. The zoom images capture the complete 1258 × 622 device-pixel browser surface. Owner visual preference and a human assistive-technology session remain unmeasured. Axe checks and accessibility-tree assertions cover specific machine-testable behavior. [Playwright accessibility testing](https://playwright.dev/docs/accessibility-testing)
+At a register width below 920 CSS pixels, inspecting a lot opens a scrollable modal so every detail and action remains reachable. At 150% zoom the 1280 × 720 browser window provided an 839 × 415 CSS-pixel content area on the test host. Both engines and layouts opened the inspector, restored row focus and kept document width inside the viewport. The zoom images capture the complete 1258 × 622 device-pixel browser surface. Axe checks and accessibility-tree assertions cover specific machine-testable behavior. The comparison did not include a human assistive-technology session. [Playwright accessibility testing](https://playwright.dev/docs/accessibility-testing)
 
 ## Decision
 
-The owner selects **Workbench or Ledger** for navigation and visual design and **Vue or React** for the frontend. The independent Reviewer cleared the corrected order confirmations, field validation and partial totals. The pull request tracks CI and the downloadable offline preview. The issue records the selection and milestone acceptance after owner review. [M1 pull request](https://github.com/abrianbaker80/BrickVault-V2/pull/5) The interactive sample establishes design evidence using fictional data. M2 has its own authorization gate.
+The owner accepted **M1 (U01–U03)** at the reviewed checkpoint and approved Workbench and Vue 3 with TypeScript for the operator workspace. The independent Reviewer cleared the corrected order confirmations, field validation and partial totals. The pull request tracks CI and the downloadable offline preview. The interactive sample establishes design evidence using fictional data. Starting M2 requires separate owner authorization. [Accepted M1 comparison](https://github.com/abrianbaker80/BrickVault-V2/commit/d5a3264dcf3650bbf91fb98a132bb31b74c9fb92) · [M1 owner decision](https://github.com/abrianbaker80/BrickVault-V2/issues/4#issuecomment-7091249610) · [M1 pull request](https://github.com/abrianbaker80/BrickVault-V2/pull/5)

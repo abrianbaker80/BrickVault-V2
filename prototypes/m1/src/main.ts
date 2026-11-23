@@ -47,7 +47,7 @@ function readRoute(): Route {
   return {
     view: Object.hasOwn(views, view) ? view : 'inventory',
     design: params.get('design') === 'ledger' ? 'ledger' : 'workbench',
-    engine: params.get('engine') === 'vue' ? 'vue' : 'react'
+    engine: params.get('engine') === 'react' ? 'react' : 'vue'
   }
 }
 function href(next: Route) {
