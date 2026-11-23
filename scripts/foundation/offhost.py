@@ -144,14 +144,17 @@ class TransportRoute:
     config: Path
     base: str
     password_command: str
+    snapshot: Path
+    config_sha256: str
 
-    def publication_context(self, instance):
-        # Rclone may legitimately refresh encrypted token bytes. Identify the selected
-        # private route without exposing its local paths or reading those credentials.
+    def publication_context(self, instance, mirror):
+        # A replaced config can map the same alias to another account, even at the original path.
         values = [
             os.path.normcase(str(self.descriptor)),
             os.path.normcase(str(self.config)),
+            self.config_sha256,
             self.base,
+            os.path.normcase(str(outside_checkout(mirror))) if mirror else None,
             str(uuid.UUID(instance.config["id"])),
             str(uuid.UUID(instance.config.get("workspaceId", instance.config["id"]))),
         ]
@@ -160,7 +163,7 @@ class TransportRoute:
         ).hexdigest()
 
 
-def read_transport(descriptor):
+def capture_transport(descriptor, scratch):
     descriptor = outside_checkout(descriptor)
     route = json.loads(descriptor.read_text(encoding="utf-8"))
     if not isinstance(route, dict) or any(
@@ -180,21 +183,24 @@ def read_transport(descriptor):
         portable_path(prefix)
     base = match[1] + ":" + (prefix + "/" if prefix else "") + "BrickVault-V2/"
     config = outside_checkout(route["config"])
-    return TransportRoute(descriptor, config, base, route["password_command"])
+    snapshot = scratch / "captured-transport.conf"
+    # Capture once. Each rclone invocation gets the exact bytes whose digest binds the receipt.
+    with config.open("rb") as source, snapshot.open("xb") as captured:
+        header = source.read(256)
+        if not re.search(rb"(?m)^RCLONE_ENCRYPT_V0:\r?$", header):
+            raise RecoveryError(
+                "A password-protected rclone configuration is required."
+            )
+        captured.write(header)
+        shutil.copyfileobj(source, captured)
+    return TransportRoute(
+        descriptor, config, base, route["password_command"], snapshot, digest(snapshot)
+    )
 
 
 @contextmanager
 def transport(route, scratch):
-    isolated = scratch / "transfer.conf"
-    # rclone can refresh its active config. Only an encrypted copy ever enters this scratch directory.
-    with route.config.open("rb") as source:
-        if not re.search(rb"(?m)^RCLONE_ENCRYPT_V0:\r?$", source.read(256)):
-            raise RecoveryError(
-                "A password-protected rclone configuration is required."
-            )
-        source.seek(0)
-        with isolated.open("xb") as target:
-            shutil.copyfileobj(source, target)
+    isolated = scratch / "active-transport.conf"
     program = rclone_program()
     command = [
         program,
@@ -214,6 +220,8 @@ def transport(route, scratch):
     ]
 
     def transfer(source, destination):
+        # Isolate rclone's own credential refreshes from the immutable snapshot and from the next call.
+        shutil.copyfile(route.snapshot, isolated)
         result = subprocess.run(
             [*command, "copyto", "--immutable", "--checksum", source, destination],
             env=child_env(),
@@ -245,11 +253,11 @@ def release_manifest(instance, folder):
             instance.pg_stop()
 
 
-def make_set(instance, receipt_dir, point, route):
+def make_set(instance, receipt_dir, point, route, mirror):
     with tempfile.TemporaryDirectory(dir=instance.path) as temporary:
         folder = Path(temporary)
         with operation(instance):
-            context = route.publication_context(instance)
+            context = route.publication_context(instance, mirror)
             database = release_manifest(instance, folder)
             meta = {
                 "format": FORMAT,
@@ -331,15 +339,19 @@ def publish(args):
         paths.append(outside_checkout(args.mirror))
     disjoint(*paths)
     managed_dir(receipts, "receipts")
-    route = read_transport(args.transport)
-    instance = Instance(source)
+    with tempfile.TemporaryDirectory(dir=receipts) as temp:
+        route = capture_transport(args.transport, Path(temp))
+        publish_point(args, Instance(source), receipts, route)
+
+
+def publish_point(args, instance, receipts, route):
     if args.resume:
         point = validate_point(args.resume)
     else:
         point = (
             datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex
         )
-        make_set(instance, receipts, point, route)
+        make_set(instance, receipts, point, route, args.mirror)
     print("Prepared recovery point " + point, flush=True)
     pending = receipts / (point + ".pending.json")
     final = receipts / (point + ".json")
@@ -348,7 +360,9 @@ def publish(args):
     # An unbound first-format receipt remains suitable for recovery by its trusted digest.
     # Publication requires the captured workspace and route, even after a previous success.
     with operation(instance):
-        if receipt.get("publicationContext") != route.publication_context(instance):
+        if receipt.get("publicationContext") != route.publication_context(
+            instance, args.mirror
+        ):
             raise RecoveryError(
                 "This point is unbound or belongs to a different source or transport. Capture a new point for this destination."
             )
@@ -449,7 +463,10 @@ def recover(args):
     state.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=state.parent) as temporary:
         scratch = private_dir(temporary)
-        with transport(read_transport(args.transport), scratch) as (base, transfer):
+        with transport(capture_transport(args.transport, scratch), scratch) as (
+            base,
+            transfer,
+        ):
             transfer(base + point + ".age", scratch / "remote.age")
         verify_file(scratch / "remote.age", receipt)
         execute(

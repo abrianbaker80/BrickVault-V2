@@ -95,6 +95,41 @@ def verify_offhost(source, lab, port, expected, client_type):
     wrong_route = retry.copy()
     wrong_route[wrong_route.index("--transport") + 1] = other_route
     rejected(wrong_route)
+    wrong_mirror = retry.copy()
+    wrong_mirror[wrong_mirror.index("--mirror") + 1] = folder / "other-mirror"
+    rejected(wrong_mirror)
+    if (folder / "other-mirror").exists():
+        raise AssertionError("A retry redirected the local mirror.")
+    original_profile = config.read_bytes()
+    other_store = folder / "another-provider"
+    other_store.mkdir()
+    changed_profile = folder / "changed.conf"
+    write_private(
+        changed_profile, "[sample]\ntype = alias\nremote = " + str(other_store) + "\n"
+    )
+    subprocess.run(
+        [
+            rclone_program(),
+            "--config",
+            changed_profile,
+            "--password-command",
+            password_command,
+            "config",
+            "encryption",
+            "set",
+        ],
+        check=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        config.write_bytes(changed_profile.read_bytes())
+        rejected(retry)
+    finally:
+        config.write_bytes(original_profile)
+    if any(other_store.iterdir()):
+        raise AssertionError("A repointed alias received a previous recovery point.")
     alternate = init(folder / "unrelated-instance", folder / "unrelated-keys", port)
     wrong_source = retry.copy()
     wrong_source[wrong_source.index("--state") + 1] = alternate.path
