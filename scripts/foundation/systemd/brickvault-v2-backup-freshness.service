@@ -1,0 +1,13 @@
+[Unit]
+Description=Check the age of the last verified BrickVault V2 backup
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/brickvault-v2-backup/scripts/foundation/nightly.py status --config /etc/brickvault-v2-backup/controller.json
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/brickvault-v2-backup
+Environment=PYTHONDONTWRITEBYTECODE=1

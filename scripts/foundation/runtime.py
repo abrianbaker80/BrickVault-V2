@@ -3,19 +3,20 @@
 import base64
 import hashlib
 import hmac
+import http.client
 import contextlib
 import os
 from pathlib import Path
 import secrets
 import shutil
 import signal
+import socket
 import ssl
 import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
+from urllib.parse import urlsplit
 
 from instance import (
     API,
@@ -28,6 +29,7 @@ from instance import (
     UI,
     WIN,
     child_env,
+    lan_endpoint,
     password_hash,
     write_private,
 )
@@ -71,10 +73,17 @@ def caddyfile(s):
     storage = (s.path / "caddy-store").as_posix()
     if any(c in storage for c in ['"', "\n", "\r", "{", "}"]):
         raise ValueError("Unsupported characters in private instance path.")
+    lan_access = ""
+    access_order = ""
+    if "lanOrigin" in s.config:
+        access_order = "\n    order abort before handle"
+        lan_access = """
+    @external not remote_ip private_ranges
+    abort @external"""
     return f"""{{
     admin off
     auto_https disable_redirects
-    skip_install_trust
+    skip_install_trust{access_order}
     storage file_system {{
         root "{storage}"
     }}
@@ -83,11 +92,12 @@ def caddyfile(s):
     }}
 }}
 {s.origin} {{
-    bind 127.0.0.1
-    tls internal
+    bind {s.gateway_bind}
+    tls internal{lan_access}
     @ready {{
         method GET
         path /internal/ready
+        remote_ip 127.0.0.1
         header Authorization "Bearer {{$BV_READY_TOKEN}}"
     }}
     handle @ready {{
@@ -259,17 +269,23 @@ def supervise(s):
 def ready(s):
     try:
         context = ssl.create_default_context(cafile=str(s.ca))
-        request = urllib.request.Request(
-            s.origin + "/internal/ready",
-            headers={"Authorization": "Bearer " + readiness_token(s)},
-        )
-        opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({}),
-            urllib.request.HTTPSHandler(context=context),
-        )
-        with opener.open(request, timeout=3) as response:
-            return response.status == 204
-    except (OSError, ValueError):
+        host = urlsplit(s.origin).hostname
+        # Verify the canonical TLS name while dialing the local gateway directly.
+        with socket.create_connection(("127.0.0.1", s.port), timeout=3) as sock:
+            with context.wrap_socket(sock, server_hostname=host) as tls:
+                connection = http.client.HTTPConnection(host, s.port, timeout=3)
+                connection.sock = tls
+                try:
+                    connection.request(
+                        "GET",
+                        "/internal/ready",
+                        headers={"Authorization": "Bearer " + readiness_token(s)},
+                    )
+                    with connection.getresponse() as response:
+                        return response.status == 204
+                finally:
+                    connection.close()
+    except (OSError, ValueError, http.client.HTTPException):
         return False
 
 
@@ -352,6 +368,13 @@ def start(s):
 def stop(s):
     with operation(s):
         _stop(s)
+
+
+def configure_lan(s, origin):
+    lan_endpoint(origin, s.port)
+    with operation(s), exclusive(s.path / "supervisor.lock"):
+        s.config["lanOrigin"] = origin
+        s.save()
 
 
 def rotate(s):

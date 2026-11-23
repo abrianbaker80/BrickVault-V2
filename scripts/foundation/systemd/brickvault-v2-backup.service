@@ -1,0 +1,20 @@
+[Unit]
+Description=Capture and verify the nightly BrickVault V2 recovery point
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=2h
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/brickvault-v2-backup/scripts/foundation/nightly.py run --config /etc/brickvault-v2-backup/controller.json
+Restart=on-failure
+RestartSec=15min
+TimeoutStartSec=90min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/brickvault-v2-backup -/var/lib/brickvault-v2-mirror-export
+Environment=PYTHONDONTWRITEBYTECODE=1

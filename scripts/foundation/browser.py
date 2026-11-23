@@ -3,6 +3,8 @@
 import argparse
 import ctypes as c
 import hashlib
+import http.client
+import json
 import os
 from pathlib import Path
 import shutil
@@ -10,7 +12,7 @@ import ssl
 import subprocess
 import tempfile
 
-from instance import Instance, child_env, private_dir
+from instance import Instance, child_env, lan_endpoint, private_dir
 from runtime import start
 from setup import WIN, fetch
 
@@ -170,16 +172,15 @@ def operator_firefox():
     return dedicated
 
 
-def operator_profile(instance, firefox):
-    parent = private_dir(instance.path / "browser")
-    digest = hashlib.sha256(
-        ssl.PEM_cert_to_DER_cert(instance.ca.read_text(encoding="ascii"))
-    ).hexdigest()
-    profile = parent / digest
+def trusted_profile(parent, profile_id, ca_pem, firefox):
+    parent = private_dir(parent)
+    profile = parent / profile_id
     if not profile.exists():
         with tempfile.TemporaryDirectory(dir=parent) as temp:
             stage = Path(temp) / "profile"
-            provision(stage, instance.ca, firefox)
+            pinned_ca = Path(temp) / "root.crt"
+            pinned_ca.write_text(ca_pem, encoding="ascii")
+            provision(stage, pinned_ca, firefox)
             # NSS writes an absolute module path. Firefox regenerates it at the final location.
             (stage / "pkcs11.txt").unlink(missing_ok=True)
             (stage / "user.js").write_text(
@@ -197,6 +198,44 @@ def operator_profile(instance, firefox):
     if not (profile / "cert9.db").is_file():
         raise RuntimeError("The dedicated Firefox profile is incomplete.")
     return profile
+
+
+def operator_profile(instance, firefox):
+    ca_pem = instance.ca.read_text(encoding="ascii")
+    fingerprint = hashlib.sha256(ssl.PEM_cert_to_DER_cert(ca_pem)).hexdigest()
+    return trusted_profile(instance.path / "browser", fingerprint, ca_pem, firefox)
+
+
+def remote_connection(descriptor):
+    descriptor = descriptor.resolve()
+    route = json.loads(descriptor.read_text(encoding="utf-8-sig"))
+    origin = route["origin"]
+    hostname, port = lan_endpoint(origin)
+    ca_pem = (descriptor.parent / route["ca"]).read_text(encoding="ascii")
+    # Convert one certificate back to canonical PEM so extra certificates cannot be imported.
+    der = ssl.PEM_cert_to_DER_cert(ca_pem)
+    if (
+        ca_pem.count("-----BEGIN CERTIFICATE-----") != 1
+        or hashlib.sha256(der).hexdigest() != route["caSha256"]
+    ):
+        raise ValueError(
+            "The guest CA does not match the trusted workstation connection."
+        )
+    ca_pem = ssl.DER_cert_to_PEM_cert(der)
+    trust = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    trust.load_verify_locations(cadata=ca_pem)
+    connection = http.client.HTTPSConnection(hostname, port, timeout=5, context=trust)
+    try:
+        connection.request("GET", "/api/v1/session")
+        with connection.getresponse() as response:
+            if response.status != 401:
+                raise RuntimeError(
+                    "The selected server did not return the Workbench sign-in boundary."
+                )
+    finally:
+        connection.close()
+    profile_id = hashlib.sha256(origin.encode("ascii") + b"\0" + der).hexdigest()
+    return origin, profile_id, ca_pem
 
 
 def main():
@@ -217,16 +256,29 @@ def main():
         "--state", type=Path, default=default / "BrickVault-V2/foundation"
     )
     launch.add_argument("--firefox", type=Path)
+    remote = actions.add_parser(
+        "remote", help="Open a server-hosted Workbench using its pinned private CA."
+    )
+    remote.add_argument("--connection", type=Path, required=True)
+    remote.add_argument("--firefox", type=Path)
     args = parser.parse_args()
     if args.action == "prepare":
         provision(args.profile, args.ca, args.firefox)
         return
-    instance = Instance(args.state)
-    start(instance)
-    firefox = args.firefox or operator_firefox()
-    profile = operator_profile(instance, firefox)
+    if args.action == "remote":
+        origin, profile_id, ca_pem = remote_connection(args.connection)
+        firefox = args.firefox or operator_firefox()
+        profile = trusted_profile(
+            args.connection.resolve().parent / "browser", profile_id, ca_pem, firefox
+        )
+    else:
+        instance = Instance(args.state)
+        start(instance)
+        origin = instance.origin
+        firefox = args.firefox or operator_firefox()
+        profile = operator_profile(instance, firefox)
     subprocess.Popen(
-        [firefox, "--no-remote", "--profile", profile, instance.origin],
+        [firefox, "--no-remote", "--profile", profile, origin],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

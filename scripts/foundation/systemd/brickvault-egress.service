@@ -1,0 +1,13 @@
+[Unit]
+Description=Restrict BrickVault application egress to loopback
+After=ufw.service
+Before=brickvault-workbench.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /opt/brickvault-v2/scripts/foundation/systemd/brickvault-egress.nft
+RemainAfterExit=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+CapabilityBoundingSet=CAP_NET_ADMIN

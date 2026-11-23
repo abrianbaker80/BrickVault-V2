@@ -8,7 +8,17 @@ from pathlib import Path
 import setup
 from instance import Instance, init
 from recovery import activate, backup, restore
-from runtime import build, operation, ready, rotate, running, start, stop, supervise
+from runtime import (
+    build,
+    configure_lan,
+    operation,
+    ready,
+    rotate,
+    running,
+    start,
+    stop,
+    supervise,
+)
 
 
 def main():
@@ -32,21 +42,45 @@ def main():
             "supervise",
             "verify",
             "activate",
+            "configure-lan",
         ],
     )
     p.add_argument("--state", type=Path, default=default / "foundation")
-    p.add_argument("--recovery", type=Path, default=default / "recovery")
+    keys = p.add_mutually_exclusive_group()
+    keys.add_argument("--recovery", type=Path)
+    keys.add_argument(
+        "--recipient", help="External public X25519 age backup recipient."
+    )
     p.add_argument("--port", type=int, default=49420)
+    p.add_argument(
+        "--lan-origin",
+        help="Canonical HTTPS origin for the guest's private LAN gateway.",
+    )
     p.add_argument("--file", type=Path)
     p.add_argument("--identity", type=Path)
     p.add_argument("--target")
     args = p.parse_args()
+    if args.recipient is not None and args.action != "init":
+        p.error("--recipient applies to init")
+    if args.lan_origin is not None and args.action not in ("init", "configure-lan"):
+        p.error("--lan-origin applies to init or configure-lan")
     if args.action == "setup":
         setup.install()
     elif args.action == "build":
         build()
     elif args.action == "init":
-        init(args.state, args.recovery, args.port)
+        recovery = (
+            None
+            if args.recipient is not None
+            else args.recovery or default / "recovery"
+        )
+        init(
+            args.state,
+            recovery,
+            args.port,
+            lan_origin=args.lan_origin,
+            recipient=args.recipient,
+        )
         print(
             "Foundation initialized. The initial operator sign-in is in the private owner-login.txt file."
         )
@@ -56,7 +90,12 @@ def main():
         verify(args.port)
     else:
         s = Instance(args.state)
-        if args.action == "start":
+        if args.action == "configure-lan":
+            if not args.lan_origin:
+                p.error("configure-lan requires --lan-origin")
+            configure_lan(s, args.lan_origin)
+            print("Private LAN gateway configured. Start the instance to apply it.")
+        elif args.action == "start":
             start(s)
             print("Private Workbench ready at " + s.origin)
         elif args.action == "stop":

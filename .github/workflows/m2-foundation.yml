@@ -25,7 +25,9 @@ jobs:
       - run: python3 scripts/foundation/manage.py build
       - run: npx playwright install --with-deps firefox
         working-directory: src/workbench
-      - run: python3 scripts/foundation/manage.py verify --port 49440
+      - run: python3 scripts/foundation/verify_cloud_receipt.py
+      - run: sudo python3 scripts/foundation/verify_nightly.py
+      - run: python3 scripts/foundation/manage.py verify --port 25440
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: brickvault-m2-linux-x64

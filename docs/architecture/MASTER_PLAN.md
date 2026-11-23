@@ -124,7 +124,7 @@ Phase 0 recorded the architecture review. The owner accepted M0 and M1. M2 is in
 
 ## M2 execution checkpoint
 
-The isolated M2 Workbench covers sign-in, persistent operator-authored catalog and location records, audit and job diagnostics, encrypted logical backup and restore to a fresh database. T01–T06 identify where independent evidence or production decisions remain due. Production Proxmox commissioning requires measured capacity, network isolation, recovery design and cost. Licensed catalog acquisition, physical device jobs, live provider operations, migration of V1 data and cutover retain their respective gates. [Foundation runbook](../verification/m2-foundation.md) · [Feature matrix](FEATURE_MATRIX.md) · [M2 issue #6](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
+The isolated M2 Workbench covers sign-in, persistent operator-authored catalog and location records, audit and job diagnostics, encrypted logical backup and restore to a fresh database. T01–T06 identify where independent evidence or production decisions remain due. The reviewed capacity, isolation, recovery and cost assessment supports the dedicated server-hosted M2 guest. Windows is its browser client. The controller takes an encrypted backup nightly using the existing storage plan and a V2-specific destination. Licensed catalog acquisition, physical device jobs, live provider operations, migration of V1 data and cutover retain their respective gates. [Foundation runbook](../verification/m2-foundation.md) · [Feature matrix](FEATURE_MATRIX.md) · [M2 issue #6](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
 
 ## M0 execution checkpoint
 
