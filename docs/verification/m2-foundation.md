@@ -94,6 +94,34 @@ Use a new archive filename and a fresh target database on every restore. Both in
 
 Restore checks the archive, dump and release hashes, restores into a new database, reapplies grants, and compares counts and SHA-256 signatures for schema versions, catalog, locations, command receipts, audit, jobs and effects. Live sessions and worker heartbeat data are excluded. Activation checks the target again while the instance is stopped. The restored workspace retains its original identity so the browser can replay its pending commands. A separately initialized workspace has its own identity. Trust the destination's public CA in a fresh browser profile, open the new origin, sign in with its new password and compare the records and audit. Stop both lab instances with `Invoke-Foundation stop --state $destination` and `Invoke-Foundation stop --state $state` when finished. The drill measures recovery of a logical snapshot. Off-host failover, point-in-time recovery and production RPO/RTO require separate evidence.
 
+## Independent backup storage
+
+An off-host recovery point contains the encrypted PostgreSQL backup and the exact matching release in one age-encrypted archive. The transfer uses the provider account's configured backup root and adds a dedicated `BrickVault-V2/` child. An optional second directory receives the encrypted bytes and their receipt. Keep the trusted receipt and V2 decryption key available independently of the source. Confirm cloud replication of a desktop sync folder separately.
+
+Use a private transport descriptor prepared by the account administrator. Its `remote` field names a configured rclone remote and optional prefix, `config` is the absolute path of its encrypted rclone configuration, and `password_command` is a trusted local credential helper. The CLI runs a checksum-verified rclone 1.75.1 with a temporary encrypted configuration copy. The V2 instance itself needs no provider credential. Keep the descriptor and its helper under administrative control.
+
+Run the following in the PowerShell session from the setup example. Supply dedicated directories for the source, receipts, local encrypted mirror and recovery keys. A finalized receipt appears only after a fresh provider download matches the original ciphertext. Retry an interrupted publication with `publish --resume <point>` and the original arguments.
+
+```powershell
+$offhost = (Resolve-Path ./scripts/foundation/offhost.py).Path
+$route = Join-Path $lab 'private-transport.json'
+$receipts = Join-Path $lab 'trusted-receipts'
+$mirror = Join-Path $lab 'encrypted-mirror'
+& $foundationPython $offhost publish --state $state --transport $route --receipts $receipts --mirror $mirror
+```
+
+For a disaster rehearsal, stop the source, use its independently retained recovery identity and the matching trusted receipt. Use the same OS and architecture as the source, with the foundation tools installed. The release binaries come from the remote archive. The destination generates new credentials. After signing in, compare the expected business records, audit and original command receipt. Retain the destination's new key for future backups.
+
+```powershell
+$destination = Join-Path $lab 'offhost-recovery'
+$destinationKeys = Join-Path $lab 'offhost-recovery-keys'
+Invoke-Foundation stop --state $state
+& $foundationPython $offhost recover --state $destination --recovery $destinationKeys --port 49430 --transport $route --receipt $trustedReceipt --identity $sourceIdentity
+Invoke-Foundation start --state $destination
+```
+
+The qualification command exercises publication, retry and fresh recovery with a local rclone test destination. Issue #6 contains the separate external-storage rehearsal result. Production scheduling, freshness monitoring, retention and a full guest recovery objective belong to the hosting checkpoint. [M2 checkpoint](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
+
 ## Compatibility and maintenance
 
 | Contract | Supported foundation baseline |

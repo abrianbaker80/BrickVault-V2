@@ -37,9 +37,12 @@ def fetch(url, checksum, algorithm):
     with tempfile.NamedTemporaryFile(dir=cache, delete=False) as dest:
         temp = Path(dest.name)
     try:
-        with urllib.request.urlopen(url, timeout=120) as response, temp.open(
-            "wb"
-        ) as dest:
+        with urllib.request.urlopen(
+            urllib.request.Request(
+                url, headers={"User-Agent": "BrickVault-Foundation/1.0"}
+            ),
+            timeout=120,
+        ) as response, temp.open("wb") as dest:
             shutil.copyfileobj(response, dest)
         if not matches(temp):
             raise RuntimeError("Download checksum failed: " + target.name)
@@ -124,6 +127,44 @@ def install_linux_pg():
             ["make", "-s", "-j", str(min(os.cpu_count() or 1, 6))], cwd=cwd, check=True
         )
         subprocess.run(["make", "-s", "install"], cwd=cwd, check=True)
+
+
+def rclone_program():
+    """Install the verified transfer binary locally on first use."""
+    version = "1.75.1"
+    system = "windows" if WIN else "linux"
+    distribution = f"rclone-v{version}-{system}-amd64"
+    name = "rclone" + EXT
+    directory = TOOLS / "foundation" / distribution
+    program = directory / name
+    archive = fetch(
+        f"https://downloads.rclone.org/v{version}/{distribution}.zip",
+        (
+            "200eb602c126d82aa38b51e0f6b9ae837473ff99b51278d3f6f837574c494d6e"
+            if WIN
+            else "982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab"
+        ),
+        "sha256",
+    )
+    with zipfile.ZipFile(archive) as source:
+        member = distribution + "/" + name
+        with source.open(member) as verified:
+            expected = hashlib.file_digest(verified, "sha256").digest()
+        if program.is_file():
+            with program.open("rb") as current:
+                if hashlib.file_digest(current, "sha256").digest() == expected:
+                    return program
+        directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=directory, delete=False) as tmp:
+            stage = Path(tmp.name)
+            with source.open(member) as verified:
+                shutil.copyfileobj(verified, tmp)
+        try:
+            stage.chmod(0o755)
+            os.replace(stage, program)
+        finally:
+            stage.unlink(missing_ok=True)
+    return program
 
 
 def install():
