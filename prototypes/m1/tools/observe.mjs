@@ -155,7 +155,20 @@ try {
           documentWidth: document.documentElement.scrollWidth
         }))
         if (geometry.documentWidth > geometry.width) throw Error('Horizontal page overflow at 150% zoom')
-        if (engine === 'vue') await page.screenshot({ path: join(evidence, design + '-150pct.png') })
+        if (engine === 'vue') {
+          const session = await context.newCDPSession(page)
+          try {
+            const capture = await session.send('Page.captureScreenshot', {
+              format: 'png', fromSurface: true, captureBeyondViewport: false
+            })
+            const png = Buffer.from(capture.data, 'base64')
+            const surfaceWidth = png.readUInt32BE(16)
+            if (Math.abs(surfaceWidth - geometry.width * actual) > 3) {
+              throw Error('Native capture did not include the full zoomed viewport: ' + surfaceWidth)
+            }
+            await writeFile(join(evidence, design + '-150pct.png'), png)
+          } finally { await session.detach() }
+        }
         results.push({ design, engine, zoom: actual, ...geometry })
       }
   } finally {

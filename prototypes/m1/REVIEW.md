@@ -55,8 +55,8 @@ The architecture register’s earlier weighted assessment favored React by 0.10 
 
 | Framework entry | JS gzip size | First register paint, median (range) | Search result paint, median (range) |
 |---|---:|---:|---:|
-| react | 68.9 KiB | 83 ms (78–90) | 97 ms (88–104) |
-| vue | 28 KiB | 72 ms (69–79) | 102 ms (95–113) |
+| React | 68.9 KiB | 99 ms (94–108) | 92 ms (85–105) |
+| Vue | 28.0 KiB | 86 ms (82–91) | 102 ms (89–112) |
 
 At 1440 × 900, Workbench showed 9 complete inventory rows and Ledger showed 8. At 1280 × 720 the counts were 6 and 5. At 900 × 760 they were 7 and 6. The starting order and lot details were identical.
 
@@ -70,7 +70,7 @@ The local run used the production build, Chromium on Windows, one workstation an
 | 900 × 760 | [Register](evidence/workbench-900.png) · [Inspector](evidence/workbench-inspector-900.png) | [Register](evidence/ledger-900.png) · [Inspector](evidence/ledger-inspector-900.png) |
 | 150% native Chromium zoom | [Workbench](evidence/workbench-150pct.png) | [Ledger](evidence/ledger-150pct.png) |
 
-At a register width below 920 CSS pixels, inspecting a lot opens a scrollable modal so every detail and action remains reachable. At 150% zoom the 1280 × 720 browser window provided an 839 × 415 CSS-pixel content area on the test host. Both engines and layouts opened the inspector, restored row focus and kept document width inside the viewport. Owner visual preference and a human assistive-technology session remain unmeasured. Axe checks and accessibility-tree assertions cover specific machine-testable behavior. [Playwright accessibility testing](https://playwright.dev/docs/accessibility-testing)
+At a register width below 920 CSS pixels, inspecting a lot opens a scrollable modal so every detail and action remains reachable. At 150% zoom the 1280 × 720 browser window provided an 839 × 415 CSS-pixel content area on the test host. Both engines and layouts opened the inspector, restored row focus and kept document width inside the viewport. The zoom images capture the complete 1258 × 622 device-pixel browser surface. Owner visual preference and a human assistive-technology session remain unmeasured. Axe checks and accessibility-tree assertions cover specific machine-testable behavior. [Playwright accessibility testing](https://playwright.dev/docs/accessibility-testing)
 
 ## Decision
 
