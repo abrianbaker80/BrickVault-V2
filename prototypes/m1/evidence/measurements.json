@@ -1,0 +1,157 @@
+{
+  "browser": "Chromium 159.0.8154.6",
+  "metrics": {
+    "react": {
+      "gzipBytes": 70587,
+      "runs": [
+        [
+          78,
+          89
+        ],
+        [
+          89,
+          100
+        ],
+        [
+          83,
+          99
+        ],
+        [
+          83,
+          88
+        ],
+        [
+          82,
+          104
+        ],
+        [
+          86,
+          101
+        ],
+        [
+          87,
+          97
+        ],
+        [
+          90,
+          96
+        ],
+        [
+          82,
+          88
+        ]
+      ]
+    },
+    "vue": {
+      "gzipBytes": 28697,
+      "runs": [
+        [
+          71,
+          104
+        ],
+        [
+          72,
+          96
+        ],
+        [
+          70,
+          95
+        ],
+        [
+          69,
+          113
+        ],
+        [
+          73,
+          96
+        ],
+        [
+          75,
+          110
+        ],
+        [
+          79,
+          106
+        ],
+        [
+          77,
+          102
+        ],
+        [
+          70,
+          99
+        ]
+      ]
+    }
+  },
+  "layouts": [
+    {
+      "design": "workbench",
+      "width": 1440,
+      "documentWidth": 1440,
+      "visibleLots": 9
+    },
+    {
+      "design": "ledger",
+      "width": 1440,
+      "documentWidth": 1440,
+      "visibleLots": 8
+    },
+    {
+      "design": "workbench",
+      "width": 1280,
+      "documentWidth": 1280,
+      "visibleLots": 6
+    },
+    {
+      "design": "ledger",
+      "width": 1280,
+      "documentWidth": 1280,
+      "visibleLots": 5
+    },
+    {
+      "design": "workbench",
+      "width": 900,
+      "documentWidth": 900,
+      "visibleLots": 7
+    },
+    {
+      "design": "ledger",
+      "width": 900,
+      "documentWidth": 900,
+      "visibleLots": 6
+    },
+    {
+      "design": "workbench",
+      "engine": "react",
+      "zoom": 1.5,
+      "width": 839,
+      "height": 415,
+      "documentWidth": 839
+    },
+    {
+      "design": "workbench",
+      "engine": "vue",
+      "zoom": 1.5,
+      "width": 839,
+      "height": 415,
+      "documentWidth": 839
+    },
+    {
+      "design": "ledger",
+      "engine": "react",
+      "zoom": 1.5,
+      "width": 839,
+      "height": 415,
+      "documentWidth": 839
+    },
+    {
+      "design": "ledger",
+      "engine": "vue",
+      "zoom": 1.5,
+      "width": 839,
+      "height": 415,
+      "documentWidth": 839
+    }
+  ]
+}

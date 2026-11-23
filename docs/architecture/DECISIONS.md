@@ -1,6 +1,6 @@
 # BrickVault V2 decision register
 
-The owner approved the decisions below for architecture planning and authorized M0 implementation. Each future milestone, live provider qualification, deployment and migration has a separate gate. [Master plan](MASTER_PLAN.md) · [Feature matrix](FEATURE_MATRIX.md)
+The owner approved the decisions below for architecture planning and authorized M0 and subsequently the isolated M1 comparison. Each future milestone, live provider qualification, deployment and migration has a separate gate. [Master plan](MASTER_PLAN.md) · [Feature matrix](FEATURE_MATRIX.md)
 
 | ID | Owner decision | Operating rule and next gate |
 |---|---|---|
@@ -75,4 +75,4 @@ Give each assignment its requirements, allowed files, proof, stop conditions and
 
 G04 was witnessed in the OpenAI Codex sidebar in VS Code Insiders. The native Builder returned a bounded fixture change, an independent Reviewer found the seeded error, the Builder corrected it, and a fresh Reviewer checked the result. The parent requested owner approval for the separate README edit and left it unapplied. Witnessed revision [b731a22](https://github.com/abrianbaker80/BrickVault-V2/commit/b731a225964b7d102243960f0308c9e248a98fb8).
 
-For each accepted checkpoint, link requirement, issue, PR, reviewed commit, applicable test and read-back of local and remote main. The owner accepted the M0 engineering checkpoint at [2d88409](https://github.com/abrianbaker80/BrickVault-V2/commit/2d88409b5fb556316888d1282c08968ba5619c70). Issue #1 records the G03 synchronization check and the owner’s decision. M1 requires separate authorization. [M0 issue #1](https://github.com/abrianbaker80/BrickVault-V2/issues/1) · [Owner acceptance](https://github.com/abrianbaker80/BrickVault-V2/issues/1#issuecomment-7090263747)
+For each accepted checkpoint, link requirement, issue, PR, reviewed commit, applicable test and read-back of local and remote main. The owner accepted the M0 engineering checkpoint at [2d88409](https://github.com/abrianbaker80/BrickVault-V2/commit/2d88409b5fb556316888d1282c08968ba5619c70). Issue #1 records the G03 synchronization check and the owner’s decision. The owner subsequently authorized M1. The [M1 comparison](../../prototypes/m1/REVIEW.md) records the recommendation pending owner selection. [M0 issue #1](https://github.com/abrianbaker80/BrickVault-V2/issues/1) · [Owner acceptance](https://github.com/abrianbaker80/BrickVault-V2/issues/1#issuecomment-7090263747)

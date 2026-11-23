@@ -1,6 +1,6 @@
 # BrickVault V2 master plan
 
-The owner authorized M0 and a public source repository with fresh history. The deployed application, store data and private supporting records remain restricted. D01–D07 define the approved direction. Release scope remains provisional under D03. M1–M9 require separate authorization.
+The owner accepted M0, authorized M1 and approved a public source repository with fresh history. The deployed application, store data and private supporting records remain restricted. D01–D07 define the approved direction. Release scope remains provisional under D03. M2–M9 require separate authorization.
 
 ## Recommendation
 
@@ -74,7 +74,7 @@ The provided BrickVault logo shows a yellow brick built into a graphite vault on
 | Picking and packing | One task row gets large count and input focus, tote/parcel stays visible. Support keyboard-only work, wrong/duplicate scans, short count, restart and amended order. Small windows show sequential pages with maintained context. |
 | Sync and reporting | Present the local cause, remote observation age, suspected sale and remaining uncertainty side-by-side. Every alert has an action and scope. Profit details distinguish actual, estimated, unallocated and missing amounts. |
 
-Once separately authorized, M1 presents two distinct polished visual directions at equivalent compactness and task depth, with the same realistic tasks and data. Benchmark React and Vue on one equivalent design under the same visual and interaction requirements. Compare usability, visual quality, maintainability, measured performance, accessibility and development efficiency; present both evaluations to the owner before selection. M1 uses synthetic data only: long item names, set/minifig variants, 0/unknown/stale, split locations, shortage, ambiguous send, pending print and return. Test the intended desktop viewport, 1280×720 and a narrow 900-pixel window, 150% scale, keyboard only, visible focus order, screen-reader table/row actions, safe dialog focus restoration and no color-only states. Define which layouts collapse inspectors into pages rather than truncate actions. Compare read-error, legitimate empty and stale last-success screens. Prototype success is a design decision; production screens require real integration, render checks and owner acceptance of material differences.
+M1 presents two distinct polished visual directions at equivalent compactness and task depth, with the same realistic tasks and data. Benchmark React and Vue on one equivalent design under the same visual and interaction requirements. Compare usability, visual quality, maintainability, measured performance, accessibility and development efficiency; present both evaluations to the owner before selection. M1 uses synthetic data only: long item names, set/minifig variants, 0/unknown/stale, split locations, shortage, ambiguous send, pending print and return. Test the intended desktop viewport, 1280×720 and a narrow 900-pixel window, 150% scale, keyboard only, visible focus order, screen-reader table/row actions, safe dialog focus restoration and no color-only states. Define which layouts collapse inspectors into pages rather than truncate actions. Compare read-error, legitimate empty and stale last-success screens. Prototype success is a design decision; production screens require real integration, render checks and owner acceptance of material differences.
 
 ## Migration and one controlled cutover
 
@@ -91,7 +91,7 @@ Once separately authorized, M1 presents two distinct polished visual directions 
 
 ## Milestones and acceptance
 
-Phase 0 recorded the architecture review. The owner authorized M0 only. The numbered Builder milestones below intentionally bring Git and integration contracts forward. A status of **Planned** grants no authority to begin. Dependencies are acceptance dependencies except for explicitly approved non-production contract work. The feature matrix allocates individual requirements. All gates include independent inspection, actual test evidence and the GitHub checkpoint described in the decision register.
+Phase 0 recorded the architecture review. The owner accepted M0 and authorized M1. The numbered Builder milestones below intentionally bring Git and integration contracts forward. A status of **Planned** grants no authority to begin. Dependencies are acceptance dependencies except for explicitly approved non-production contract work. The feature matrix allocates individual requirements. All gates include independent inspection, actual test evidence and the GitHub checkpoint described in the decision register.
 
 | Milestone / dependencies | Complete workflow and focused evidence | Failure, owner gate and stop |
 |---|---|---|
@@ -120,7 +120,7 @@ Phase 0 recorded the architecture review. The owner authorized M0 only. The numb
 | Physical custody at transition and ancillary V1 workflows | Recount/review designated high-risk lots and any active pick/packed parcel. Approve a retention or replacement plan for every used capability before retirement. |
 | Repository protection and project-scoped orchestration | Verify enforceable rules and a successful required check on the public repository. Witness the full Insiders sidebar delegation, correction, review and approval-pause exercise. |
 
-**Current authority.** The owner accepted M0. The M1 comparison is approved in concept only. The Architect may dispatch the M1 assignment only when the owner separately authorizes that milestone. M0 includes no business implementation, production infrastructure, V1 changes, data migration or live marketplace operations.
+**Current authority.** The owner accepted M0 and authorized the isolated M1 comparison. The framework and visual direction await owner selection. Production infrastructure, V1 changes, migration and live marketplace operations require separate authorization. [M1 review](../../prototypes/m1/REVIEW.md)
 
 ## M0 execution checkpoint
 
