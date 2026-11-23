@@ -1,0 +1,15 @@
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+
+[sandbox_workspace_write]
+network_access = false
+
+[features]
+memories = false
+
+[memories]
+use_memories = false
+generate_memories = false
+
+[skills]
+include_instructions = false
