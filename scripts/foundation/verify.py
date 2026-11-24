@@ -857,11 +857,13 @@ def verify(port):
 
             from verify_register import verify_register
             from verify_counts import qualify_counts, verify_restored_counts
+            from verify_holds import qualify_holds, verify_restored_holds
 
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
             verify_register(first, transfer)
             counts = qualify_counts(first, rec["entityId"])
+            holds = qualify_holds(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -1015,6 +1017,7 @@ def verify(port):
                 verify_restored_transfers(recovered, transfer)
                 verify_register(recovered, transfer)
                 verify_restored_counts(recovered, counts)
+                verify_restored_holds(recovered, holds)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]
