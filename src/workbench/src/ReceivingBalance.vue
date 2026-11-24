@@ -10,7 +10,7 @@ const amount = (value: number | null) => money(value, props.purchase.currency)
 </script>
 <template>
   <aside class="side-panels receiving-balances" aria-label="Purchase readback">
-    <section class="panel" aria-labelledby="balance-title">
+    <section class="panel" role="region" aria-labelledby="balance-title">
       <header class="panel-head"><h2 id="balance-title">Stock balance</h2><span class="count">Purchase revision {{ purchase.revision }}</span></header>
       <dl class="stock-counts">
         <div><dt>Physical on hand</dt><dd>{{ balances.physicalOnHand }}</dd></div>
@@ -29,7 +29,7 @@ const amount = (value: number | null) => money(value, props.purchase.currency)
         </li>
       </ul>
     </section>
-    <section class="panel" aria-labelledby="cost-title">
+    <section class="panel" role="region" aria-labelledby="cost-title">
       <header class="panel-head"><h2 id="cost-title">Cost coverage</h2></header>
       <dl class="details finance-details">
         <dt>Known item costs</dt><dd>{{ amount(balances.knownItemCostMinor) }}</dd>
@@ -39,7 +39,7 @@ const amount = (value: number | null) => money(value, props.purchase.currency)
         <dt>Free units with unknown item cost</dt><dd>{{ balances.unknownCostFreeQuantity }}</dd>
       </dl>
     </section>
-    <section class="panel" aria-labelledby="offers-title">
+    <section class="panel" role="region" aria-labelledby="offers-title">
       <header class="panel-head"><h2 id="offers-title">Price and publication</h2><span class="tag">Internal only</span></header>
       <dl class="details finance-details">
         <dt>Backed</dt><dd>{{ balances.backedQuantity }}</dd>

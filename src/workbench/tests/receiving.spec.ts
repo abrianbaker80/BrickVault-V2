@@ -153,6 +153,11 @@ test('split receipts, lost confirmation, partial putaway and explicit unpublishe
   } finally { await reader.close() }
 })
 
+async function accessible(page: Page) {
+  const scan = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()
+  expect(scan.violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target) }))).toEqual([])
+}
+
 test('Receiving forms and stock readback are accessible at 320 pixels', async ({ page }) => {
   const purchase = 'UI-A11Y-' + randomUUID().slice(0, 8)
   await page.setViewportSize({ width: 320, height: 800 })
@@ -161,6 +166,8 @@ test('Receiving forms and stock readback are accessible at 320 pixels', async ({
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await page.getByRole('link', { name: 'Receiving' }).click()
   await page.getByRole('button', { name: 'New purchase' }).click()
+  await expect(page.getByLabel('Purchase reference')).toBeFocused()
+  await accessible(page)
   await page.getByLabel('Purchase reference').fill(purchase)
   await page.getByLabel('Purchase source').fill('Fictional accessibility qualification')
   await page.getByLabel('Ordered quantity').fill('2')
@@ -175,6 +182,5 @@ test('Receiving forms and stock readback are accessible at 320 pixels', async ({
   await balance(page, 2, 2, 0)
   await expect(page.getByRole('list', { name: 'Deliveries and bin positions' })).toContainText('Quarantine2')
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-  const scan = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()
-  expect(scan.violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target) }))).toEqual([])
+  await accessible(page)
 })
