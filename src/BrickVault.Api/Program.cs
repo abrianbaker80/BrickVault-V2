@@ -30,6 +30,7 @@ try
     var references = new References(db);
     var receiving = new Receiving(db);
     var counts = new StockCounts(db);
+    var holds = new BuildHolds(db);
     var bins = new BinStock(db);
     var inventory = new StockRegister(db);
     var transfers = new Transfers(db);
@@ -107,7 +108,16 @@ try
     api.MapPost("/catalog", (HttpContext c, CancellationToken ct) => Save<CatalogCommand>(c, references.Save, ct));
     api.MapPost("/locations", (HttpContext c, CancellationToken ct) => Save<LocationCommand>(c, references.Save, ct));
     api.MapGet("/receiving", (CancellationToken ct) => receiving.LegacySnapshot(ct));
-    api.MapGet("/receiving/current", (CancellationToken ct) => receiving.Snapshot(ct));
+    api.MapGet("/receiving/current", (HttpContext c, CancellationToken ct) =>
+        receiving.CurrentSnapshot(c.Request.Query["holds"] == "true", ct));
+    api.MapGet("/receiving/bins/{locationId:guid}/positions/{positionId:guid}/holds",
+        (Guid locationId, Guid positionId, Guid? after, int? limit, Guid? commandId, CancellationToken ct) =>
+            holds.Snapshot(locationId, positionId, after, limit ?? 25, ct, commandId));
+    api.MapGet("/receiving/bins/{locationId:guid}/positions/{positionId:guid}/holds/{holdId:guid}/releases",
+        (Guid locationId, Guid positionId, Guid holdId, Guid? after, int? limit, Guid? commandId, CancellationToken ct) =>
+            holds.Releases(locationId, positionId, holdId, after, limit ?? 25, ct, commandId));
+    api.MapPost("/receiving/holds", (HttpContext c, CancellationToken ct) => Save<StockHoldCommand>(c, holds.Save, ct));
+    api.MapPost("/receiving/holds/release", (HttpContext c, CancellationToken ct) => Save<StockHoldReleaseCommand>(c, holds.Save, ct));
     api.MapGet("/receiving/bins/{locationId:guid}/counts",
         (Guid locationId, Guid? positionId, Guid? after, int? limit, Guid? observationId, Guid? commandId,
             CancellationToken ct) => counts.Snapshot(locationId, ct, positionId, after, limit ?? 25, observationId, commandId));

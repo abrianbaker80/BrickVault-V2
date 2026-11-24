@@ -73,11 +73,12 @@ internal sealed class Receiving(NpgsqlDataSource db)
         }
         catch (PostgresException ex) when (ex.ConstraintName is
             "receiving_quantity" or "receiving_catalog" or "receiving_catalog_reconfirmation" or
-            "receiving_delivery" or "receiving_bin" or "receiving_backing" or "stock_shortage_open")
+            "receiving_delivery" or "receiving_bin" or "receiving_backing" or "stock_shortage_open" or "reserved_stock_unavailable")
         {
             throw ex.ConstraintName switch
             {
                 "stock_shortage_open" => Fault.StockShortageOpen(),
+                "reserved_stock_unavailable" => Rejected("reserved_stock_unavailable", "Choose units that are free of build holds and other backing."),
                 "receiving_quantity" => Rejected("quantity_unavailable", "There are fewer units available for this action."),
                 "receiving_catalog" => Rejected("catalog_ineligible", "Confirm a matching, eligible catalog identity and condition."),
                 "receiving_catalog_reconfirmation" => Rejected("catalog_reconfirmation_required",
@@ -113,10 +114,19 @@ internal sealed class Receiving(NpgsqlDataSource db)
 
     public async Task<ReceivingWorkspace> LegacySnapshot(CancellationToken token)
     {
-        var snapshot = await Snapshot(token);
+        var snapshot = await CurrentSnapshot(acceptHolds: false, token);
         if (snapshot.Purchases.SelectMany(p => p.Offers).Any(offer => offer.Backing.Count > 64))
             throw new Fault(426, "receiving_client_upgrade_required",
                 "This offer spans more stock positions than this client supports. Update Workbench to read the full receiving snapshot.");
+        return snapshot;
+    }
+
+    public async Task<ReceivingWorkspace> CurrentSnapshot(bool acceptHolds, CancellationToken token)
+    {
+        var snapshot = await Snapshot(token);
+        if (!acceptHolds && snapshot.Purchases.Any(p => p.Balances.Reserved > 0))
+            throw new Fault(426, "receiving_client_upgrade_required",
+                "Active build holds require a newer Workbench. Update Workbench to read the reserved stock and receiving balances.");
         return snapshot;
     }
 
@@ -138,7 +148,8 @@ internal sealed class Receiving(NpgsqlDataSource db)
             SELECT delivery_id,p.id,p.catalog_id,p.catalog_revision,p.location_id,p.location_code,p.quantity,
                 COALESCE((SELECT sum(b.quantity) FROM brickvault.current_offer_backing b WHERE b.placement_id=p.id),0)::integer,
                 c.integration_eligible AND c.revision=p.catalog_revision
-                    AND NOT EXISTS (SELECT 1 FROM brickvault.stock_shortage_cases sc WHERE sc.position_id=p.id AND sc.resolved_by_command_id IS NULL)
+                    AND NOT EXISTS (SELECT 1 FROM brickvault.stock_shortage_cases sc WHERE sc.position_id=p.id AND sc.resolved_by_command_id IS NULL),
+                COALESCE((SELECT sum(h.remaining_quantity) FROM brickvault.current_build_holds h WHERE h.position_id=p.id),0)::integer
             FROM brickvault.current_placement_stock p JOIN brickvault.catalog c ON c.id=p.catalog_id
             WHERE p.quantity > 0
             ORDER BY p.location_code,p.id
@@ -146,19 +157,23 @@ internal sealed class Receiving(NpgsqlDataSource db)
         {
             var quantity = r.GetInt32(6);
             var backed = r.GetInt32(7);
-            return (DeliveryId: r.GetGuid(0), Value: new PlacementRow(r.GetGuid(1), r.GetGuid(2), r.GetInt32(3),
-                r.GetGuid(4), r.GetString(5), quantity, backed, r.GetBoolean(8) ? quantity - backed : 0));
-        }, token)).ToLookup(r => r.DeliveryId, r => r.Value);
+            var reserved = r.GetInt32(9);
+            return (DeliveryId: r.GetGuid(0), Reserved: reserved, Value: new PlacementRow(r.GetGuid(1),
+                r.GetGuid(2), r.GetInt32(3), r.GetGuid(4), r.GetString(5), quantity, backed,
+                r.GetBoolean(8) ? quantity - backed - reserved : 0));
+        }, token)).ToLookup(r => r.DeliveryId);
         var deliveries = (await Rows(connection, tx, """
             SELECT purchase_id,id,reference,quantity,catalog_id,catalog_revision,item_cost_minor
             FROM brickvault.deliveries ORDER BY reference,id
             """, r =>
         {
             var quantity = r.GetInt32(3);
-            var positions = placements[r.GetGuid(1)].ToList();
-            return (PurchaseId: r.GetGuid(0), Value: new DeliveryRow(r.GetGuid(1), r.GetString(2), quantity,
-                Optional<Guid>(r,4), Optional<int>(r,5), Optional<int>(r,6), quantity - positions.Sum(p => p.Quantity), positions));
-        }, token)).ToLookup(r => r.PurchaseId, r => r.Value);
+            var positions = placements[r.GetGuid(1)];
+            var values = positions.Select(p => p.Value).ToList();
+            return (PurchaseId: r.GetGuid(0), Reserved: positions.Sum(p => p.Reserved),
+                Value: new DeliveryRow(r.GetGuid(1), r.GetString(2), quantity, Optional<Guid>(r,4), Optional<int>(r,5),
+                    Optional<int>(r,6), quantity - values.Sum(p => p.Quantity), values));
+        }, token)).ToLookup(r => r.PurchaseId);
         var backing = (await Rows(connection, tx, """
             SELECT offer_id,placement_id,quantity FROM brickvault.current_offer_backing ORDER BY offer_id,placement_id
             """, r => (OfferId: r.GetGuid(0), Value: new BackingRow(r.GetGuid(1), r.GetInt32(2))),
@@ -176,24 +191,27 @@ internal sealed class Receiving(NpgsqlDataSource db)
         }, token)).ToLookup(r => r.PurchaseId, r => r.Value);
         return new ReceivingWorkspace("receiving", asOf, true, purchases.Select(p =>
         {
-            var received = deliveries[p.Id].ToList();
+            var layers = deliveries[p.Id];
+            var received = layers.Select(d => d.Value).ToList();
             return new PurchaseRow(p.Id, p.Revision, p.Reference, p.Source, p.Currency, p.Ordered, p.Charge,
-                received, offers[p.Id].ToList(), Balance(received, p.Charge));
+                received, offers[p.Id].ToList(), Balance(received, layers.Sum(d => d.Reserved),
+                    layers.Where(d => d.Value.ItemCostMinor.HasValue).Sum(d => d.Reserved), p.Charge));
         }).ToList());
     }
 
-    private static StockBalances Balance(IReadOnlyList<DeliveryRow> deliveries, int? pendingChargeMinor)
+    private static StockBalances Balance(IReadOnlyList<DeliveryRow> deliveries, int reserved, int knownReserved,
+        int? pendingChargeMinor)
     {
         var onHand = deliveries.Sum(d => d.Quantity);
         var unavailable = deliveries.Sum(d => d.IntakeQuantity);
-        var free = onHand - unavailable;
+        var free = onHand - unavailable - reserved;
         var backed = deliveries.SelectMany(d => d.Placements).Sum(p => p.BackedQuantity);
         var documented = deliveries.Where(d => d.ItemCostMinor.HasValue).ToList();
-        var knownFree = documented.Sum(d => d.Quantity - d.IntakeQuantity);
+        var knownFree = documented.Sum(d => d.Quantity - d.IntakeQuantity) - knownReserved;
         long? known = documented.Count == 0 ? null : documented.Sum(d => (long)d.ItemCostMinor!.Value);
         long? components = known.HasValue || pendingChargeMinor.HasValue
             ? known.GetValueOrDefault() + pendingChargeMinor.GetValueOrDefault() : null;
-        return new StockBalances(onHand, unavailable, Reserved: 0, free, backed, free - backed,
+        return new StockBalances(onHand, unavailable, reserved, free, backed, free - backed,
             PublishedQuantity: 0, knownFree, free - knownFree, known, components);
     }
 }
