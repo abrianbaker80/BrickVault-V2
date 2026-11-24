@@ -2,8 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import BinStock from './BinStock.vue'
 import { label } from './presentation'
-import type { Catalog, Location, Workspace } from './api'
-const props = defineProps<{ page: 'catalog' | 'locations'; workspace: Workspace; connected: boolean }>()
+import type { Catalog, Location, TransferControls, Workspace } from './api'
+const props = defineProps<{ page: 'catalog' | 'locations'; workspace: Workspace; connected: boolean; transfers: TransferControls; confirmedSourceId?: string }>()
 const emit = defineEmits<{ failure: [reason: unknown] }>()
 const query = ref('')
 const search = ref<HTMLInputElement>()
@@ -25,6 +25,9 @@ function inspect(row: Catalog | Location, event: MouseEvent) {
   origin = event.currentTarget as HTMLButtonElement
   inspectedId.value = row.id
 }
+watch(() => props.confirmedSourceId, id => {
+  if (id && !inspectedId.value && props.page === 'locations') inspectedId.value = id
+})
 watch([inspectedId, compact], async () => {
   await nextTick()
   if (detail.value instanceof HTMLDialogElement) {
@@ -111,7 +114,8 @@ onBeforeUnmount(() => {
       <dt>Record ID</dt><dd>{{ inspected.id }}</dd><dt>Revision</dt><dd>{{ inspected.revision }}</dd>
     </dl>
     <BinStock v-if="'code' in inspected" :key="inspected.id" :location="inspected" :as-of="workspace.asOf"
-      :connected="connected" @failure="emit('failure', $event)" />
+      :connected="connected" :locations="workspace.locations" :transfers="transfers"
+      @inspect="inspectedId = $event" @recover="close" @failure="emit('failure', $event)" />
   </component>
   </div>
 </template>
