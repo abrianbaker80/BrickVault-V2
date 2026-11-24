@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ContractFailure, explain } from './api'
 import { countReceiptLink } from './countLinks'
 import type { CountObservation, Location, TransferControls } from './api'
-import { time } from './presentation'
+import { label, time } from './presentation'
+import { itemLabel } from './receiving'
 import HoldReleases from './HoldReleases.vue'
 
 const props = defineProps<{ location: Location; positionId: string; asOf: string; connected: boolean; controls: TransferControls }>()
@@ -11,6 +12,9 @@ const emit = defineEmits<{ close: []; failure: [reason: unknown]; recover: [] }>
 type Snapshot = Awaited<ReturnType<typeof api.positionHolds>>
 type Hold = Snapshot['holds'][number]
 const dialog = ref<HTMLDialogElement>()
+const formHeading = ref<HTMLElement>()
+const createButton = ref<HTMLButtonElement>()
+const confirmation = ref<HTMLElement>()
 const snapshot = shallowRef<Snapshot>()
 const evidence = shallowRef<CountObservation>()
 const partial = ref(false)
@@ -22,14 +26,14 @@ const change = ref(0)
 const sending = ref(false)
 const result = ref('')
 const historyId = ref('')
-const draft = shallowRef<{ revision: number; workspace: string; locationCode: string; selected?: Hold; caseId: string | null; observation: string | null }>()
+const draft = shallowRef<{ revision: number; catalogRevision: number; workspace: string; locationCode: string; selected?: Hold; caseId: string | null; observation: string | null }>()
 const amount = ref<number | ''>('')
 const binCode = ref('')
 const purpose = ref('')
 const reason = ref('')
 const message = ref('')
 const stale = computed(() => draft.value && snapshot.value && (draft.value.revision !== snapshot.value.purchaseRevision ||
-  draft.value.workspace !== props.controls.workspaceId || draft.value.locationCode !== props.location.code || draft.value.caseId !== snapshot.value.shortageId ||
+  draft.value.catalogRevision !== snapshot.value.currentCatalog.revision || draft.value.workspace !== props.controls.workspaceId || draft.value.locationCode !== props.location.code || draft.value.caseId !== snapshot.value.shortageId ||
   draft.value.observation !== snapshot.value.latestObservationId || (draft.value.selected &&
   snapshot.value.holds.find(h => h.id === draft.value?.selected?.id)?.remainingQuantity !== draft.value.selected.remainingQuantity)))
 const ready = computed(() => props.connected && props.controls.enabled && !reading.value && !readError.value &&
@@ -76,12 +80,23 @@ watch(() => [props.positionId, props.location.id, props.connected, props.asOf, r
   }, { immediate: true })
 
 onMounted(() => dialog.value?.showModal())
-function edit(selected?: Hold) {
+async function edit(selected?: Hold) {
   const data = snapshot.value
   if (!ready.value || !data) return
-  draft.value = { selected, locationCode: data.location.code, revision: data.purchaseRevision, workspace: props.controls.workspaceId,
+  draft.value = { selected, locationCode: data.location.code, revision: data.purchaseRevision, catalogRevision: data.currentCatalog.revision, workspace: props.controls.workspaceId,
     caseId: data.shortageId, observation: data.latestObservationId }
   amount.value = ''; binCode.value = ''; purpose.value = ''; reason.value = ''; result.value = ''; message.value = ''
+  await nextTick()
+  formHeading.value?.focus()
+}
+async function cancel() {
+  const id = draft.value?.selected?.id
+  draft.value = undefined
+  await nextTick()
+  const releaseButton = id ? dialog.value?.querySelector<HTMLButtonElement>('button[data-release="' + id + '"]') : null
+  const target = releaseButton && !releaseButton.disabled ? releaseButton : createButton.value
+  if (target && !target.disabled) target.focus()
+  else dialog.value?.querySelector<HTMLButtonElement>('button.close')?.focus()
 }
 function page(after?: string | null) {
   if (!ready.value || draft.value) return
@@ -101,8 +116,10 @@ async function save() {
       : await props.controls.dispatch({ kind: 'hold', workspaceId: workspace,
           body: { ...body, positionId: props.positionId, locationId: props.location.id, confirmedLocationCode: binCode.value, purpose: purpose.value.trim() } })
     if (receipt) {
-      result.value = selected ? 'Released ' + body.quantity + ' from ' + selected.purpose + '.' : 'Reserved ' + body.quantity + ' for ' + purpose.value.trim() + '.'
+      result.value = selected ? 'Released ' + body.quantity + ' from ' + selected.purpose + '. Hold ID ' + selected.id :
+        'Reserved ' + body.quantity + ' for ' + purpose.value.trim() + '. Hold ID ' + receipt.entityId
       draft.value = undefined; requested.value = ['']; ++change.value
+      await nextTick(); confirmation.value?.focus()
     } else if (props.controls.pending) emit('recover')
     else message.value = props.controls.feedback
   } finally { sending.value = false }
@@ -120,8 +137,13 @@ async function save() {
       <p v-else-if="reading" role="status">Reading build holds…</p>
       <p v-else-if="partial" class="warning" role="status">Partial hold read. {{ snapshot?.complete ? 'Showing the last confirmed read.' : 'Hold or count evidence is incomplete.' }}</p>
       <button v-if="(readError || partial) && connected" :disabled="reading" @click="++change">Retry hold read</button>
-      <p v-if="result" role="status" class="notice">{{ result }}</p>
+      <p v-if="result" ref="confirmation" role="status" tabindex="-1" class="notice">{{ result }}</p>
       <template v-if="snapshot">
+        <section aria-label="Selected receipt position" class="position-identity">
+          <strong>{{ snapshot.purchaseReference }} · {{ snapshot.deliveryReference }}</strong>
+          <p>{{ label(snapshot.currentCatalog.itemType) }} · {{ itemLabel([snapshot.currentCatalog], snapshot.currentCatalog.id, snapshot.catalogRevision) }}</p>
+          <small>Position ID {{ snapshot.positionId }}</small>
+        </section>
         <small>Position read {{ time(snapshot.asOf) }}</small>
         <dl class="details"><dt>Ledger quantity</dt><dd>{{ snapshot.ledgerQuantity }}</dd>
           <dt>Backed by offers</dt><dd>{{ snapshot.offerBackedQuantity }}</dd>
@@ -137,16 +159,16 @@ async function save() {
           <p>Choose a project and quantity to release. The shortage stays open for review.</p>
         </section>
         <template v-if="!draft">
-          <button class="primary" :disabled="!ready || !snapshot.availableToHoldQuantity" @click="edit()">Create build hold</button>
+          <button ref="createButton" class="primary" :disabled="!ready || !snapshot.availableToHoldQuantity" @click="edit()">Create build hold</button>
           <ul v-if="snapshot.holds.length" class="receipt-lines" aria-label="Project holds">
             <li v-for="hold in snapshot.holds" :key="hold.id">
-              <strong>{{ hold.purpose }}</strong><p>{{ hold.remainingQuantity }} held · {{ hold.releasedQuantity }} released of {{ hold.quantity }}</p>
+              <strong>{{ hold.purpose }}</strong><small>Hold ID {{ hold.id }}</small><p>{{ hold.remainingQuantity }} held · {{ hold.releasedQuantity }} released of {{ hold.quantity }}</p>
               <small>{{ hold.reason }} · {{ time(hold.createdAt) }}</small>
-              <button v-if="hold.releasedQuantity" :aria-expanded="historyId === hold.id"
+              <button v-if="hold.releasedQuantity" :aria-label="'Release history for ' + hold.purpose + ' · Hold ID ' + hold.id" :aria-expanded="historyId === hold.id"
                 @click="historyId = historyId === hold.id ? '' : hold.id">Release history</button>
               <HoldReleases v-if="historyId === hold.id" :key="hold.id" :bin="location.id" :position="positionId" :hold="hold.id"
                 :connected="connected" :as-of="snapshot.asOf" @failure="emit('failure', $event)" />
-              <button v-if="hold.remainingQuantity" :aria-label="'Release pieces from ' + hold.purpose" :disabled="!ready" @click="edit(hold)">Release pieces</button>
+              <button v-if="hold.remainingQuantity" :data-release="hold.id" :aria-label="'Release pieces from ' + hold.purpose + ' · Hold ID ' + hold.id" :disabled="!ready" @click="edit(hold)">Release pieces</button>
             </li>
           </ul>
           <p v-else-if="ready">No build holds recorded for this position.</p>
@@ -155,7 +177,7 @@ async function save() {
             <button :disabled="!ready || !snapshot.nextAfter" @click="page(snapshot.nextAfter)">Older holds</button></nav>
         </template>
         <form v-else @submit.prevent="save">
-          <h3>{{ draft.selected ? 'Release from ' + draft.selected.purpose : 'Create build hold' }}</h3>
+          <h3 ref="formHeading" tabindex="-1">{{ draft.selected ? 'Release from ' + draft.selected.purpose : 'Create build hold' }}</h3>
           <p v-if="stale" role="alert" class="warning">Stock or count evidence changed. Cancel and review the current quantities before making a decision.</p>
           <fieldset :disabled="!ready || Boolean(stale)">
             <label v-if="!draft.selected">Build or project<input v-model="purpose" required maxlength="120" /></label>
@@ -163,9 +185,11 @@ async function save() {
             <label>{{ draft.selected ? 'Quantity to release' : 'Quantity to reserve' }}<input v-model="amount" type="number" min="1" :max="maximum" required /></label>
             <label>Reason<input v-model="reason" maxlength="200" required /></label>
           </fieldset>
+          <p v-if="draft.selected" class="release-target"><strong>{{ draft.selected.purpose }}</strong>
+            <small>Hold ID {{ draft.selected.id }}</small></p>
           <p v-if="message" role="alert" class="warning">{{ message }}</p>
-          <div class="actions"><button type="button" :disabled="sending" @click="draft = undefined">Cancel</button>
-            <button class="primary" :disabled="!canSave">{{ draft.selected ? 'Confirm release' : 'Confirm hold' }}</button></div>
+          <div class="actions"><button type="button" :disabled="sending" @click="cancel">Cancel</button>
+            <button class="primary" :disabled="!canSave" :aria-label="draft.selected ? 'Confirm release from ' + draft.selected.purpose + ' · Hold ID ' + draft.selected.id : undefined">{{ draft.selected ? 'Confirm release' : 'Confirm hold' }}</button></div>
         </form>
       </template>
     </div>
@@ -176,6 +200,8 @@ async function save() {
 .hold-body { display: grid; gap: 12px; padding: 16px; overflow-wrap: anywhere }
 .hold-body p, .hold-body h3, .hold-body dl, .hold-body ul { margin: 0 }
 .hold-body > button { justify-self: start }
+.position-identity, .release-target { display: grid; gap: 3px }
+.position-identity small, .release-target small, .receipt-lines small { overflow-wrap: anywhere }
 .hold-body form, .hold-body fieldset { display: grid; gap: 10px }
 .hold-body fieldset { border: 0; padding: 0; min-width: 0 }
 .hold-body label { display: grid; gap: 4px }

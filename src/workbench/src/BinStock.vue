@@ -128,7 +128,7 @@ watch(() => [props.location.id, props.location.revision, props.asOf, props.conne
               :aria-label="'Transfer stock from ' + layer.purchaseReference + ' · ' + layer.deliveryReference"
               @click="openTransfer(stock.positions[index], $event)">Transfer stock</button>
             <a class="count-link" :href="countPositionLink(location.id, layer.placementId)" :aria-label="'Count stock for ' + layer.purchaseReference + ' · ' + layer.deliveryReference">Count stock</a>
-            <a class="count-link" :href="holdPositionLink(location.id, layer.placementId)" :aria-label="'Build holds for ' + layer.purchaseReference + ' · ' + layer.deliveryReference">Build holds</a>
+            <a class="count-link" :href="holdPositionLink(location.id, layer.placementId)" :aria-label="'Build holds for ' + layer.purchaseReference + ' · ' + layer.deliveryReference + ' · Position ID ' + layer.placementId">Build holds</a>
             <small v-if="fenced.has(layer.placementId)" class="warning">Open shortage · transfers and new offer backing are blocked.</small>
           </li>
         </ul>

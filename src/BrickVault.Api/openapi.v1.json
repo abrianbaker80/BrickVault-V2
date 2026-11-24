@@ -4443,6 +4443,24 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "purchaseReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deliveryReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Revision recorded on the placement."
+          },
+          "currentCatalog": {
+            "$ref": "#/components/schemas/CatalogRow"
           }
         },
         "required": [
@@ -4461,7 +4479,11 @@
           "shortageId",
           "latestObservationId",
           "holds",
-          "nextAfter"
+          "nextAfter",
+          "purchaseReference",
+          "deliveryReference",
+          "catalogRevision",
+          "currentCatalog"
         ],
         "additionalProperties": false
       },
