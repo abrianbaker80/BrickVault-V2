@@ -1,10 +1,14 @@
 import type { Catalog } from './api'
 
-export function itemLabel(catalog: Catalog[], id: string) {
+export function itemLabel(catalog: Catalog[], id: string, recordedRevision?: number | null) {
   const row = catalog.find(item => item.id === id)
-  if (!row) return 'Catalog record ' + id
+  if (!row) return 'Catalog record ' + id + (recordedRevision ? ' · Revision ' + recordedRevision : '')
   const color = row.colorState === 'known' ? 'color ' + row.colorId : row.colorState
-  return [row.itemNumber, row.variant, row.name, color, row.condition, row.completeness].filter(Boolean).join(' · ')
+  const description = [row.itemNumber, row.variant, row.name, color, row.condition, row.completeness].filter(Boolean).join(' · ')
+  if (recordedRevision && recordedRevision !== row.revision) {
+    return `Recorded catalog ${id} · Revision ${recordedRevision}. Current catalog (revision ${row.revision}) · ${description}`
+  }
+  return description
 }
 
 function currencyFormat(currency: string) {
