@@ -5,11 +5,17 @@ import { test } from './trusted'
 
 test('a count review identifies protected pieces and both unpublished offers before any loss is posted', async ({ page }, info) => {
   const f = await fixture(page)
-  await f.secondOffer()
+  const source = await page.request.get('/api/v1/receiving/bins/' + f.b.id + '/movements')
+  const other = (await source.json()).positions[0].layer.placementId
+  const sharedOffer = await f.write('receiving/offers', 5, { purchaseId: f.paid.purchaseId, catalogId: f.catalogId,
+    unitPriceMinor: 225, backing: [{ placementId: f.position, quantity: 2 }, { placementId: other, quantity: 1 }] })
+  await f.write('receiving/transfers', 6, { purchaseId: f.paid.purchaseId, sourcePlacementId: other, sourceLocationId: f.b.id,
+    confirmedSourceLocationCode: f.b.code, destinationLocationId: f.a.id, confirmedDestinationLocationCode: f.a.code,
+    quantity: 1, reason: 'Same offer also backs a second position in this bin', backing: [{ offerId: sharedOffer, quantity: 1 }] })
   const position = f.position
   const base = { purchaseId: f.paid.purchaseId, positionId: position, locationId: f.a.id, confirmedLocationCode: f.a.code }
-  await f.write('receiving/holds', 6, { ...base, purpose: 'Display model', quantity: 1, reason: 'Show reservation separately' })
-  const obs = await f.write('receiving/counts', 7, { ...base, countedQuantity: 3, reason: 'Three pieces witnessed in the tray' })
+  await f.write('receiving/holds', 7, { ...base, purpose: 'Display model', quantity: 1, reason: 'Show reservation separately' })
+  const obs = await f.write('receiving/counts', 8, { ...base, countedQuantity: 3, reason: 'Three pieces witnessed in the tray' })
   await page.setViewportSize({ width: 320, height: 720 })
   await page.goto('/' + countReceiptLink(f.a.id, obs))
   const receipt = page.getByRole('dialog', { name: 'Count receipt' })
@@ -19,6 +25,8 @@ test('a count review identifies protected pieces and both unpublished offers bef
   await expect(review.locator('dd')).toHaveText(['6', '3', '3', '3', '1', '2', '5', 'USD 12.34'])
   await expect(review.getByRole('listitem')).toHaveCount(2)
   await expect(review).toContainText(f.firstOffer)
+  await expect(review.getByRole('listitem').filter({ hasText: f.firstOffer })).toContainText('3 backed by this position')
+  await expect(review.getByRole('listitem').filter({ hasText: sharedOffer })).toContainText('2 backed by this position')
   await expect(review).toContainText('At least 3 units of offer backing need review.')
   await expect(review.getByRole('link', { name: 'Latest witnessed count' })).toHaveAttribute('href', countReceiptLink(f.a.id, obs))
   expect(await receipt.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true)
@@ -29,7 +37,7 @@ test('a count review identifies protected pieces and both unpublished offers bef
   const facts = (await fresh.json()).purchases.find((p: {id: string}) => p.id === f.paid.purchaseId)
   expect(facts.balances.physicalOnHand).toBe(8)
   expect(facts.balances.reserved).toBe(1)
-  expect(facts.offers.map((offer: {backedQuantity: number}) => offer.backedQuantity).sort()).toEqual([2,3])
+  expect(facts.offers.map((offer: {backedQuantity: number}) => offer.backedQuantity).sort()).toEqual([3,3])
 })
 
 test('offer pages keep their confirmed rows and restart when a newer count changes the case', async ({ page }) => {
@@ -80,6 +88,8 @@ test('offer pages keep their confirmed rows and restart when a newer count chang
   await expect(rows.locator('small')).toHaveText(firstPage)
   await review.getByRole('button', { name: 'Read current review' }).click()
   await expect(review.getByRole('link', { name: 'Latest witnessed count' })).toHaveAttribute('href', countReceiptLink(f.a.id, latest))
+  await expect(receipt.getByRole('region', { name: 'Open shortage' })).toContainText('5 missing at opening · 0 missing on latest count')
+  await expect(receipt.getByText('First observed count', { exact: true })).toBeVisible()
   await expect(review).toContainText('The latest count supports no stock loss.')
   await expect(review.locator('dd')).toHaveText(['26','27','0','26','0','26','26','Unknown (EUR)'])
 })

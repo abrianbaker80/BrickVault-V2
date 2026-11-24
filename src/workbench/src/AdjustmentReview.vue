@@ -5,8 +5,8 @@ import { countReceiptLink } from './countLinks'
 import { time } from './presentation'
 import { money } from './receiving'
 
-const props = defineProps<{ bin: string; position: string; caseId: string; asOf: string; connected: boolean }>()
-const emit = defineEmits<{ failure: [reason: unknown] }>()
+const props = defineProps<{ bin: string; position: string; caseId: string; witnessId: string; asOf: string; connected: boolean }>()
+const emit = defineEmits<{ failure: [reason: unknown]; refreshCount: [] }>()
 const expanded = ref(false)
 const page = shallowRef<Awaited<ReturnType<typeof api.adjustmentReview>>>()
 const displayed = shallowRef<string[]>([''])
@@ -16,14 +16,19 @@ const loading = ref(false)
 const error = ref('')
 const partial = ref(false)
 const stalePage = ref(false)
+const awaitingWitness = ref('')
 const offersHeading = ref<HTMLElement>()
 
-watch(() => [expanded.value, props.bin, props.position, props.caseId, props.asOf, props.connected, requested.value, retry.value] as const,
-  async ([open, bin, position, caseId, , online, cursors], _, cleanup) => {
+watch(() => [expanded.value, props.bin, props.position, props.caseId, props.witnessId, props.asOf, props.connected, requested.value, retry.value] as const,
+  async ([open, bin, position, caseId, witnessId, , online, cursors], _, cleanup) => {
     let current = true
     cleanup(() => { current = false })
     loading.value = open && online
     if (!loading.value) return
+    if (page.value && page.value.latestObservation.id !== witnessId && cursors.length > 1) {
+      requested.value = ['']
+      return
+    }
     error.value = ''
     stalePage.value = false
     try {
@@ -31,6 +36,14 @@ watch(() => [expanded.value, props.bin, props.position, props.caseId, props.asOf
       if (!current) return
       partial.value = !result.complete
       if (partial.value) return
+      if (result.latestObservation.id !== witnessId) {
+        if (awaitingWitness.value !== result.latestObservation.id) {
+          awaitingWitness.value = result.latestObservation.id
+          emit('refreshCount')
+        }
+        return
+      }
+      awaitingWitness.value = ''
       const moved = displayed.value.length !== cursors.length
       page.value = result
       displayed.value = cursors
@@ -43,6 +56,7 @@ watch(() => [expanded.value, props.bin, props.position, props.caseId, props.asOf
     } finally { if (current) loading.value = false }
   })
 function retryRead() {
+  if (awaitingWitness.value) emit('refreshCount')
   if (stalePage.value) requested.value = ['']
   ++retry.value
 }
@@ -52,10 +66,11 @@ function retryRead() {
     <summary>Review stock adjustment</summary>
     <section v-if="expanded" aria-label="Stock adjustment review">
       <p v-if="!connected || error" class="warning" role="status">{{ error || 'Disconnected.' }} {{ page ? 'Showing the last confirmed review.' : 'Review unavailable.' }}</p>
+      <p v-else-if="awaitingWitness" class="warning" role="status">A newer count is available. Updating the shortage summary.</p>
       <p v-else-if="partial" class="warning" role="status">Incomplete adjustment review. {{ page ? 'Showing the last confirmed review.' : 'Quantities are awaiting confirmation.' }}</p>
       <p v-else-if="loading" role="status">Reading the latest count and commitments…</p>
-      <button v-if="connected && (partial || error)" :disabled="loading" @click="retryRead">{{ stalePage ? 'Read current review' : 'Retry adjustment review' }}</button>
-      <template v-if="page">
+      <button v-if="connected && (partial || error || awaitingWitness)" :disabled="loading" @click="retryRead">{{ stalePage ? 'Read current review' : 'Retry adjustment review' }}</button>
+      <template v-if="page && page.latestObservation.id === witnessId && !awaitingWitness">
         <p><strong>{{ page.receipt.deliveryReference }} · {{ page.location.code }}</strong><small>Review read {{ time(page.asOf) }} · purchase revision {{ page.purchaseRevision }}</small></p>
         <a :href="countReceiptLink(bin, page.latestObservation.id)">Latest witnessed count</a>
         <dl class="details">
@@ -74,7 +89,7 @@ function retryRead() {
         <p v-if="!page.candidateLossQuantity">The latest count supports no stock loss.</p>
         <h3 ref="offersHeading" tabindex="-1">Unpublished offers ({{ page.offerCount }})</h3>
         <ul v-if="page.offers.length" class="receipt-lines">
-          <li v-for="offer in page.offers" :key="offer.id"><strong>{{ offer.backedQuantity }} backed in this bin</strong>
+          <li v-for="offer in page.offers" :key="offer.id"><strong>{{ offer.backedQuantity }} backed by this position</strong>
             <p>{{ money(offer.unitPriceMinor, offer.currency) }} per unit</p><small>Offer {{ offer.id }}</small></li>
         </ul>
         <p v-else-if="!page.offerCount">No unpublished offers use this position.</p>
