@@ -102,17 +102,31 @@ def qualify_receiving(instance, client, catalog_id):
         catalogId=None,
         itemCostMinor=None,
     )
-    check_stock(purchase_row(client, purchase_id), 12, 4, 8)
-    _, shelf_b = post(
-        client,
-        "receiving/putaway",
-        receipt_b["revision"],
+    mixed = purchase_row(client, purchase_id)
+    check_stock(mixed, 12, 4, 8)
+    put_b = dict(
         purchaseId=purchase_id,
         deliveryId=receipt_b["entityId"],
         catalogId=catalog_id,
         locationId=bins["C-03"],
         confirmedLocationCode="C-03",
         quantity=3,
+    )
+    denied = client.call(
+        "receiving/putaway",
+        "POST",
+        {"commandId": str(uuid.uuid4()), "expectedRevision": receipt_b["revision"], **put_b},
+        expected=409,
+    )
+    assert denied["code"] == "catalog_reconfirmation_required"
+    assert purchase_row(client, purchase_id) == mixed
+    selected = next(row for row in client.call("workspace")["catalog"] if row["id"] == catalog_id)
+    _, shelf_b = post(
+        client,
+        "receiving/putaway",
+        receipt_b["revision"],
+        confirmedCatalogRevision=selected["revision"],
+        **put_b,
     )
     placed = purchase_row(client, purchase_id)
     check_stock(placed, 12, 1, 11)

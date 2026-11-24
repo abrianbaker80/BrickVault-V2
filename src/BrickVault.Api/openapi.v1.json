@@ -1467,7 +1467,7 @@
             ],
             "minimum": 1,
             "maximum": 2147483647,
-            "description": "The selected current catalog revision explicitly confirmed by the operator. Required when an identified delivery recorded an older revision."
+            "description": "The selected current catalog revision explicitly confirmed by the operator. Required for unidentified deliveries and when an identified delivery recorded an older revision."
           }
         },
         "required": [

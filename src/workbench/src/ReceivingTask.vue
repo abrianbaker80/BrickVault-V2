@@ -34,7 +34,7 @@ const needsReconfirmation = computed(() => Boolean(line.value?.catalogId && curr
   currentItem.value.revision !== line.value.catalogRevision))
 const confirmedRevision = ref<number | null>(null)
 const verifiedIdentity = computed(() => currentItem.value?.integrationEligible &&
-  (!needsReconfirmation.value || confirmedRevision.value === currentItem.value.revision))
+  ((line.value?.catalogId && !needsReconfirmation.value) || confirmedRevision.value === currentItem.value.revision))
 const available = computed(() => placements.value.filter(p => p.freeToBackQuantity > 0 &&
   eligible.value.some(c => c.id === p.catalogId && c.revision === p.catalogRevision)))
 const itemsToOffer = computed(() => eligible.value.filter(c => available.value.some(p => p.catalogId === c.id)))
@@ -46,7 +46,17 @@ const label = (id: string) => itemLabel(props.workspace.catalog, id)
 function clearBin() { scanned.value = ''; moved.value = undefined; issue.value = '' }
 function clearPlacement() { identifiedItem.value = ''; confirmedRevision.value = null; target.value = ''; clearBin() }
 watch(deliveryId, clearPlacement)
-watch(() => currentItem.value?.revision, () => { confirmedRevision.value = null })
+function identifyMixed(id: string) {
+  identifiedItem.value = id
+  confirmedRevision.value = currentItem.value?.revision ?? null
+  clearBin()
+}
+watch(() => currentItem.value?.revision, revision => {
+  if (confirmedRevision.value !== null && revision !== confirmedRevision.value) {
+    confirmedRevision.value = null
+    if (!line.value?.catalogId) { identifiedItem.value = ''; clearBin() }
+  }
+})
 watch(target, clearBin)
 watch(offerItem, () => { quantities.value = {}; issue.value = '' })
 function change(next: Step) {
@@ -82,7 +92,7 @@ async function save() {
     }
     const result = await props.dispatch({ kind: 'putaway', workspaceId, body: { ...common,
       deliveryId: line.value.id, catalogId: selectedItem.value, locationId: target.value,
-      ...(needsReconfirmation.value && confirmedRevision.value !== null ? { confirmedCatalogRevision: confirmedRevision.value } : {}),
+      ...(confirmedRevision.value !== null ? { confirmedCatalogRevision: confirmedRevision.value } : {}),
       confirmedLocationCode: scanned.value, quantity: moved.value } })
     if (result) change(remaining.value ? 'receive' : pendingLines.value.length ? 'putaway' : 'offer')
   } else {
@@ -133,7 +143,7 @@ async function save() {
           <fieldset class="fields" :disabled="!enabled || stale">
             <label class="span">Delivery to put away<select v-model="deliveryId" required><option disabled value="">Choose delivery</option>
               <option v-for="d in pendingLines" :key="d.id" :value="d.id">{{ d.reference }} · {{ d.intakeQuantity }} {{ d.catalogId ? 'in intake' : 'in quarantine' }}</option></select></label>
-            <label v-if="line && !line.catalogId" class="span">Identified catalog item<select v-model="identifiedItem" required><option disabled value="">Choose the verified variant and condition</option>
+            <label v-if="line && !line.catalogId" class="span">Identified catalog item<select :value="identifiedItem" @change="identifyMixed(($event.target as HTMLSelectElement).value)" required><option disabled value="">Choose the verified variant and condition</option>
               <option v-for="c in eligible" :key="c.id" :value="c.id">{{ label(c.id) }}</option></select></label>
             <p v-else-if="line?.catalogId" class="span field-hint">{{ label(line.catalogId) }}</p>
             <div v-if="needsReconfirmation && currentItem" class="span reconfirmation">

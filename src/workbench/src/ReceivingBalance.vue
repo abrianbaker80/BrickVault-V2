@@ -21,10 +21,10 @@ const amount = (value: number | null) => money(value, props.purchase.currency)
       <ul v-if="purchase.deliveries.length" class="receipt-lines" aria-label="Deliveries and bin positions">
         <li v-for="d in purchase.deliveries" :key="d.id">
           <div class="receipt-line-head"><strong>{{ d.reference }}</strong><span>{{ d.quantity }} received</span></div>
-          <small>{{ d.catalogId ? itemLabel(catalog, d.catalogId) : 'Mixed delivery' }} · Item cost {{ amount(d.itemCostMinor) }}</small>
+          <small>{{ d.catalogId ? itemLabel(catalog, d.catalogId, d.catalogRevision) : 'Mixed delivery' }} · Item cost {{ amount(d.itemCostMinor) }}</small>
           <ul class="bin-rows">
             <li v-if="d.intakeQuantity"><span>{{ d.catalogId ? 'Intake' : 'Quarantine' }}</span><strong>{{ d.intakeQuantity }}</strong></li>
-            <li v-for="p in d.placements" :key="p.id"><span>Bin {{ p.locationCode }}<small>{{ itemLabel(catalog, p.catalogId) }}</small></span><strong>{{ p.quantity }}</strong></li>
+            <li v-for="p in d.placements" :key="p.id"><span>Bin {{ p.locationCode }}<small>{{ itemLabel(catalog, p.catalogId, p.catalogRevision) }}</small></span><strong>{{ p.quantity }}</strong></li>
           </ul>
         </li>
       </ul>
@@ -49,7 +49,7 @@ const amount = (value: number | null) => money(value, props.purchase.currency)
       <ul v-if="purchase.offers.length" class="receipt-lines" aria-label="Unpublished offers">
         <li v-for="offer in purchase.offers" :key="offer.id">
           <div class="receipt-line-head"><strong>{{ money(offer.unitPriceMinor, offer.currency) }} per unit</strong><span>{{ offer.backedQuantity }} backed</span></div>
-          <small>{{ itemLabel(catalog, offer.catalogId) }}</small>
+          <small>{{ itemLabel(catalog, offer.catalogId, offer.catalogRevision) }}</small>
           <p v-if="!offer.backingCurrent" class="warning">The backing needs renewed catalog confirmation. Check the item revision before using this offer.</p>
           <ul class="bin-rows"><li v-for="b in offer.backing" :key="b.placementId"><span>{{ positions.get(b.placementId) }}</span><strong>{{ b.quantity }}</strong></li></ul>
         </li>

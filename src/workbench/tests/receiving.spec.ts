@@ -17,13 +17,14 @@ async function references(page: Page, key: string) {
     variant: 'a', colorState: 'known', colorId: 7, condition: 'new', completeness: 'complete', mapping: 'confirmed',
     source: 'Operator receiving qualification', license: 'operator-owned' }
   const item = await create('catalog', itemFields)
-  async function revise(expectedRevision: number) {
-    const result = await page.request.post('/api/v1/catalog', { headers, data: { ...itemFields, id: item,
+  const alternative = await create('catalog', { ...itemFields, itemNumber: 'ALT-' + key })
+  async function revise(expectedRevision: number, id = item, condition = 'new') {
+    const result = await page.request.post('/api/v1/catalog', { headers, data: { ...itemFields, itemNumber: (id === alternative ? 'ALT-' : 'PL-') + key, id, condition,
       name: 'Reconfirmed plate ' + key, commandId: randomUUID(), expectedRevision } })
     expect(result.ok()).toBe(true)
   }
   const binA = 'B-' + key, binB = 'C-' + key
-  return { item, revise, binA, binB, locationA: await create('locations', { name: 'First storage bin', code: binA }),
+  return { item, alternative, revise, binA, binB, locationA: await create('locations', { name: 'First storage bin', code: binA }),
     locationB: await create('locations', { name: 'Second storage bin', code: binB }) }
 }
 
@@ -40,7 +41,7 @@ test('split receipts, lost confirmation, partial putaway and explicit unpublishe
   await page.getByLabel('Password').fill(process.env.BV_OWNER_PASSWORD!)
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page.getByText('Connected', { exact: true })).toBeVisible()
-  const { item, revise, binA, binB, locationA, locationB } = await references(page, key)
+  const { item, alternative, revise, binA, binB, locationA, locationB } = await references(page, key)
   await page.getByRole('link', { name: 'Receiving' }).click()
   await page.getByRole('button', { name: 'New purchase' }).click()
   await page.getByLabel('Purchase reference').fill(purchase)
@@ -103,7 +104,18 @@ test('split receipts, lost confirmation, partial putaway and explicit unpublishe
   await page.getByLabel('Item cost basis').selectOption('unknown')
   await page.getByRole('button', { name: 'Receive delivery' }).click()
   await balance(page, 12, 4, 8)
-  await page.getByLabel('Identified catalog item').selectOption(item)
+  const identify = page.getByLabel('Identified catalog item')
+  await identify.selectOption(alternative)
+  await page.getByLabel('Destination bin').selectOption(locationB)
+  await page.getByLabel('Confirm bin code').fill(binB)
+  await page.getByLabel('Count placed').fill('3')
+  await revise(1, alternative, 'used')
+  const declined = page.waitForResponse(r => r.url().endsWith('/receiving/putaway') && r.status() === 409)
+  await page.getByRole('button', { name: 'Confirm putaway' }).click()
+  await declined
+  await expect(identify).toHaveValue('')
+  await balance(page, 12, 4, 8)
+  await identify.selectOption(item)
   await page.getByLabel('Destination bin').selectOption(locationB)
   await page.getByLabel('Confirm bin code').fill(binB)
   await page.getByLabel('Count placed').fill('3')
@@ -135,9 +147,13 @@ test('split receipts, lost confirmation, partial putaway and explicit unpublishe
   await expect(page.getByRole('heading', { name: purchase })).toBeVisible()
   await expect(offers).toContainText('7 backed')
   await expect(page.getByRole('region', { name: 'Price and publication' })).toContainText('Published0')
-  await revise(2)
+  await revise(2, item, 'used')
   await page.getByRole('button', { name: 'Refresh', exact: true }).click()
   await expect(offers).toContainText('The backing needs renewed catalog confirmation')
+  await expect(lines.getByText('Recorded catalog ' + item + ' · Revision 1.', { exact: false }).first()).toBeVisible()
+  await expect(lines.getByText('Recorded catalog ' + item + ' · Revision 2.', { exact: false }).first()).toBeVisible()
+  await expect(offers).toContainText('Current catalog (revision 3)')
+  await expect(offers).toContainText('used')
   const publication = page.getByRole('region', { name: 'Price and publication' })
   await expect(publication.locator('dt')).toHaveText(['Backed', 'Free units withheld', 'Published'])
   await expect(publication.locator('dd')).toHaveText(['7', '4', '0'])
@@ -151,6 +167,39 @@ test('split receipts, lost confirmation, partial putaway and explicit unpublishe
     await balance(narrow, 12, 1, 11)
     expect(await narrow.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   } finally { await reader.close() }
+})
+
+test('purchase selection remains bound to its link across refresh and same-page navigation', async ({ page }) => {
+  await page.goto('/#receiving')
+  await page.getByLabel('Password').fill(process.env.BV_OWNER_PASSWORD!)
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'New purchase' })).toBeEnabled()
+  const session = await (await page.request.get('/api/v1/session')).json()
+  async function purchase(reference: string) {
+    const response = await page.request.post('/api/v1/receiving/purchases', {
+      headers: { 'X-CSRF-Token': session.csrfToken, 'X-Workspace-Id': session.workspaceId, Origin: new URL(page.url()).origin },
+      data: { commandId: randomUUID(), expectedRevision: 0, reference, source: 'Fictional selection test',
+        currency: 'USD', orderedQuantity: 2, pendingChargeMinor: null }
+    })
+    expect(response.ok()).toBe(true)
+    return (await response.json()).entityId as string
+  }
+  const key = randomUUID().slice(0,8)
+  const first = await purchase('PO-A-' + key)
+  const second = await purchase('PO-B-' + key)
+  await page.goto('/#receiving/' + first)
+  await page.getByRole('button', { name:'Refresh', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'PO-A-' + key })).toBeVisible()
+  await page.goto('/#receiving/' + second)
+  await expect(page.getByRole('heading', { name: 'PO-B-' + key })).toBeVisible()
+  await purchase('000-' + key)
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'PO-B-' + key })).toBeVisible()
+  await page.goto('/#receiving/' + randomUUID())
+  await expect(page.getByText('The selected purchase is unavailable in this read.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Receive delivery' })).toHaveCount(0)
+  await page.getByLabel('Purchase', { exact: true }).selectOption(first)
+  await expect(page.getByRole('heading', { name: 'PO-A-' + key })).toBeVisible()
 })
 
 async function accessible(page: Page) {

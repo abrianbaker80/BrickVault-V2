@@ -80,7 +80,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
                 "receiving_quantity" => Rejected("quantity_unavailable", "There are fewer units available for this action."),
                 "receiving_catalog" => Rejected("catalog_ineligible", "Confirm a matching, eligible catalog identity and condition."),
                 "receiving_catalog_reconfirmation" => Rejected("catalog_reconfirmation_required",
-                    "The catalog changed since receipt or confirmation. Review the current identity and confirm it before putaway."),
+                    "Review the current catalog identity and confirm its revision before putting away unidentified or changed stock."),
                 "receiving_delivery" => Rejected("delivery_mismatch", "Select a delivery from this purchase."),
                 "receiving_bin" => Rejected("bin_confirmation_mismatch", "The confirmed code must match the selected bin."),
                 _ => Rejected("backing_mismatch", "Select matching stock placements that are available to back this offer.")
