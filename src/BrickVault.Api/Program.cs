@@ -31,6 +31,7 @@ try
     var receiving = new Receiving(db);
     var counts = new StockCounts(db);
     var holds = new BuildHolds(db);
+    var adjustmentReviews = new StockAdjustmentReviews(db);
     var bins = new BinStock(db);
     var inventory = new StockRegister(db);
     var transfers = new Transfers(db);
@@ -118,6 +119,9 @@ try
             holds.Releases(locationId, positionId, holdId, after, limit ?? 25, ct, commandId));
     api.MapPost("/receiving/holds", (HttpContext c, CancellationToken ct) => Save<StockHoldCommand>(c, holds.Save, ct));
     api.MapPost("/receiving/holds/release", (HttpContext c, CancellationToken ct) => Save<StockHoldReleaseCommand>(c, holds.Save, ct));
+    api.MapGet("/receiving/bins/{locationId:guid}/positions/{positionId:guid}/shortages/{caseId:guid}/adjustment-review",
+        (Guid locationId, Guid positionId, Guid caseId, string? after, int? limit, CancellationToken ct) =>
+            adjustmentReviews.Read(locationId, positionId, caseId, after, limit ?? 25, ct));
     api.MapGet("/receiving/bins/{locationId:guid}/counts",
         (Guid locationId, Guid? positionId, Guid? after, int? limit, Guid? observationId, Guid? commandId,
             CancellationToken ct) => counts.Snapshot(locationId, ct, positionId, after, limit ?? 25, observationId, commandId));

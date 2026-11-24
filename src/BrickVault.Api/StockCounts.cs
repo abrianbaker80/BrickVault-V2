@@ -45,7 +45,7 @@ internal sealed class StockCounts(NpgsqlDataSource db)
     private static Fault StalePurchase() =>
         new(409, "revision_conflict", "This purchase has changed. Reload its current positions and confirm the count.");
 
-    private const string ObservationProjection = """
+    internal const string ObservationProjection = """
         SELECT n.id,n.command_id,c.correlation_id,n.purchase_id,n.position_id,n.location_id,n.location_code,
             n.expected_purchase_revision,n.ledger_quantity,n.offer_backed_quantity,n.counted_quantity,n.reason,n.observed_at
         FROM brickvault.stock_count_observations n JOIN brickvault.commands c ON c.command_id=n.command_id
@@ -152,7 +152,7 @@ internal sealed class StockCounts(NpgsqlDataSource db)
         return new BinCountSnapshot("bin-counts", asOf, true, location, positionId, next, positions, observations, shortages);
     }
 
-    private static StockCountObservation ReadObservation(NpgsqlDataReader r)
+    internal static StockCountObservation ReadObservation(NpgsqlDataReader r)
     {
         var ledger = r.GetInt32(8);
         var counted = r.GetInt32(10);

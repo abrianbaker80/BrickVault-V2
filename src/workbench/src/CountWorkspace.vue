@@ -5,6 +5,7 @@ import type { Catalog, CountPosition, CountSnapshot, Location, TransferControls 
 import { countPositionLink, countReceiptLink, holdPositionLink } from './countLinks'
 import { itemLabel } from './receiving'
 import { time } from './presentation'
+import AdjustmentReview from './AdjustmentReview.vue'
 
 const props = defineProps<{ location: Location; positionId?: string; receiptId?: string; asOf: string;
   connected: boolean; controls: TransferControls; catalog: Catalog[] }>()
@@ -110,6 +111,8 @@ async function submit() {
           <p>Transfers and new offer backing are blocked for this position. Existing holds keep their priority until the owner selects a hold and quantity to release.</p>
           <a :href="holdPositionLink(location.id, c.positionId)">Review build holds for this shortage</a>
           <a :href="countReceiptLink(location.id, c.openingObservationId)">Opening count receipt</a>
+          <AdjustmentReview :key="c.id" :bin="location.id" :position="c.positionId" :case-id="c.id" :witness-id="c.latestObservationId"
+            :as-of="snapshot.asOf" :connected="connected" @refresh-count="attempt++" @failure="emit('failure', $event)" />
         </section>
         <template v-if="receipt">
           <h3>Observed quantities</h3>

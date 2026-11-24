@@ -119,6 +119,16 @@ export const api = {
     if (after) query.set('after', after)
     return read('inventory/positions/' + encodeURIComponent(id) + '/movements?' + query, valid.PositionMovementPage)
   },
+  async adjustmentReview(binId: string, positionId: string, caseId: string, after = '') {
+    const params = new URLSearchParams({ limit: '25' })
+    if (after) params.set('after', after)
+    const result = await read('receiving/bins/' + encodeURIComponent(binId) + '/positions/' +
+      encodeURIComponent(positionId) + '/shortages/' + encodeURIComponent(caseId) + '/adjustment-review?' + params, valid.StockAdjustmentReview)
+    if (result.location.id !== binId || result.positionId !== positionId || result.caseId !== caseId ||
+        result.latestObservation.positionId !== positionId || result.latestObservation.purchaseId !== result.purchaseId ||
+        result.latestObservation.locationId !== binId) throw new ContractFailure()
+    return result
+  },
   async positionHolds(binId: string, positionId: string, after = '', commandId = '') {
     const params = new URLSearchParams({ limit: '25' })
     if (after) params.set('after', after)
