@@ -1,14 +1,23 @@
 <script setup lang="ts">
-import { api } from './api'
-import type { StockPosition, TimelineEvent } from './api'
+import { ref } from 'vue'
+import { api, ApiFailure } from './api'
+import type { PositionTimelinePage, TimelineEvent } from './api'
+import StockPositionDetails from './StockPositionDetails.vue'
 import { countReceiptLink, lossReceiptLink } from './countLinks'
 import { time } from './presentation'
 import { usePositionPage, type PositionReadState } from './usePositionPage'
 
-const props = defineProps<{ position: StockPosition; asOf: string; state: PositionReadState }>()
-const emit = defineEmits<{ failure: [reason: unknown]; related: [id: string] }>()
+const props = defineProps<{ id: string; asOf: string; state: PositionReadState }>()
+const emit = defineEmits<{ failure: [reason: unknown]; related: [id: string]; inspect: [id: string] }>()
+const missing = ref(false)
 const { page, confirmed, requested, attempt, loading, partial, error, heading, retry } =
-  usePositionPage(props, after => api.positionTimeline(props.position, after), reason => emit('failure', reason))
+  usePositionPage<PositionTimelinePage>(props, (after, previous) => {
+    missing.value = false
+    return api.positionTimeline(props.id, after, previous?.complete ? previous.position : undefined)
+  }, reason => {
+    missing.value = reason instanceof ApiFailure && reason.status === 404 && reason.detail?.code === 'unknown_position'
+    emit('failure', reason)
+  })
 
 const titles: Record<TimelineEvent['kind'], string> = {
   'putaway': 'Put away', 'transfer-in': 'Transferred in', 'transfer-out': 'Transferred out',
@@ -18,15 +27,21 @@ const titles: Record<TimelineEvent['kind'], string> = {
 function signed(value: number) { return value > 0 ? '+' + value : String(value) }
 </script>
 <template>
+  <p v-if="missing && !page" role="status" class="balance-read">No stock position was found for this ID.</p>
+  <p v-else-if="loading || error || partial || state !== 'ready'" role="status" class="balance-read">
+    {{ page?.complete ? 'Showing balances and activity from the last confirmed timeline read.' :
+      loading ? 'Reading position balances and activity…' : 'Confirmed position balances are unavailable.' }}
+  </p>
+  <StockPositionDetails v-if="page?.complete" :record="page.position" :as-of="page.asOf" @inspect="emit('inspect', $event)" />
   <section class="timeline" role="region" aria-label="Position timeline">
     <h3 ref="heading" tabindex="-1">Position timeline</h3>
     <p v-if="error || state === 'unavailable'" class="warning" role="status">
       {{ error || 'The position could not be verified.' }} {{ page?.complete ? 'Showing the last confirmed timeline page.' : 'A complete timeline is unavailable.' }}
     </p>
     <p v-else-if="loading || state === 'loading'" role="status">Reading position activity…</p>
-    <p v-if="partial" class="warning" role="status">Partial timeline read. {{ page?.complete ? 'Showing the last confirmed timeline page.' : 'Some events may be missing.' }}</p>
+    <p v-if="partial" class="warning" role="status">Partial timeline read. {{ page?.complete ? 'Showing the last confirmed timeline page.' : 'A complete position and activity read is required.' }}</p>
     <button ref="retry" v-if="(error || partial) && state === 'ready'" class="retry" @click="attempt++">Retry timeline page {{ requested.length }}</button>
-    <template v-if="page">
+    <template v-if="page?.complete">
       <small class="stamp">Timeline read {{ time(page.asOf) }}</small>
       <p v-if="page.hasUndatedEvents" class="undated">Some events have no recorded time. Events follow the purchase revision, newest first.</p>
       <p v-if="!page.events.length && page.complete && !partial && !loading && !error && state === 'ready'" class="muted">
@@ -64,6 +79,7 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
   </section>
 </template>
 <style scoped>
+.balance-read { margin: 6px 16px; color: var(--muted); font-size: 13px }
 .timeline { padding: 10px 16px 14px; overflow-wrap: anywhere }
 .timeline h3, .timeline p { margin: 0; padding: 2px 0 }
 .timeline h3 { font-size: 15px }

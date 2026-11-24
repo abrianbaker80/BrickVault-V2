@@ -2,11 +2,9 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { api, ContractFailure, explain } from './api'
 import type { StockPage, StockPosition } from './api'
-import { countPositionLink } from './countLinks'
+import StockPositionDetails from './StockPositionDetails.vue'
 import PositionHistory from './PositionHistory.vue'
 import PositionTimeline from './PositionTimeline.vue'
-import { money } from './receiving'
-import { label, time } from './presentation'
 
 const props = defineProps<{ id: string; asOf: string; connected: boolean; historyView: 'all' | 'transfers' }>()
 const emit = defineEmits<{ failure: [reason: unknown]; inspect: [id: string]; related: [id: string]; view: [value: 'all' | 'transfers'] }>()
@@ -16,15 +14,14 @@ const read = shallowRef<StockPage | null>(null)
 const rowError = ref('')
 const reading = ref(false)
 const validId = computed(() => /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(props.id))
-const layer = computed(() => record.value?.layer)
 const historyState = computed(() => !props.connected || rowError.value ? 'unavailable' :
   reading.value ? 'loading' : read.value?.complete && read.value.rows.length ? 'ready' : 'unavailable')
-watch(() => [props.id, props.asOf, props.connected] as const, async ([id, , connected], _, onCleanup) => {
+watch(() => [props.id, props.asOf, props.connected, props.historyView] as const, async ([id, , connected, view], _, onCleanup) => {
   let active = true
   onCleanup(() => { active = false })
   rowError.value = ''
-  reading.value = connected && validId.value
-  if (!connected || !validId.value) return
+  reading.value = connected && validId.value && view === 'transfers'
+  if (!reading.value) return
   try {
     const found = await api.positions({ positionId: id, limit: 1 })
     if (!active) return
@@ -47,64 +44,32 @@ watch(() => [props.id, props.asOf, props.connected] as const, async ([id, , conn
 <template>
   <div class="position-inspector">
     <p class="position-id"><span>Position ID</span>{{ id }}</p>
+    <div v-if="validId" class="history-filter" role="group" aria-label="Position history filter">
+      <button :aria-pressed="historyView === 'all'" @click="emit('view', 'all')">All activity</button>
+      <button :aria-pressed="historyView === 'transfers'" @click="emit('view', 'transfers')">Transfers only</button>
+    </div>
     <p v-if="!validId" class="warning" role="status">This position link has an invalid ID.</p>
-    <p v-else-if="rowError || !connected" class="warning" role="status">
-      {{ rowError || 'The workspace is disconnected.' }} {{ record ? 'Showing the last position read.' : 'Position details are unavailable.' }}
-    </p>
-    <p v-else-if="reading" role="status">Reading selected position…</p>
-    <p v-else-if="read && !read.complete" class="warning" role="status">Partial position read. {{ !read.rows.length ? 'The selected position was not returned.' : '' }} {{ !read.rows.length && record ? 'Showing the last position read.' : '' }}</p>
-    <p v-else-if="read && !record" role="status">No stock position was found for this ID.</p>
-    <template v-if="record && layer">
-      <small class="history-time">Position read {{ time(recordAsOf) }}</small>
-      <div class="identity"><h3>{{ layer.currentCatalog.name }}</h3><p>{{ label(layer.currentCatalog.itemType) }} · {{ layer.currentCatalog.itemNumber }}{{ layer.currentCatalog.variant ? ' · ' + layer.currentCatalog.variant : '' }}</p>
-        <small>{{ layer.currentCatalog.colorState === 'known' ? 'Color ' + layer.currentCatalog.colorId : label(layer.currentCatalog.colorState) + ' color' }} · {{ label(layer.currentCatalog.condition) }} · {{ label(layer.currentCatalog.completeness) }}</small></div>
-      <p v-if="layer.catalogRevision !== layer.currentCatalog.revision" class="warning" role="status">Recorded at catalog revision {{ layer.catalogRevision }}. Item details show current revision {{ layer.currentCatalog.revision }}.</p>
-      <p v-if="layer.quantity === 0" class="held-note">No units remain in this position.</p>
-      <h3>Stock position</h3><dl class="details">
-        <dt>Bin</dt><dd>{{ record.location.code }} · {{ record.location.name }}</dd>
-        <dt>Physical on hand</dt><dd>{{ layer.quantity }}</dd><dt>Backed by offers</dt><dd>{{ layer.backedQuantity }}</dd>
-        <dt>Unbacked</dt><dd>{{ layer.unbackedQuantity }}</dd><dt>Available to back</dt><dd>{{ layer.freeToBackQuantity }}</dd>
-      </dl>
-      <p><a :href="countPositionLink(record.location.id, layer.placementId)">Inspect counts and stock-loss receipts</a></p>
-      <h3>Receipt provenance</h3><dl class="details">
-        <dt>Purchase</dt><dd>{{ layer.purchaseReference }}</dd><dt>Delivery</dt><dd>{{ layer.deliveryReference }}</dd>
-        <dt>Whole delivery</dt><dd>{{ layer.receiptQuantity }} units</dd><dt>Whole-delivery item cost</dt>
-        <dd>{{ money(layer.receiptItemCostMinor, layer.currency) }}<template v-if="layer.receiptItemCostMinor === null"> ({{ layer.currency }})</template></dd>
-        <dt>Original bin</dt><dd>{{ layer.locationCodeAtPutaway }}</dd>
-        <dt>Recorded catalog revision</dt><dd>{{ layer.catalogRevision }}</dd>
-      </dl>
-      <details class="ids"><summary>Receipt and catalog IDs</summary><dl class="details">
-        <dt>Purchase ID</dt><dd>{{ layer.purchaseId }}</dd><dt>Delivery ID</dt><dd>{{ layer.deliveryId }}</dd>
-        <dt>Catalog ID</dt><dd>{{ layer.catalogId }}</dd><dt>Receipt correlation ID</dt><dd>{{ layer.receiptCorrelationId }}</dd>
-        <dt>Original placement ID</dt><dd>{{ record.originPlacementId }}
-          <button v-if="record.originPlacementId !== layer.placementId" @click="emit('inspect', record.originPlacementId)">Inspect original</button></dd>
-      </dl></details>
-      <div class="history-filter" role="group" aria-label="Position history filter">
-        <button :aria-pressed="historyView === 'all'" @click="emit('view', 'all')">All activity</button>
-        <button :aria-pressed="historyView === 'transfers'" @click="emit('view', 'transfers')">Transfers only</button>
-      </div>
-      <PositionTimeline v-if="historyView === 'all'" :position="record" :as-of="recordAsOf" :state="historyState"
-        @failure="emit('failure', $event)" @related="emit('related', $event)" />
-      <PositionHistory v-else :id="layer.placementId" :as-of="recordAsOf" :state="historyState"
-        @failure="emit('failure', $event)" @inspect="emit('inspect', $event)" />
+    <PositionTimeline v-else-if="historyView === 'all'" :id="id" :as-of="asOf" :state="connected ? 'ready' : 'unavailable'"
+      @failure="emit('failure', $event)" @related="emit('related', $event)" @inspect="emit('inspect', $event)" />
+    <template v-else>
+      <p v-if="rowError || !connected" class="warning" role="status">
+        {{ rowError || 'The workspace is disconnected.' }} {{ record ? 'Showing the last position read.' : 'Position details are unavailable.' }}
+      </p>
+      <p v-else-if="reading" role="status">Reading selected position…</p>
+      <p v-else-if="read && !read.complete" class="warning" role="status">Partial position read. {{ !read.rows.length ? 'The selected position was not returned.' : '' }} {{ !read.rows.length && record ? 'Showing the last position read.' : '' }}</p>
+      <p v-else-if="read && !record" role="status">No stock position was found for this ID.</p>
+      <template v-if="record">
+        <StockPositionDetails :record="record" :as-of="recordAsOf" @inspect="emit('inspect', $event)" />
+        <PositionHistory :id="id" :as-of="recordAsOf" :state="historyState" @failure="emit('failure', $event)" @inspect="emit('inspect', $event)" />
+      </template>
     </template>
   </div>
 </template>
 <style scoped>
 .position-inspector { overflow-wrap: anywhere }
-.position-inspector h3, .position-inspector p, .identity, .ids, .history-time { margin: 0; padding: 8px 16px }
-.position-inspector h3 { font-size: 15px }
-.position-inspector p, .identity small, .history-time, .ids { font-size: 13px }
-.position-inspector .warning, .held-note { margin: 5px 12px; padding: 8px }
-.position-id span, .history-time { display: block }
-.position-id span, .identity small, .history-time { color: var(--muted) }
-.identity { padding: 12px 16px; background: var(--soft) }
-.identity h3, .identity p { padding: 0 }
-.position-inspector .details { padding: 9px 16px 14px }
-.ids { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line) }
-.ids summary { cursor: pointer; font-weight: 600 }
-.ids .details { padding-inline: 0; margin-top: 8px }
-.history-filter { display: flex; flex-wrap: wrap; gap: 4px; padding: 12px 16px 3px }
+.position-inspector > p { margin: 0; padding: 8px 16px; font-size: 13px }
+.position-inspector > .warning { margin: 5px 12px; padding: 8px }
+.position-id span { display: block; color: var(--muted) }
+.history-filter { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 16px 10px }
 .history-filter [aria-pressed="true"] { background: var(--soft); box-shadow: inset 0 -2px #6f5320; font-weight: 650 }
-.details button { display: block; margin-top: 6px }
 </style>
