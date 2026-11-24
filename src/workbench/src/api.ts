@@ -13,8 +13,8 @@ export type BinTransferSnapshot = Schema['BinTransferSnapshot']
 export type TransferPosition = BinTransferSnapshot['positions'][number]
 export type TransferCommand = Schema['TransferCommand']
 export type TransferControls = { enabled: boolean; pending: boolean; feedback: string; workspaceId: string; dispatch: Dispatch }
-export type ReceivingWorkspace = Schema['ReceivingWorkspace']
-export type Purchase = Schema['PurchaseRow']
+export type ReceivingWorkspace = Schema['CurrentReceivingWorkspace']
+export type Purchase = Schema['CurrentPurchaseRow']
 export type ReceivingCommand = { workspaceId: string } & (
   | { kind: 'purchase'; body: Schema['PurchaseCommand'] }
   | { kind: 'delivery'; body: Schema['DeliveryCommand'] }
@@ -93,7 +93,7 @@ export const api = {
   },
   workspace: (allAudit = false) => read(allAudit ? 'workspace?audit=all' : 'workspace', valid.Workspace),
   binTransfers: (id: string) => read('receiving/bins/' + encodeURIComponent(id) + '/movements', valid.BinTransferSnapshot),
-  receiving: () => read('receiving', valid.ReceivingWorkspace),
+  receiving: () => read('receiving/current', valid.CurrentReceivingWorkspace),
   diagnostic: (id: string) => read('diagnostics/' + encodeURIComponent(id), valid.Diagnostic),
   async save(command: Command, csrf: string) {
     const options = {
