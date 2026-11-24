@@ -113,9 +113,10 @@ BEGIN
     IF NOT FOUND OR (delivery.catalog_id IS NOT NULL AND delivery.catalog_id <> NEW.catalog_id) THEN
         RAISE check_violation USING CONSTRAINT = 'receiving_catalog';
     END IF;
-    IF (NEW.confirmed_catalog_revision IS NOT NULL AND NEW.confirmed_catalog_revision <> NEW.catalog_revision)
-        OR (delivery.catalog_revision <> NEW.catalog_revision
-            AND NEW.confirmed_catalog_revision IS DISTINCT FROM NEW.catalog_revision) THEN
+    -- A mixed receipt has no recorded catalog version to stand in for explicit operator confirmation.
+    IF NEW.confirmed_catalog_revision IS DISTINCT FROM NEW.catalog_revision
+        AND (NEW.confirmed_catalog_revision IS NOT NULL OR delivery.catalog_id IS NULL
+            OR delivery.catalog_revision <> NEW.catalog_revision) THEN
         RAISE check_violation USING CONSTRAINT = 'receiving_catalog_reconfirmation';
     END IF;
     PERFORM 1 FROM brickvault.locations
