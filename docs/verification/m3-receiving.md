@@ -19,6 +19,12 @@ Open the source bin in **Locations** and select the receipt layer that physicall
 
 Check the source and destination after saving. Transfers appear in both bins’ movement history with the same command receipt. A later move from the destination keeps the original delivery. The purchase's physical, quarantined, reserved and free totals and its offer quantities stay consistent across the move. [Transfer qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/18)
 
+## Locate a stock position
+
+Open **Inventory** and search for an item number, catalog name, purchase or delivery reference, bin code or record ID. Filter by item type or bin. The matching position count and total units cover the whole result, including subsequent pages. Each row represents one physical position from a specific delivery. Open the row to inspect its current catalog identity, recorded revision, quantity, offer backing, bin and movement history.
+
+A receipt cost applies to the entire delivery in its recorded currency. Two positions can show the same receipt cost when that delivery was split. An explicit zero and an unknown cost have different meanings. A bookmarked position remains addressable by ID after every unit moves out of its bin. [Inventory register qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/19)
+
 ## Stage a schema upgrade
 
 Build the current release from the checkout. Stop the source instance and use a new output directory with room for another complete cluster. The command copies the stopped cluster, operator credentials, workspace identity and established certificate authority into private staging. It applies the candidate migrations and database grants, compares the original business records and verifies the opening stock and offer backing in both directions against the receiving records. Existing positions retain their IDs. Transferring stock requires schema 4. A successful run exposes the stopped candidate at `<output>/instance`. Preserve the original instance and its matching encrypted backup.
