@@ -28,7 +28,7 @@ test('a witnessed shortage retains both builds until the owner releases units fr
   await expect(transfer).toContainText('3 reserved for builds · 3 can move, including 0 without offer backing.')
   await expect(transfer.getByLabel('Count moved')).toHaveAttribute('max', '3')
   await expect(transfer.getByRole('checkbox', { name: /Move the whole position/ })).toBeDisabled()
-  await transfer.getByLabel('Destination bin').selectOption(f.b.id)
+  await transfer.getByRole('combobox', { name: 'Destination bin', exact: true }).selectOption(f.b.id)
   await transfer.getByLabel('Confirm source bin code').fill(f.a.code)
   await transfer.getByLabel('Confirm destination bin code').fill(f.b.code)
   await transfer.getByLabel('Count moved').fill('1')
