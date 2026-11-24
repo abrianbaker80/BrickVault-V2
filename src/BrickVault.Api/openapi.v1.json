@@ -1952,7 +1952,6 @@
           },
           "complete": {
             "type": "boolean",
-            "const": true,
             "description": "All current placements in the selected location were read."
           },
           "location": {
