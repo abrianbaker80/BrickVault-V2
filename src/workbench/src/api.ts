@@ -14,6 +14,9 @@ export type PositionMovementPage = Schema['PositionMovementPage']
 export type StockPosition = Schema['StockRegisterRow']
 export type StockQuery = NonNullable<operations['searchStockPositions']['parameters']['query']>
 export type BinTransferSnapshot = Schema['BinTransferSnapshot']
+export type CountSnapshot = Schema['BinCountSnapshot']
+export type CountPosition = Schema['CountPosition']
+export type CountObservation = Schema['StockCountObservation']
 export type TransferPosition = BinTransferSnapshot['positions'][number]
 export type TransferCommand = Schema['TransferCommand']
 export type TransferControls = { enabled: boolean; pending: boolean; feedback: string; workspaceId: string; dispatch: Dispatch }
@@ -24,12 +27,13 @@ export type ReceivingCommand = { workspaceId: string } & (
   | { kind: 'delivery'; body: Schema['DeliveryCommand'] }
   | { kind: 'putaway'; body: Schema['PutawayCommand'] }
   | { kind: 'offer'; body: Schema['OfferCommand'] }
-  | { kind: 'transfer'; body: TransferCommand })
+  | { kind: 'transfer'; body: TransferCommand }
+  | { kind: 'count'; body: Schema['StockCountCommand'] })
 export type Command = ReceivingCommand | { workspaceId: string } & (
   | { kind: 'catalog'; body: Schema['CatalogCommand'] }
   | { kind: 'location'; body: Schema['LocationCommand'] })
 export type Held = { workspaceId: string | null; commandId: string }
-export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | undefined>
+export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | undefined>
 
 export function commandLabel(command: Command) {
   switch (command.kind) {
@@ -38,6 +42,7 @@ export function commandLabel(command: Command) {
     case 'delivery': return 'Delivery ' + command.body.reference
     case 'putaway': return 'Putaway to ' + command.body.confirmedLocationCode
     case 'offer': return 'Unpublished offer'
+    case 'count': return 'Stock count of ' + command.body.countedQuantity + ' in ' + command.body.confirmedLocationCode
     case 'transfer': return 'Transfer of ' + command.body.quantity + ' from ' + command.body.confirmedSourceLocationCode + ' to ' + command.body.confirmedDestinationLocationCode
   }
 }
@@ -49,6 +54,7 @@ const commands = {
   delivery: { path: 'receiving/deliveries', valid: valid.DeliveryCommand },
   putaway: { path: 'receiving/putaway', valid: valid.PutawayCommand },
   offer: { path: 'receiving/offers', valid: valid.OfferCommand },
+  count: { path: 'receiving/counts', valid: valid.StockCountCommand },
   transfer: { path: 'receiving/transfers', valid: valid.TransferCommand }
 }
 
@@ -107,6 +113,15 @@ export const api = {
     if (after) query.set('after', after)
     return read('inventory/positions/' + encodeURIComponent(id) + '/movements?' + query, valid.PositionMovementPage)
   },
+  async binCounts(binId: string, query: { positionId?: string; observationId?: string; commandId?: string; after?: string; limit?: string }) {
+    const result = await read('receiving/bins/' + encodeURIComponent(binId) + '/counts?' + new URLSearchParams(query), valid.BinCountSnapshot)
+    if (result.location.id !== binId || (query.positionId && result.positionId !== query.positionId) ||
+        result.observations.some(o => o.locationId !== binId || o.positionId !== result.positionId ||
+          (query.observationId && o.id !== query.observationId) || (query.commandId && o.commandId !== query.commandId)) ||
+        result.positions.some(p => p.positionId !== result.positionId) || result.shortages.some(s => s.positionId !== result.positionId) ||
+        ((query.observationId || query.commandId) && result.complete && result.observations.length !== 1)) throw new ContractFailure()
+    return result
+  },
   binTransfers: (id: string) => read('receiving/bins/' + encodeURIComponent(id) + '/movements', valid.BinTransferSnapshot),
   receiving: () => read('receiving/current', valid.CurrentReceivingWorkspace),
   diagnostic: (id: string) => read('diagnostics/' + encodeURIComponent(id), valid.Diagnostic),
@@ -118,6 +133,7 @@ export const api = {
     const path = commands[command.kind].path
     const receipt = command.kind === 'catalog' || command.kind === 'location'
       ? await read(path, valid.Receipt, options)
+      : command.kind === 'count' ? await read(path, valid.StockCountReceipt, options)
       : command.kind === 'transfer' ? await read(path, valid.TransferReceipt, options) : await read(path, valid.ReceivingReceipt, options)
     if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind) throw new ContractFailure()
     return receipt

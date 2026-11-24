@@ -12,6 +12,7 @@ import RecordForm from './RecordForm.vue'
 import { useWorkbench } from './useWorkbench'
 import type { CatalogInput, LocationInput } from './api'
 import { commandLabel } from './api'
+import { readCountLink } from './countLinks'
 import { time } from './presentation'
 
 const Receiving = defineAsyncComponent(() => import('./Receiving.vue'))
@@ -28,9 +29,12 @@ const route = () => {
   const hash = window.location.hash.slice(1)
   if (hash === 'inventory' || hash.startsWith('inventory/')) return 'inventory'
   if (hash === 'receiving' || hash.startsWith('receiving/')) return 'receiving'
-  return hash === 'locations' || hash === 'activity' ? hash : 'catalog'
+  if (hash === 'locations' || hash.startsWith('locations/')) return 'locations'
+  return hash === 'activity' ? hash : 'catalog'
 }
 const page = ref<Page>(route())
+const hash = ref(window.location.hash)
+const countLink = computed(() => readCountLink(hash.value))
 const { session, workspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
   canSend, canCreate, refresh, signIn, signOut, create, record, send, expired } = useWorkbench(page)
 const referencePage = computed(() => page.value === 'catalog' || page.value === 'locations')
@@ -46,6 +50,7 @@ watch(() => session.value?.workspaceId, async () => {
 const addButton = ref<HTMLButtonElement>()
 const status = computed(() => ({ loading: 'Loading', ready: 'Connected', disconnected: 'Disconnected', partial: 'Partial read' })[readState.value])
 async function navigate() {
+  hash.value = window.location.hash
   page.value = route()
   dialogKind.value = null
   await nextTick()
@@ -129,7 +134,8 @@ function openForm() {
           <p v-if="error && !dialogKind" class="warning" role="alert">{{ error }}</p>
           <p v-if="journalError" class="warning" role="alert">{{ journalError }}</p>
           <div v-if="notice" class="success" role="status"><strong>{{ notice.message }}</strong>
-            <div>Correlation ID {{ notice.correlationId }}</div></div>
+            <div>Correlation ID {{ notice.correlationId }}</div>
+            <a v-if="notice.countLink" :href="notice.countLink">View count receipt</a></div>
           <p v-if="readState === 'partial'" class="warning" role="status">The service returned a partial register. Refresh to verify the complete workspace before making a change.</p>
           <section v-if="pending.length && !submitting" class="message recovery" aria-label="Pending confirmations">
             <h2>Pending confirmation</h2>
@@ -161,7 +167,7 @@ function openForm() {
             </template>
             <Register v-else :key="session.workspaceId + page" :page="page" :workspace="workspace" :connected="readState !== 'disconnected'"
               :transfers="{ enabled: canCreate, pending: pending.length > 0, feedback: error || journalError, workspaceId: session.workspaceId, dispatch: record }"
-              :confirmed-source-id="notice?.sourceLocationId" @failure="expired" />
+              :count-link="countLink" :confirmed-source-id="notice?.sourceLocationId" @failure="expired" />
           </div>
           <RecordForm v-if="dialogKind" :kind="dialogKind" :enabled="canCreate" :saving="submitting"
             :error="error || journalError || (readState === 'disconnected' ? 'Reconnect before sending.' : '')" @close="closeForm" @save="submit" />
