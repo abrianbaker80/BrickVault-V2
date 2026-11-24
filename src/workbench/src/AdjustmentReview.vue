@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, explain } from './api'
 import { countReceiptLink } from './countLinks'
 import { time } from './presentation'
@@ -18,6 +18,7 @@ const partial = ref(false)
 const stalePage = ref(false)
 const awaitingWitness = ref('')
 const offersHeading = ref<HTMLElement>()
+const showingConfirmed = computed(() => page.value?.latestObservation.id === props.witnessId && !awaitingWitness.value)
 
 watch(() => [expanded.value, props.bin, props.position, props.caseId, props.witnessId, props.asOf, props.connected, requested.value, retry.value] as const,
   async ([open, bin, position, caseId, witnessId, , online, cursors], _, cleanup) => {
@@ -25,6 +26,7 @@ watch(() => [expanded.value, props.bin, props.position, props.caseId, props.witn
     cleanup(() => { current = false })
     loading.value = open && online
     if (!loading.value) return
+    if (awaitingWitness.value === witnessId) awaitingWitness.value = ''
     if (page.value && page.value.latestObservation.id !== witnessId && cursors.length > 1) {
       requested.value = ['']
       return
@@ -65,12 +67,12 @@ function retryRead() {
   <details class="adjustment" @toggle="expanded = ($event.target as HTMLDetailsElement).open">
     <summary>Review stock adjustment</summary>
     <section v-if="expanded" aria-label="Stock adjustment review">
-      <p v-if="!connected || error" class="warning" role="status">{{ error || 'Disconnected.' }} {{ page ? 'Showing the last confirmed review.' : 'Review unavailable.' }}</p>
+      <p v-if="!connected || error" class="warning" role="status">{{ error || 'Disconnected.' }} {{ showingConfirmed ? 'Showing the last confirmed review.' : 'Review unavailable.' }}</p>
       <p v-else-if="awaitingWitness" class="warning" role="status">A newer count is available. Updating the shortage summary.</p>
-      <p v-else-if="partial" class="warning" role="status">Incomplete adjustment review. {{ page ? 'Showing the last confirmed review.' : 'Quantities are awaiting confirmation.' }}</p>
+      <p v-else-if="partial" class="warning" role="status">Incomplete adjustment review. {{ showingConfirmed ? 'Showing the last confirmed review.' : 'Quantities are awaiting confirmation.' }}</p>
       <p v-else-if="loading" role="status">Reading the latest count and commitments…</p>
       <button v-if="connected && (partial || error || awaitingWitness)" :disabled="loading" @click="retryRead">{{ stalePage ? 'Read current review' : 'Retry adjustment review' }}</button>
-      <template v-if="page && page.latestObservation.id === witnessId && !awaitingWitness">
+      <template v-if="page && showingConfirmed">
         <p><strong>{{ page.receipt.deliveryReference }} · {{ page.location.code }}</strong><small>Review read {{ time(page.asOf) }} · purchase revision {{ page.purchaseRevision }}</small></p>
         <a :href="countReceiptLink(bin, page.latestObservation.id)">Latest witnessed count</a>
         <dl class="details">
