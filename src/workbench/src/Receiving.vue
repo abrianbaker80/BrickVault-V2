@@ -52,7 +52,7 @@ async function savePurchase() {
     <div v-else><h2>{{ stock.complete ? 'No purchases yet' : 'No purchases in this read' }}</h2><p>Record a purchase to start receiving its deliveries.</p></div>
     <button type="button" class="primary add" :disabled="!enabled || adding" @click="openPurchase"><span aria-hidden="true">+</span> New purchase</button>
   </section>
-  <section v-if="adding" class="panel purchase-form" aria-labelledby="new-purchase">
+  <section v-if="adding" class="panel purchase-form" role="region" aria-labelledby="new-purchase">
     <header class="panel-head"><h2 id="new-purchase">New purchase</h2></header>
     <form class="form-body" @submit.prevent="savePurchase">
       <fieldset class="fields" :disabled="!enabled">
