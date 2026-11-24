@@ -7,7 +7,7 @@ The private signing key stays on the controller. Keep the **public** trust file 
 ## Rotate the controller signing key
 
 1. Let pending publications finish under the outgoing key. Choose the first UTC capture second for the incoming key after the last old-key capture. The timestamp prefix of a recovery point gives its capture second.
-2. Obtain the incoming public key through a channel that independently authenticates the controller. Confirm the commissioned source and workspace IDs. Use those three fields to create `NEW_PIN.json` in protected custody. Keep the existing trust file for the full retention period.
+2. Generate a fresh Ed25519 key pair for each signing period. Rotation and verification reject reuse of any current or retired key. Obtain the incoming public key through a channel that independently authenticates the controller. Confirm the commissioned source and workspace IDs. Use those three fields to create `NEW_PIN.json` in protected custody. Keep the existing trust file for the full retention period.
 3. Prepare a combined trust file in a fresh location. Supply the cutover in `YYYYMMDDTHHMMSSZ` format. Rotation and receipt verification both reject the entire trust history if any historical pin belongs to a different source or workspace. Rotation also checks the incoming pin against the commissioned IDs before writing the combined file.
 
    ```text

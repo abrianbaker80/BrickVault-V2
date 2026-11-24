@@ -92,7 +92,7 @@ def ssh_keygen(args, content):
     return result.stdout
 
 
-def validated_pin_lineage(pin):
+def validated_pin(pin):
     if not isinstance(pin, dict):
         raise RecoveryError("Invalid signing pin in independently held receipt trust.")
     public = str(pin.get("publicKey", "")).split()
@@ -107,24 +107,30 @@ def validated_pin_lineage(pin):
     if not key.startswith(prefix) or len(key) != len(prefix) + 32:
         raise RecoveryError("Invalid OpenSSH Ed25519 public key.")
     try:
-        return uuid.UUID(pin["sourceId"]), uuid.UUID(pin["workspaceId"])
+        lineage = uuid.UUID(pin["sourceId"]), uuid.UUID(pin["workspaceId"])
     except (AttributeError, TypeError, ValueError, KeyError) as exc:
         raise RecoveryError(
             "Signing pins require their source and workspace IDs."
         ) from exc
+    return key, lineage
 
 
 def signing_periods(trust):
-    commissioned = validated_pin_lineage(trust)
+    current_key, commissioned = validated_pin(trust)
+    seen_keys = {current_key}
     previous = trust.get("previous", [])
     if not isinstance(previous, list):
         raise RecoveryError("Historical signing pins must be an ordered list.")
     last_cutover = ""
     for pin in previous:
-        if validated_pin_lineage(pin) != commissioned:
+        key, lineage = validated_pin(pin)
+        if lineage != commissioned:
             raise RecoveryError(
                 "Historical signing pins must retain the commissioned source and workspace IDs."
             )
+        if key in seen_keys:
+            raise RecoveryError("Each signing period requires a distinct Ed25519 key.")
+        seen_keys.add(key)
         cutoff = pin.get("before")
         if not isinstance(cutoff, str) or not re.fullmatch(
             r"[0-9]{8}T[0-9]{6}Z", cutoff
@@ -160,12 +166,13 @@ def rotate_trust(current_file, new_pin_file, cutover, output):
     current = load_small(current_file)
     previous = signing_periods(current)
     new = load_small(new_pin_file)
-    incoming_lineage = validated_pin_lineage(new)
+    _, incoming_lineage = validated_pin(new)
     if "previous" in new:
         raise RecoveryError(
             "Supply the single incoming controller pin and its lineage."
         )
-    if incoming_lineage != validated_pin_lineage(current):
+    _, commissioned_lineage = validated_pin(current)
+    if incoming_lineage != commissioned_lineage:
         raise RecoveryError(
             "A signing-key rotation must retain the commissioned source and workspace IDs."
         )

@@ -376,8 +376,12 @@ class CloudReceipts(unittest.TestCase):
 
     def test_historical_cutovers_are_complete_and_unambiguous(self):
         pin = cloud.load_small(self.trust)
-        first = pin | {"before": "20250101T000000Z"}
+        first = pin | {
+            "publicKey": self.keygen(self.root / "first-key"),
+            "before": "20250101T000000Z",
+        }
         second = pin | {
+            "publicKey": self.keygen(self.root / "second-key"),
             "before": "20260101T000000Z",
             "sourceId": uuid.UUID(pin["sourceId"]).hex.upper(),
             "workspaceId": "{" + pin["workspaceId"].upper() + "}",
@@ -386,7 +390,7 @@ class CloudReceipts(unittest.TestCase):
         self.assertIs(cloud.signing_pin(history, self.point), second)
         for bad in (
             [second, first],
-            [first, first],
+            [first, second | {"before": first["before"]}],
             [first | {"before": "20250230T000000Z"}],
             [first | {"workspaceId": "invalid"}],
             [first | {"publicKey": "ssh-ed25519 AAAA"}],
@@ -397,14 +401,15 @@ class CloudReceipts(unittest.TestCase):
                 cloud.signing_pin(pin | {"previous": bad}, self.point)
         incoming = self.root / "independent-pin.json"
         outgoing = self.root / "combined.json"
-        incoming.write_bytes(cloud.encoded(pin | {"workspaceId": str(uuid.uuid4())}))
+        next_pin = pin | {"publicKey": self.keygen(self.root / "next-key")}
+        incoming.write_bytes(
+            cloud.encoded(next_pin | {"workspaceId": str(uuid.uuid4())})
+        )
         with self.assertRaises(RecoveryError):
             cloud.rotate_trust(self.trust, incoming, "20270101T000000Z", outgoing)
         self.assertFalse(outgoing.exists())
         self.trust.write_bytes(cloud.encoded(history))
-        incoming.write_bytes(
-            cloud.encoded(pin | {"publicKey": self.keygen(self.root / "next-key")})
-        )
+        incoming.write_bytes(cloud.encoded(next_pin))
         cloud.rotate_trust(self.trust, incoming, "20270101T000000Z", outgoing)
         combined = cloud.load_small(outgoing)
         self.assertEqual(
@@ -412,9 +417,14 @@ class CloudReceipts(unittest.TestCase):
         )
 
     def test_reject_mixed_imported_history_before_verification_or_rotation(self):
-        commissioned = cloud.load_small(self.trust)
-        earlier = commissioned | {"before": "20250101T000000Z"}
-        retired = commissioned | {"before": "20260101T000000Z"}
+        retired = cloud.load_small(self.trust) | {"before": "20260101T000000Z"}
+        commissioned = cloud.load_small(self.trust) | {
+            "publicKey": self.keygen(self.root / "current")
+        }
+        earlier = commissioned | {
+            "before": "20250101T000000Z",
+            "publicKey": self.keygen(self.root / "earlier"),
+        }
         incoming = self.root / "incoming.json"
         incoming.write_bytes(
             cloud.encoded(commissioned | {"publicKey": self.keygen(self.root / "next")})
@@ -454,6 +464,54 @@ class CloudReceipts(unittest.TestCase):
                 self.assertEqual(output.read_bytes(), b"previously commissioned trust")
                 self.assertEqual(self.trust.read_bytes(), original_history)
                 self.assertEqual(incoming.read_bytes(), original_incoming)
+
+    def test_each_signing_period_requires_distinct_key_material(self):
+        current = cloud.load_small(self.trust)
+        retired = current | {"publicKey": self.keygen(self.root / "retired")}
+        fresh = current | {"publicKey": self.keygen(self.root / "fresh")}
+        historical = retired | {"before": "20250101T000000Z"}
+        reused_current = current | {
+            "publicKey": current["publicKey"].replace(" ", "\t")
+        }
+        reused_retired = retired | {
+            "publicKey": retired["publicKey"].replace(" ", "\t")
+        }
+        for case, previous, incoming_pin, invalid_history in (
+            ("current-key", [], reused_current, False),
+            ("retired-key", [historical], reused_retired, False),
+            (
+                "retired-key-padding",
+                [historical],
+                retired | {"publicKey": retired["publicKey"] + "="},
+                False,
+            ),
+            (
+                "repeated-current",
+                [reused_current | {"before": "20250101T000000Z"}],
+                fresh,
+                True,
+            ),
+            (
+                "repeated-history",
+                [historical, reused_retired | {"before": "20260101T000000Z"}],
+                fresh,
+                True,
+            ),
+        ):
+            with self.subTest(case=case):
+                history = current | {"previous": previous}
+                if invalid_history:
+                    with self.assertRaises(RecoveryError):
+                        cloud.signing_pin(history, self.point)
+                self.trust.write_bytes(cloud.encoded(history))
+                incoming = self.root / "incoming.json"
+                incoming.write_bytes(cloud.encoded(incoming_pin))
+                output = self.root / case
+                with self.assertRaises(RecoveryError):
+                    cloud.rotate_trust(self.trust, incoming, "20270101T000000Z", output)
+                self.assertFalse(output.exists())
+                self.assertEqual(self.trust.read_bytes(), cloud.encoded(history))
+                self.assertEqual(incoming.read_bytes(), cloud.encoded(incoming_pin))
 
     def test_tamper_substitution_and_conflict(self):
         self.publish()
