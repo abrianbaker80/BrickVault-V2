@@ -29,6 +29,7 @@ try
     var references = new References(db);
     var receiving = new Receiving(db);
     var bins = new BinStock(db);
+    var inventory = new StockRegister(db);
     var transfers = new Transfers(db);
     var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
     {
@@ -102,6 +103,8 @@ try
     api.MapPost("/catalog", (HttpContext c, CancellationToken ct) => Save<CatalogCommand>(c, references.Save, ct));
     api.MapPost("/locations", (HttpContext c, CancellationToken ct) => Save<LocationCommand>(c, references.Save, ct));
     api.MapGet("/receiving", (CancellationToken ct) => receiving.Snapshot(ct));
+    api.MapGet("/inventory/positions", (string? q, string? itemType, Guid? locationId, Guid? after, int? limit, CancellationToken ct) =>
+        inventory.Search(q, itemType, locationId, after, limit ?? 25, ct));
     api.MapGet("/receiving/bins/{locationId:guid}", (Guid locationId, CancellationToken ct) => bins.Snapshot(locationId, ct));
     api.MapGet("/receiving/bins/{locationId:guid}/movements",
         (Guid locationId, CancellationToken ct) => bins.Movements(locationId, ct));

@@ -776,6 +776,91 @@
         },
         "description": "Move an explicitly allocated portion of one confirmed placement to another registered bin. The receipt entityId identifies both the movement and its newly introduced destination position."
       }
+    },
+    "/api/v1/inventory/positions": {
+      "get": {
+        "operationId": "searchStockPositions",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 160
+            }
+          },
+          {
+            "name": "itemType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "part",
+                "set",
+                "minifigure",
+                "book",
+                "gear",
+                "instruction",
+                "original-box",
+                "catalog"
+              ]
+            }
+          },
+          {
+            "name": "locationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Filtered stock positions and their totals in one consistent database read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockRegisterPage"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2579,6 +2664,75 @@
           "correlationId"
         ],
         "additionalProperties": false
+      },
+      "StockRegisterRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "layer": {
+            "$ref": "#/components/schemas/BinStockLayer"
+          },
+          "originPlacementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          }
+        },
+        "required": [
+          "layer",
+          "originPlacementId",
+          "location"
+        ]
+      },
+      "StockRegisterPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "const": "inventory-positions",
+            "type": "string"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "matchingPositions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "matchingUnits": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StockRegisterRow"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "matchingPositions",
+          "matchingUnits",
+          "nextAfter",
+          "rows"
+        ]
       }
     },
     "securitySchemes": {
