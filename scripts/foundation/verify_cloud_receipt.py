@@ -1,8 +1,10 @@
 """Exercise signed cloud receipt publication and offline recovery with separate trust custody."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
+from datetime import datetime, timezone
 import hashlib
 import base64
+import io
 import json
 from pathlib import Path
 import shutil
@@ -98,6 +100,16 @@ class CloudReceipts(unittest.TestCase):
     def download(self):
         cloud.download_signed(None, self.output, self.point, self.trust)
 
+    def reader_profile(self):
+        profile = self.root / "reader"
+        profile.mkdir()
+        (profile / "reader.conf").write_bytes(b"RCLONE_ENCRYPT_V0:\nfixture")
+        (profile / ".brickvault-v2-offhost").write_text("onedrive-reader")
+        (profile / "authorization.json").write_text(
+            json.dumps({"state": "ready", "verifiedAt": "enrollment"})
+        )
+        return profile
+
     def test_onedrive_signed_mirror_and_independent_download(self):
         self.publish()
         point = self.point
@@ -115,13 +127,7 @@ class CloudReceipts(unittest.TestCase):
         self.assertEqual((mirror / (point + cloud.SIDECAR)).read_bytes(), raw)
         with self.assertRaises(RecoveryError):
             backup_mirror.sync_point([], mirror, state, signed | {"bytes": 1}, trust)
-        profile = self.root / "reader"
-        profile.mkdir()
-        (profile / "reader.conf").write_bytes(b"RCLONE_ENCRYPT_V0:\nfixture")
-        (profile / ".brickvault-v2-offhost").write_text("onedrive-reader")
-        (profile / "authorization.json").write_text(
-            json.dumps({"state": "ready", "verifiedAt": "enrollment"})
-        )
+        profile = self.reader_profile()
         calls = []
         original_run = subprocess.run
 
@@ -161,6 +167,162 @@ class CloudReceipts(unittest.TestCase):
             with self.assertRaises(RecoveryError):
                 onedrive_reader.download(profile, self.trust, point, self.output)
             self.assertFalse(self.output.exists())
+
+    def test_unattended_readback_waits_only_for_unavailable_cloud_objects(self):
+        latest = (
+            datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex
+        )
+        config = {
+            "state": self.root / "state",
+            "mirror": self.root / "mirror",
+            "sshConfig": "fixture",
+            "oneDriveProfile": self.reader_profile(),
+            "receiptTrust": self.trust,
+        }
+        content = self.archive.read_bytes()
+        listing = []
+        for point in (self.point, latest):
+            receipt = self.receipt | {"point": point}
+            (self.provider / (point + ".age")).write_bytes(content)
+            self.publish(receipt)
+            signed = (self.controller / (point + cloud.SIDECAR)).read_bytes()
+            listing.append(
+                cloud.encoded(
+                    receipt | {"signedReceipt": base64.b64encode(signed).decode()}
+                )
+            )
+        provider_reads = []
+        controller_reads = []
+        original_run = subprocess.run
+        fault = "delayed"
+
+        def transfer(command, **kwargs):
+            if command[0] == "ssh":
+                controller_reads.append(command[-1])
+                if command[-1] == "list":
+                    return SimpleNamespace(stdout=b"".join(listing))
+                self.assertIn(command[-1], ["get " + self.point, "get " + latest])
+                kwargs["stdout"].write(content)
+                return SimpleNamespace(returncode=0)
+            if "listremotes" in command:
+                return SimpleNamespace(stdout=b"bv2onedrive:\n")
+            if "copyto" in command:
+                remote, destination = command[-2:]
+                name = remote.split("/")[-1]
+                provider_reads.append(name)
+                if name == latest + cloud.SIDECAR and fault == "missing-sidecar":
+                    return SimpleNamespace(returncode=4)
+                if name == latest + cloud.SIDECAR and fault == "wrong-signature":
+                    envelope = json.loads((self.provider / name).read_text())
+                    envelope["receipt"]["publicationContext"] = "2" * 64
+                    destination.write_bytes(cloud.encoded(envelope))
+                    return SimpleNamespace(returncode=0)
+                if name == latest + ".age":
+                    if fault == "delayed":
+                        return SimpleNamespace(returncode=3)
+                    if isinstance(fault, int):
+                        return SimpleNamespace(returncode=fault)
+                    if fault == "corrupt":
+                        destination.write_bytes(b"invalid ciphertext")
+                        return SimpleNamespace(returncode=0)
+                shutil.copyfile(self.provider / name, destination)
+                return SimpleNamespace(returncode=0)
+            return original_run(command, **kwargs)
+
+        status_file = config["state"] / "status.json"
+
+        def wait_for_upload(seconds):
+            nonlocal fault
+            waiting = json.loads(status_file.read_text())
+            self.assertEqual(waiting["state"], "waiting-onedrive")
+            self.assertEqual(waiting["pendingReadbacks"], 1)
+            self.assertTrue(waiting["nextReadbackAt"])
+            with self.assertRaises(RecoveryError):
+                backup_mirror.health(config)
+            if fault == "delayed":
+                self.assertEqual(waiting["cloudPoint"], self.point)
+                self.assertEqual(waiting["point"], latest)
+                fault = None
+
+        with (
+            patch.object(onedrive_reader, "rclone_program", return_value="fixture"),
+            patch.object(subprocess, "run", side_effect=transfer),
+            patch.object(backup_mirror, "READBACK_DELAYS", (1, 2)),
+            patch.object(
+                backup_mirror.time, "sleep", side_effect=wait_for_upload
+            ) as sleep,
+            redirect_stdout(io.StringIO()),
+        ):
+            backup_mirror.catch_up(config)
+            backup_mirror.health(config)
+            sleep.assert_called_once_with(1)
+            self.assertEqual(
+                controller_reads, ["list", "get " + self.point, "get " + latest]
+            )
+            self.assertEqual(provider_reads.count(self.point + ".age"), 1)
+            self.assertEqual(provider_reads.count(latest + ".age"), 2)
+            verified = json.loads(status_file.read_text())
+            self.assertEqual(verified["state"], "verified-onedrive")
+            self.assertEqual(verified["cloudPoint"], latest)
+            self.assertEqual(verified["pendingReadbacks"], 0)
+            proof = config["state"] / "onedrive-readbacks" / (latest + ".json")
+            saved_proof = proof.read_bytes()
+            for fault, waits in (
+                (3, 2),
+                (4, 2),
+                (5, 2),
+                (7, 0),
+                ("corrupt", 0),
+                ("wrong-signature", 0),
+                ("missing-sidecar", 2),
+            ):
+                with self.subTest(fault=fault):
+                    sleep.reset_mock()
+                    provider_reads.clear()
+                    controller_reads.clear()
+                    with self.assertRaises(RecoveryError):
+                        backup_mirror.catch_up(config)
+                    with self.assertRaises(RecoveryError):
+                        backup_mirror.health(config)
+                    failed = json.loads(status_file.read_text())
+                    self.assertEqual(failed["state"], "failed")
+                    self.assertFalse(failed["cloudSyncVerified"])
+                    self.assertIsNone(failed["nextReadbackAt"])
+                    self.assertEqual(
+                        failed["cloudVerifiedAt"], verified["cloudVerifiedAt"]
+                    )
+                    self.assertEqual(failed["cloudPoint"], latest)
+                    self.assertEqual(proof.read_bytes(), saved_proof)
+                    self.assertEqual(sleep.call_count, waits)
+                    self.assertEqual(controller_reads, ["list"])
+                    self.assertNotIn(self.point + ".age", provider_reads)
+                    expected_archives = 0 if fault == "missing-sidecar" else waits + 1
+                    self.assertEqual(
+                        provider_reads.count(latest + ".age"), expected_archives
+                    )
+
+    def test_readback_deadline_covers_transfer_time_and_suspended_workstation(self):
+        config = {"oneDriveProfile": self.reader_profile(), "receiptTrust": self.trust}
+        for ticks, waits in (([0, 7201], 0), ([0, 1, 7201], 1)):
+            with (
+                self.subTest(ticks=ticks),
+                patch.object(backup_mirror.time, "monotonic", side_effect=ticks),
+                patch.object(backup_mirror.time, "sleep") as sleep,
+                patch.object(
+                    backup_mirror,
+                    "record_readback",
+                    side_effect=onedrive_reader.ReadbackPending("Upload pending."),
+                ) as download,
+            ):
+                status = {}
+                with self.assertRaisesRegex(RecoveryError, "still unavailable"):
+                    backup_mirror.verify_onedrive(
+                        config, self.root, [self.receipt], status
+                    )
+                self.assertIsNone(status["nextReadbackAt"])
+                self.assertEqual(status["pendingReadbacks"], 1)
+                self.assertEqual(download.call_count, 1)
+                self.assertEqual(sleep.call_count, waits)
 
     def test_mirror_does_not_publish_unauthenticated_data(self):
         self.publish()

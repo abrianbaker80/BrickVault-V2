@@ -28,6 +28,10 @@ SCOPES = {"Files.Read", "offline_access"}
 FOLDER = "BrickVault V2 Backup"
 
 
+class ReadbackPending(RecoveryError):
+    """The expected provider object is missing or the transfer is temporarily unavailable."""
+
+
 def private_path(path):
     path = outside_checkout(path)
     for name in ("OneDrive", "OneDriveConsumer", "OneDriveCommercial"):
@@ -294,6 +298,10 @@ def download(profile, trust, point, output, program=None):
                 stderr=subprocess.DEVNULL,
                 timeout=1800,
             )
+            if result.returncode in (3, 4, 5):
+                raise ReadbackPending(
+                    f"OneDrive recovery object is unavailable (rclone exit {result.returncode})."
+                )
             if result.returncode:
                 raise RecoveryError(
                     f"OneDrive has not returned the requested recovery point (rclone exit {result.returncode})."

@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 from cloud_receipt import FIELDS, SIDECAR, load_small, publish_local, verify_sidecar
@@ -27,6 +28,10 @@ from offhost import (
     verify_file,
 )
 from runtime import exclusive
+
+# Wait for the desktop sync client to publish the already captured files.
+READBACK_DELAYS = (60, 180, 420, 900, 1800, 3600)
+READBACK_WINDOW = 2 * 60 * 60
 
 
 @contextmanager
@@ -279,7 +284,34 @@ def sync_point(ssh, target, state, receipt, trust):
     return copied
 
 
-def verify_onedrive(config, state, receipts, status):
+def record_readback(profile, trust, state, receipt, enrollment):
+    import onedrive_reader
+
+    point = receipt["point"]
+    with tempfile.TemporaryDirectory(dir=state) as temp:
+        directory = Path(temp) / "download"
+        onedrive_reader.download(profile, trust, point, directory)
+        trusted = read_receipt(directory / (point + ".json"), point)
+        if any(trusted.get(field) != receipt.get(field) for field in FIELDS):
+            raise RecoveryError(
+                "OneDrive's signed point differs from the selected controller point."
+            )
+    now = datetime.now(timezone.utc).isoformat()
+    write_private(
+        state / "onedrive-readbacks" / (point + ".json"),
+        json.dumps(
+            {
+                "point": point,
+                "sha256": receipt["sha256"],
+                "verifiedAt": now,
+                "enrollment": enrollment,
+            }
+        ),
+    )
+    return now
+
+
+def verify_onedrive(config, state, receipts, status, *, allow_retry=True):
     import onedrive_reader
 
     profile = onedrive_reader.profile_path(config["oneDriveProfile"])
@@ -293,7 +325,7 @@ def verify_onedrive(config, state, receipts, status):
     proofs = state / "onedrive-readbacks"
     proofs.mkdir(mode=0o700, exist_ok=True)
     latest = receipts[-1]["point"]
-    failures = []
+    pending = []
     for receipt in receipts:
         point = receipt["point"]
         proof_file = proofs / (point + ".json")
@@ -304,44 +336,63 @@ def verify_onedrive(config, state, receipts, status):
             and evidence.get("enrollment") == enrollment
         ):
             continue
-        try:
-            with tempfile.TemporaryDirectory(dir=state) as temp:
-                directory = Path(temp) / "download"
-                onedrive_reader.download(
-                    profile, config["receiptTrust"], point, directory
+        pending.append(receipt)
+    delays = iter(READBACK_DELAYS if allow_retry else ())
+    deadline = time.monotonic() + READBACK_WINDOW
+    status_file = state / "status.json"
+    while pending:
+        status.update(
+            state="checking-onedrive",
+            nextReadbackAt=None,
+            pendingReadbacks=len(pending),
+        )
+        write_private(status_file, json.dumps(status))
+        delayed = []
+        failures = []
+        for receipt in pending:
+            try:
+                verified = record_readback(
+                    profile, config["receiptTrust"], state, receipt, enrollment
                 )
-                trusted = read_receipt(directory / (point + ".json"), point)
-                if any(trusted.get(field) != receipt.get(field) for field in FIELDS):
-                    raise RecoveryError(
-                        "OneDrive's signed point differs from the selected controller point."
-                    )
-            now = datetime.now(timezone.utc).isoformat()
-            write_private(
-                proof_file,
-                json.dumps(
-                    {
-                        "point": point,
-                        "sha256": receipt["sha256"],
-                        "verifiedAt": now,
-                        "enrollment": enrollment,
-                    }
-                ),
+                point = receipt["point"]
+                if point == latest or point >= (status.get("cloudPoint") or ""):
+                    status.update(cloudPoint=point, cloudVerifiedAt=verified)
+                if point == latest:
+                    status["cloudSyncVerified"] = True
+            except onedrive_reader.ReadbackPending as exc:
+                delayed.append(receipt)
+                delay_reason = failure_reason(exc)
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                RecoveryError,
+                subprocess.SubprocessError,
+            ) as exc:
+                failures.append(failure_reason(exc))
+        status["pendingReadbacks"] = len(delayed)
+        if failures:
+            raise RecoveryError(
+                f"{len(failures)} OneDrive readback(s) require attention. {failures[0]}"
             )
-            if point == latest:
-                status.update(
-                    cloudSyncVerified=True, cloudPoint=point, cloudVerifiedAt=now
-                )
-        except (
-            OSError,
-            ValueError,
-            KeyError,
-            RecoveryError,
-            subprocess.SubprocessError,
-        ) as exc:
-            failures.append(failure_reason(exc))
-    if failures:
+        if not delayed:
+            return
+        delay = next(delays, None)
+        if delay is not None and time.monotonic() + delay < deadline:
+            status.update(
+                state="waiting-onedrive",
+                nextReadbackAt=(
+                    datetime.now(timezone.utc) + timedelta(seconds=delay)
+                ).isoformat(),
+            )
+            write_private(status_file, json.dumps(status))
+            time.sleep(delay)
+            if time.monotonic() < deadline:
+                pending = delayed
+                continue
+        status["nextReadbackAt"] = None
         raise RecoveryError(
-            f"{len(failures)} OneDrive readback(s) require attention. {failures[0]}"
+            f"{len(delayed)} OneDrive readback(s) still unavailable. {delay_reason}"
         )
 
 
@@ -366,6 +417,8 @@ def catch_up(config):
             state="running",
             lastError=None,
             cloudSyncVerified=False,
+            nextReadbackAt=None,
+            pendingReadbacks=0,
         )
         write_private(status_file, json.dumps(status))
         try:
@@ -408,7 +461,9 @@ def catch_up(config):
                 )
             if receipts and config.get("oneDriveProfile"):
                 try:
-                    verify_onedrive(config, state, receipts, status)
+                    verify_onedrive(
+                        config, state, receipts, status, allow_retry=not failed
+                    )
                 except (
                     OSError,
                     ValueError,
@@ -455,6 +510,7 @@ def health(config):
         fresh = timedelta(0) <= age <= timedelta(hours=config.get("freshnessHours", 30))
     cloud_fresh = (
         fresh
+        and status.get("state") == "verified-onedrive"
         and status.get("point") == status.get("cloudPoint")
         and status.get("cloudSyncVerified") is True
     )
