@@ -46,7 +46,7 @@ def profile_path(path):
     return directory
 
 
-def command(profile, program):
+def command(profile, program, config_file=None):
     helper = Path(__file__).with_name("OneDrive-ReaderPassword.ps1").resolve()
     loader = [
         "pwsh",
@@ -60,7 +60,7 @@ def command(profile, program):
     return [
         str(program),
         "--config",
-        str(profile / "reader.conf"),
+        str(config_file or profile / "reader.conf"),
         "--ask-password=false",
         "--password-command",
         subprocess.list2cmdline(loader),
@@ -99,7 +99,8 @@ def open_authorization(local_url):
         if (
             response.status not in (302, 303, 307)
             or auth.scheme != "https"
-            or auth.hostname != "login.microsoftonline.com"
+            or auth.netloc != "login.microsoftonline.com"
+            or auth.path != "/consumers/oauth2/v2.0/authorize"
             or scope != SCOPES
         ):
             raise RecoveryError(
@@ -110,6 +111,139 @@ def open_authorization(local_url):
     os.startfile(location)
 
 
+def encrypted_config(path):
+    if path.is_symlink():
+        raise RecoveryError("The V2 reader configuration is a symbolic link.")
+    with path.open("rb") as raw:
+        if b"RCLONE_ENCRYPT_V0:" not in raw.read(256):
+            raise RecoveryError(
+                "Reader profile requires rclone configuration encryption."
+            )
+
+
+def authorize(base, progress):
+    args = [
+        *base,
+        "config",
+        "create",
+        REMOTE,
+        "onedrive",
+        "access_scopes",
+        "Files.Read offline_access",
+        "config_is_local",
+        "true",
+        "config_auth_no_browser",
+        "true",
+        "config_type",
+        "onedrive",
+        "auth_url",
+        "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize",
+        "token_url",
+        "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+        "--no-output",
+    ]
+    observed = False
+    write_private(progress, json.dumps({"state": "starting"}))
+    with subprocess.Popen(
+        args,
+        env=child_env(),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ) as proc:
+        try:
+            for line in proc.stderr:
+                match = re.search(r"http://127\.0\.0\.1:53682/auth\?state=[^\s]+", line)
+                if match:
+                    open_authorization(match.group())
+                    observed = True
+                    write_private(
+                        progress,
+                        json.dumps(
+                            {
+                                "state": "awaiting-account-owner",
+                                "scopes": sorted(SCOPES),
+                            }
+                        ),
+                    )
+            if proc.wait() != 0 or not observed:
+                raise RecoveryError(
+                    "Microsoft sign-in did not complete. Rerun the reader connection."
+                )
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
+
+def enroll(profile, program, reauthorize=False):
+    state = profile / "authorization.json"
+    encrypted = profile / "reader.conf"
+    if encrypted.is_symlink():
+        raise RecoveryError("The reader profile must contain its own configuration.")
+    if encrypted.exists() and encrypted.stat().st_size:
+        encrypted_config(encrypted)
+        if (
+            state.is_file()
+            and json.loads(state.read_text()).get("state") == "ready"
+            and not reauthorize
+        ):
+            check_remote(command(profile, program))
+            print("OneDrive reader already enrolled.")
+            return
+    secret = profile / "reader.dpapi"
+    if not secret.exists():
+        if encrypted.exists() and encrypted.stat().st_size:
+            raise RecoveryError(
+                "Existing encrypted reader profile needs its original Windows credential."
+            )
+        subprocess.run(
+            [
+                "pwsh",
+                "-NoProfile",
+                "-NonInteractive",
+                "-File",
+                Path(__file__).with_name("OneDrive-ReaderPassword.ps1"),
+                "-ProtectedFile",
+                secret,
+                "-Initialize",
+            ],
+            env=child_env(),
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+    # A new encrypted config forces a fresh grant. An interrupted enrollment cannot alter existing credentials.
+    with tempfile.TemporaryDirectory(dir=profile) as temp:
+        staged = Path(temp) / "reader.conf"
+        staged.touch(exist_ok=False)
+        base = command(profile, program, staged)
+        subprocess.run(
+            [*base, "config", "encryption", "set"],
+            env=child_env(),
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        encrypted_config(staged)
+        authorize(base, profile / "enrollment.json")
+        check_remote(base)
+        os.replace(staged, encrypted)
+    write_private(
+        state,
+        json.dumps(
+            {
+                "state": "ready",
+                "scopes": sorted(SCOPES),
+                "verifiedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+    )
+    write_private(profile / "enrollment.json", json.dumps({"state": "complete"}))
+    print("OneDrive read-only account connected.")
+
+
 def connect(path, program=None, reauthorize=False):
     if os.name != "nt":
         raise RecoveryError(
@@ -117,114 +251,7 @@ def connect(path, program=None, reauthorize=False):
         )
     profile = managed_dir(private_path(path), "onedrive-reader")
     with exclusive(profile / "connect.lock"):
-        base = command(profile, program or rclone_program())
-        state = profile / "authorization.json"
-        if (
-            state.is_file()
-            and json.loads(state.read_text()).get("state") == "ready"
-            and not reauthorize
-        ):
-            check_remote(base)
-            print("OneDrive reader already enrolled.")
-            return
-        secret = profile / "reader.dpapi"
-        if not secret.exists():
-            subprocess.run(
-                [
-                    "pwsh",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-File",
-                    Path(__file__).with_name("OneDrive-ReaderPassword.ps1"),
-                    "-ProtectedFile",
-                    secret,
-                    "-Initialize",
-                ],
-                env=child_env(),
-                check=True,
-                stdout=subprocess.DEVNULL,
-            )
-        encrypted = profile / "reader.conf"
-        if not encrypted.exists():
-            encrypted.touch(exist_ok=False)
-            subprocess.run(
-                [*base, "config", "encryption", "set"],
-                env=child_env(),
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        with encrypted.open("rb") as raw:
-            if b"RCLONE_ENCRYPT_V0:" not in raw.read(256):
-                raise RecoveryError(
-                    "Reader profile requires rclone configuration encryption."
-                )
-        args = [
-            *base,
-            "config",
-            "create",
-            REMOTE,
-            "onedrive",
-            "access_scopes",
-            "Files.Read offline_access",
-            "config_is_local",
-            "true",
-            "config_auth_no_browser",
-            "true",
-            "config_type",
-            "onedrive",
-            "auth_url",
-            "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize",
-            "token_url",
-            "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
-            "--no-output",
-        ]
-        write_private(state, json.dumps({"state": "starting"}))
-        with subprocess.Popen(
-            args,
-            env=child_env(),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        ) as proc:
-            try:
-                for line in proc.stderr:
-                    match = re.search(
-                        r"http://127\.0\.0\.1:53682/auth\?state=[^\s]+", line
-                    )
-                    if match:
-                        open_authorization(match.group())
-                        write_private(
-                            state,
-                            json.dumps(
-                                {
-                                    "state": "awaiting-account-owner",
-                                    "scopes": sorted(SCOPES),
-                                }
-                            ),
-                        )
-                if proc.wait() != 0:
-                    raise RecoveryError(
-                        "Microsoft sign-in did not complete. Rerun the reader connection."
-                    )
-            finally:
-                if proc.poll() is None:
-                    proc.kill()
-        check_remote(base)
-        write_private(
-            state,
-            json.dumps(
-                {
-                    "state": "ready",
-                    "scopes": sorted(SCOPES),
-                    "verifiedAt": datetime.now(timezone.utc).isoformat(),
-                }
-            ),
-        )
-        print("OneDrive read-only account connected.")
+        enroll(profile, program or rclone_program(), reauthorize)
 
 
 def download(profile, trust, point, output, program=None):
@@ -234,6 +261,7 @@ def download(profile, trust, point, output, program=None):
         != "ready"
     ):
         raise RecoveryError("The owner must complete the OneDrive reader connection.")
+    encrypted_config(directory / "reader.conf")
     base = command(directory, program or rclone_program())
     check_remote(base)
     point = validate_point(point)

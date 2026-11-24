@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -15,9 +16,7 @@ import uuid
 from cloud_receipt import FIELDS, SIDECAR, load_small, publish_local, verify_sidecar
 from instance import child_env, write_private
 from offhost import (
-    FORMAT,
     POINT,
-    HEX,
     RecoveryError,
     failure_reason,
     managed_dir,
@@ -30,7 +29,28 @@ from offhost import (
 from runtime import exclusive
 
 
-def verify_or_repair(file, receipt, produce, quarantine):
+@contextmanager
+def on_destination_volume(staged, parent, verify_copy):
+    if staged.stat().st_dev == parent.stat().st_dev:
+        yield staged
+        return
+    with tempfile.TemporaryDirectory(dir=parent) as temp:
+        copied = Path(temp) / staged.name
+        shutil.copyfile(staged, copied)
+        verify_copy(copied)
+        yield copied
+
+
+def install_new(staged, destination):
+    if os.name == "nt":
+        staged.rename(
+            destination
+        )  # Windows rename fails atomically if a file already exists.
+    else:
+        os.link(staged, destination)
+
+
+def verify_or_repair(file, receipt, produce, quarantine, stage_dir=None):
     """Verify every existing archive. Preserve damaged bytes before atomic replacement."""
     if file.is_symlink():
         raise RecoveryError("An archive path is a symbolic link.")
@@ -40,20 +60,25 @@ def verify_or_repair(file, receipt, produce, quarantine):
             return False
         except RecoveryError:
             pass
-    with tempfile.TemporaryDirectory(dir=file.parent) as temporary:
+    with tempfile.TemporaryDirectory(dir=stage_dir or file.parent) as temporary:
         candidate = Path(temporary) / "received.age"
         produce(candidate)
         verify_file(candidate, receipt)
-        if file.exists():
-            quarantine.mkdir(mode=0o700, parents=True, exist_ok=True)
-            preserved = quarantine / (file.name + "." + uuid.uuid4().hex + ".damaged")
-            with file.open("rb") as source, preserved.open("xb") as target:
-                shutil.copyfileobj(source, target)
-                target.flush()
-                os.fsync(target.fileno())
-            os.replace(candidate, file)
-        else:
-            os.link(candidate, file)
+        with on_destination_volume(
+            candidate, file.parent, lambda copy: verify_file(copy, receipt)
+        ) as local:
+            if file.exists():
+                quarantine.mkdir(mode=0o700, parents=True, exist_ok=True)
+                preserved = quarantine / (
+                    file.name + "." + uuid.uuid4().hex + ".damaged"
+                )
+                with file.open("rb") as source, preserved.open("xb") as target:
+                    shutil.copyfileobj(source, target)
+                    target.flush()
+                    os.fsync(target.fileno())
+                os.replace(local, file)
+            else:
+                install_new(local, file)
     return True
 
 
@@ -189,54 +214,68 @@ def serve(directory):
         raise RecoveryError("Unknown mirror request.")
 
 
-def mirror_signed_receipt(target, point, receipt, encoded_sidecar, trust):
-    if not isinstance(encoded_sidecar, str) or len(encoded_sidecar) > 22000:
+def check_sidecar(path, expected):
+    if path.is_symlink():
+        raise RecoveryError("The signed receipt is a symbolic link.")
+    with path.open("rb") as file:
+        if file.read(len(expected) + 1) != expected:
+            raise RecoveryError("A conflicting signed receipt already exists.")
+
+
+def authenticate_receipt(staged, receipt, trust):
+    encoded = receipt.get("signedReceipt")
+    if not isinstance(encoded, str) or len(encoded) > 22000:
         raise RecoveryError(
             "This controller point requires its signed recovery receipt."
         )
-    with tempfile.TemporaryDirectory(dir=target) as temp:
-        staged = Path(temp) / "signed-receipt"
-        staged.write_bytes(base64.b64decode(encoded_sidecar, validate=True))
-        verified = verify_sidecar(staged, point, trust)
-        if any(verified[field] != receipt.get(field) for field in FIELDS):
-            raise RecoveryError(
-                "Signed recovery receipt differs from the controller's point."
-            )
-        publish_local(staged, target / (point + SIDECAR))
+    staged.write_bytes(base64.b64decode(encoded, validate=True))
+    verified = verify_sidecar(staged, validate_point(receipt["point"]), trust)
+    if any(verified[field] != receipt.get(field) for field in FIELDS):
+        raise RecoveryError(
+            "Signed recovery receipt differs from the controller's point."
+        )
+    return verified
 
 
 def sync_point(ssh, target, state, receipt, trust):
     point = validate_point(receipt["point"])
-    if (
-        receipt.get("format") != FORMAT
-        or not HEX.fullmatch(str(receipt.get("sha256")))
-        or type(receipt.get("bytes")) is not int
-        or receipt["bytes"] <= 0
-    ):
-        raise RecoveryError("Mirror response contained an invalid receipt.")
-    encoded_sidecar = receipt.pop("signedReceipt", None)
-    metadata = target / (point + ".json")
-    if metadata.exists():
-        matching_receipt(metadata, receipt)
+    with tempfile.TemporaryDirectory(dir=state) as temp:
+        scratch = Path(temp)
+        staged = scratch / (point + SIDECAR)
+        trusted = authenticate_receipt(staged, receipt, trust)
+        signed = target / staged.name
+        sidecar_bytes = staged.read_bytes()
+        if signed.exists() or signed.is_symlink():
+            check_sidecar(signed, sidecar_bytes)
+        metadata = target / (point + ".json")
+        if metadata.exists() or metadata.is_symlink():
+            matching_receipt(metadata, trusted)
 
-    def download(destination):
-        with destination.open("xb") as output:
-            subprocess.run(
-                [*ssh, "get " + point],
-                env=child_env(),
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.DEVNULL,
-                check=True,
-                timeout=3600,
-            )
+        def download(destination):
+            with destination.open("xb") as output:
+                subprocess.run(
+                    [*ssh, "get " + point],
+                    env=child_env(),
+                    stdin=subprocess.DEVNULL,
+                    stdout=output,
+                    stderr=subprocess.DEVNULL,
+                    check=True,
+                    timeout=3600,
+                )
 
-    copied = verify_or_repair(
-        target / (point + ".age"), receipt, download, state / "quarantine"
-    )
-    mirror_signed_receipt(target, point, receipt, encoded_sidecar, trust)
-    if not metadata.exists():
-        write_private(metadata, json.dumps(receipt, sort_keys=True))
+        copied = verify_or_repair(
+            target / (point + ".age"), trusted, download, state / "quarantine", scratch
+        )
+        if not metadata.exists():
+            write_private(metadata, json.dumps(trusted, sort_keys=True))
+        if not signed.exists():
+            with on_destination_volume(
+                staged, target, lambda file: check_sidecar(file, sidecar_bytes)
+            ) as local:
+                try:
+                    install_new(local, signed)
+                except FileExistsError:
+                    check_sidecar(signed, sidecar_bytes)
     return copied
 
 

@@ -106,14 +106,18 @@ class CloudReceipts(unittest.TestCase):
         mirror.mkdir()
         encoded = base64.b64encode(raw).decode()
         trust = cloud.load_small(self.trust)
-        backup_mirror.mirror_signed_receipt(mirror, point, self.receipt, encoded, trust)
+        signed = self.receipt | {"signedReceipt": encoded}
+        state = self.root / "scratch"
+        state.mkdir()
+        valid_bytes = self.archive.read_bytes()
+        (mirror / (point + ".age")).write_bytes(valid_bytes)
+        backup_mirror.sync_point([], mirror, state, signed, trust)
         self.assertEqual((mirror / (point + cloud.SIDECAR)).read_bytes(), raw)
         with self.assertRaises(RecoveryError):
-            backup_mirror.mirror_signed_receipt(
-                mirror, point, self.receipt | {"bytes": 1}, encoded, trust
-            )
+            backup_mirror.sync_point([], mirror, state, signed | {"bytes": 1}, trust)
         profile = self.root / "reader"
         profile.mkdir()
+        (profile / "reader.conf").write_bytes(b"RCLONE_ENCRYPT_V0:\nfixture")
         (profile / ".brickvault-v2-offhost").write_text("onedrive-reader")
         (profile / "authorization.json").write_text(
             json.dumps({"state": "ready", "verifiedAt": "enrollment"})
@@ -157,6 +161,93 @@ class CloudReceipts(unittest.TestCase):
             with self.assertRaises(RecoveryError):
                 onedrive_reader.download(profile, self.trust, point, self.output)
             self.assertFalse(self.output.exists())
+
+    def test_mirror_does_not_publish_unauthenticated_data(self):
+        self.publish()
+        raw = (self.provider / (self.point + cloud.SIDECAR)).read_bytes()
+        trust = cloud.load_small(self.trust)
+        for existing in (True, False):
+            for fault in ("missing", "invalid", "substituted", "conflicting"):
+                with self.subTest(
+                    existing=existing, fault=fault
+                ), tempfile.TemporaryDirectory(dir=self.root) as temp:
+                    target = Path(temp) / "sync"
+                    state = Path(temp) / "scratch"
+                    target.mkdir()
+                    state.mkdir()
+                    archive = target / (self.point + ".age")
+                    signed = target / (self.point + cloud.SIDECAR)
+                    if existing:
+                        archive.write_bytes(b"preserve damaged or older archive")
+                        signed.write_bytes(raw)
+                    header = self.receipt | {
+                        "signedReceipt": base64.b64encode(raw).decode()
+                    }
+                    if fault == "missing":
+                        del header["signedReceipt"]
+                    elif fault == "invalid":
+                        damaged = json.loads(raw)
+                        damaged["signature"] = "invalid"
+                        header["signedReceipt"] = base64.b64encode(
+                            cloud.encoded(damaged)
+                        ).decode()
+                    elif fault == "substituted":
+                        header["sourceInstance"] = str(uuid.uuid4())
+                    else:
+                        signed.write_bytes(b"preserve conflicting local sidecar")
+                    before = {file.name: file.read_bytes() for file in target.iterdir()}
+                    with self.assertRaises(RecoveryError):
+                        backup_mirror.sync_point(
+                            ["must-never-start-an-ssh-transfer"],
+                            target,
+                            state,
+                            header,
+                            trust,
+                        )
+                    self.assertEqual(
+                        {file.name: file.read_bytes() for file in target.iterdir()},
+                        before,
+                    )
+
+    def test_reader_enrollment_requires_observed_consent_and_atomic_encryption(self):
+        profile = self.root / "reader"
+        profile.mkdir()
+        (profile / "reader.dpapi").write_bytes(b"fixture")
+        config = profile / "reader.conf"
+        state = profile / "authorization.json"
+        saved = b"RCLONE_ENCRYPT_V0:\nprevious credentials"
+        config.write_bytes(saved)
+        state.write_text(json.dumps({"state": "ready", "verifiedAt": "original"}))
+
+        def encrypt(command, **kwargs):
+            stage = Path(command[command.index("--config") + 1])
+            self.assertNotEqual(stage, config)
+            stage.write_bytes(b"RCLONE_ENCRYPT_V0:\nfresh credentials")
+            return SimpleNamespace(returncode=0)
+
+        with patch.object(subprocess, "run", side_effect=encrypt), patch.object(
+            subprocess, "Popen"
+        ) as procs:
+            proc = procs.return_value.__enter__.return_value
+            proc.stderr = iter([])
+            proc.wait.return_value = 0
+            proc.poll.return_value = 0
+            with self.assertRaises(RecoveryError):
+                onedrive_reader.enroll(profile, "fixture", reauthorize=True)
+            self.assertEqual(config.read_bytes(), saved)
+            self.assertEqual(json.loads(state.read_text())["verifiedAt"], "original")
+        config.write_bytes(b"")
+        with patch.object(
+            subprocess, "run", side_effect=subprocess.CalledProcessError(1, "fixture")
+        ):
+            with self.assertRaises(subprocess.CalledProcessError):
+                onedrive_reader.enroll(profile, "fixture")
+            self.assertEqual(config.read_bytes(), b"")
+        with patch.object(subprocess, "run", side_effect=encrypt), patch.object(
+            onedrive_reader, "authorize"
+        ), patch.object(onedrive_reader, "check_remote"):
+            onedrive_reader.enroll(profile, "fixture")
+        self.assertEqual(config.read_bytes(), b"RCLONE_ENCRYPT_V0:\nfresh credentials")
 
     def test_enrollment_rejects_broader_or_non_microsoft_permissions(self):
         start = "http://127.0.0.1:53682/auth?state=fixture"

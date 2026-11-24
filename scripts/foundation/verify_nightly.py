@@ -108,6 +108,11 @@ class NightlyChecks(unittest.TestCase):
                     self.receive(Path(tmp), **changes)
                 self.assertFalse((Path(tmp) / "pending.json").exists())
 
+    @staticmethod
+    def authenticate_fixture(staged, receipt, trust):
+        staged.write_bytes(b"signed fixture")
+        return receipt
+
     def test_workstation_repairs_damaged_history_and_keeps_newer_point(self):
         target, state = self.directory / "mirror", self.directory / "state"
         target.mkdir()
@@ -140,7 +145,11 @@ class NightlyChecks(unittest.TestCase):
                 backup_mirror, "managed_dir", side_effect=lambda path, purpose: path
             ),
             patch.object(backup_mirror.subprocess, "run", side_effect=ssh),
-            patch.object(backup_mirror, "mirror_signed_receipt"),
+            patch.object(
+                backup_mirror,
+                "authenticate_receipt",
+                side_effect=self.authenticate_fixture,
+            ),
             redirect_stdout(io.StringIO()),
         ):
             backup_mirror.catch_up(config)
@@ -273,7 +282,11 @@ class NightlyChecks(unittest.TestCase):
                 backup_mirror, "managed_dir", side_effect=lambda path, purpose: path
             ),
             patch.object(backup_mirror.subprocess, "run") as response,
-            patch.object(backup_mirror, "mirror_signed_receipt"),
+            patch.object(
+                backup_mirror,
+                "authenticate_receipt",
+                side_effect=self.authenticate_fixture,
+            ),
             redirect_stdout(io.StringIO()),
         ):
             response.return_value.stdout = json.dumps(self.receipt).encode() + b"\n"
