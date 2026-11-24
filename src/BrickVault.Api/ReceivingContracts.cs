@@ -107,3 +107,11 @@ internal sealed record PurchaseRow(Guid Id, int Revision, string Reference, stri
     int OrderedQuantity, int? PendingChargeMinor, IReadOnlyList<DeliveryRow> Deliveries,
     IReadOnlyList<OfferRow> Offers, StockBalances Balances);
 internal sealed record ReceivingWorkspace(string Scope, DateTime AsOf, bool Complete, IReadOnlyList<PurchaseRow> Purchases);
+
+internal sealed record BinStockSnapshot(string Scope, DateTime AsOf, bool Complete, LocationRow Location,
+    long PhysicalOnHand, long BackedQuantity, long UnbackedQuantity, long FreeToBackQuantity,
+    IReadOnlyList<BinStockLayer> Layers);
+internal sealed record BinStockLayer(Guid PlacementId, Guid PurchaseId, string PurchaseReference, Guid DeliveryId,
+    string DeliveryReference, Guid ReceiptCommandId, Guid ReceiptCorrelationId, int ReceiptQuantity,
+    int? ReceiptItemCostMinor, string Currency, Guid CatalogId, int CatalogRevision, CatalogRow CurrentCatalog,
+    string LocationCodeAtPutaway, int Quantity, int BackedQuantity, int UnbackedQuantity, int FreeToBackQuantity);
