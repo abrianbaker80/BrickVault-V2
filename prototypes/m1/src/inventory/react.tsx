@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
+import { useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { partImage } from '../art'
@@ -122,7 +122,7 @@ function Inventory({ api, host }: { api: Controller; host: HTMLElement }) {
   const metrics = inventoryMetrics(s)
   const filtered = Boolean(s.query || s.location || s.condition || s.batch || s.status)
   const showReadState = s.read !== 'Normal'
-  useEffect(() => registerInteractions(host, api), [host, api])
+  useLayoutEffect(() => registerInteractions(host, api), [host, api])
   useLayoutEffect(() => {
     displayDialog(detailDialog.current, Boolean(inspected && s.compact))
     displayDialog(previewDialog.current, Boolean(s.preview || s.receipt))
