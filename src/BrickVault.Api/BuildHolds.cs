@@ -74,16 +74,20 @@ internal sealed class BuildHolds(NpgsqlDataSource db)
                 COALESCE((SELECT sum(h.remaining_quantity) FROM brickvault.current_build_holds h WHERE h.position_id=p.id),0)::integer,
                 c.integration_eligible AND c.revision=p.catalog_revision,s.id,
                 (SELECT n.id FROM brickvault.stock_count_observations n WHERE n.position_id=p.id AND s.id IS NOT NULL
-                 ORDER BY n.expected_purchase_revision DESC LIMIT 1)
+                 ORDER BY n.expected_purchase_revision DESC LIMIT 1),
+                buy.reference,d.reference,p.catalog_revision,c.id,c.revision,c.item_type,c.item_number,c.variant,c.name,
+                c.color_id,c.color_state,c.condition,c.completeness,c.source,c.license,c.mapping,c.integration_eligible
             FROM brickvault.current_placement_stock p
             JOIN brickvault.locations l ON l.id=p.location_id
             JOIN brickvault.purchases buy ON buy.id=p.purchase_id
+            JOIN brickvault.deliveries d ON d.id=p.delivery_id
             JOIN brickvault.catalog c ON c.id=p.catalog_id
             LEFT JOIN brickvault.stock_shortage_cases s ON s.position_id=p.id AND s.resolved_by_command_id IS NULL
             WHERE p.id=$1 AND p.location_id=$2
             """, r => (AsOf: r.GetDateTime(0), Location: new LocationRow(r.GetGuid(1), r.GetInt32(2), r.GetString(3), r.GetString(4)),
                 Purchase: r.GetGuid(5), Revision: r.GetInt32(6), Ledger: r.GetInt32(7), Backed: r.GetInt32(8),
-                Reserved: r.GetInt32(9), Eligible: r.GetBoolean(10), Shortage: Optional<Guid>(r, 11), Latest: Optional<Guid>(r, 12)),
+                Reserved: r.GetInt32(9), Eligible: r.GetBoolean(10), Shortage: Optional<Guid>(r, 11), Latest: Optional<Guid>(r, 12),
+                PurchaseRef: r.GetString(13), DeliveryRef: r.GetString(14), CatalogRevision: r.GetInt32(15), CurrentCatalog: References.ReadCatalog(r, 16)),
             token, positionId, locationId);
         if (positions.Count == 0)
             throw new Fault(404, "unknown_hold_position", "No receipt position with that identifier belongs to this bin.");
@@ -108,7 +112,8 @@ internal sealed class BuildHolds(NpgsqlDataSource db)
         var free = position.Ledger - position.Reserved;
         var available = position.Eligible && position.Shortage is null ? free - position.Backed : 0;
         return new StockHoldPositionSnapshot("position-holds", position.AsOf, true, position.Location,
-            positionId, position.Purchase, position.Revision, position.Ledger, position.Backed, position.Reserved,
+            positionId, position.Purchase, position.Revision, position.PurchaseRef, position.DeliveryRef, position.CatalogRevision,
+            position.CurrentCatalog, position.Ledger, position.Backed, position.Reserved,
             free, available, position.Shortage, position.Latest, holds, next);
     }
 
