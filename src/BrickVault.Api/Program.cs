@@ -27,6 +27,7 @@ try
     var settings = Foundation.Gateway();
     var sessions = new Sessions(db, settings);
     var references = new References(db);
+    var receiving = new Receiving(db);
     var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
     {
         Args = [], EnvironmentName = "Development", ContentRootPath = AppContext.BaseDirectory
@@ -94,9 +95,15 @@ try
         await sessions.Logout(c, ct);
         return Results.NoContent();
     });
-    api.MapGet("/workspace", (CancellationToken ct) => references.Workspace(ct));
-    api.MapPost("/catalog", (HttpContext c, CancellationToken ct) => Save<CatalogCommand>(c, references, ct));
-    api.MapPost("/locations", (HttpContext c, CancellationToken ct) => Save<LocationCommand>(c, references, ct));
+    api.MapGet("/workspace", (HttpContext c, CancellationToken ct) =>
+        references.Workspace(ct, c.Request.Query["audit"] == "all"));
+    api.MapPost("/catalog", (HttpContext c, CancellationToken ct) => Save<CatalogCommand>(c, references.Save, ct));
+    api.MapPost("/locations", (HttpContext c, CancellationToken ct) => Save<LocationCommand>(c, references.Save, ct));
+    api.MapGet("/receiving", (CancellationToken ct) => receiving.Snapshot(ct));
+    api.MapPost("/receiving/purchases", (HttpContext c, CancellationToken ct) => Save<PurchaseCommand>(c, receiving.Save, ct));
+    api.MapPost("/receiving/deliveries", (HttpContext c, CancellationToken ct) => Save<DeliveryCommand>(c, receiving.Save, ct));
+    api.MapPost("/receiving/putaway", (HttpContext c, CancellationToken ct) => Save<PutawayCommand>(c, receiving.Save, ct));
+    api.MapPost("/receiving/offers", (HttpContext c, CancellationToken ct) => Save<OfferCommand>(c, receiving.Save, ct));
     api.MapGet("/diagnostics", async (CancellationToken ct) =>
     {
         await using var conn = await db.OpenConnectionAsync(ct);
@@ -134,12 +141,13 @@ catch (Exception e)
     return 1;
 }
 
-static async Task<Receipt> Save<T>(HttpContext c, References references, CancellationToken ct) where T : ReferenceCommand
+static async Task<Receipt> Save<T>(HttpContext c, Func<T, Guid, CancellationToken, Task<Receipt>> write,
+    CancellationToken ct) where T : class
 {
     ((Session)c.Items[typeof(Session)]!).RequireWorkspace(c.Request.Headers);
     if (!c.Request.HasJsonContentType()) throw new Fault(415, "json_required", "Use the application/json content type.");
     var request = await c.Request.ReadFromJsonAsync<T>(Wire.Json, ct) ?? throw Fault.Invalid();
-    var receipt = await references.Save(request, (Guid)c.Items[typeof(Guid)]!, ct);
+    var receipt = await write(request, (Guid)c.Items[typeof(Guid)]!, ct);
     c.Response.Headers["X-Correlation-Id"] = receipt.CorrelationId.ToString();
     return receipt;
 }

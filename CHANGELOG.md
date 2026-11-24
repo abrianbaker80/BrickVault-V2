@@ -1,5 +1,9 @@
 # Changelog
 
+## M3 receiving
+
+- Added split purchase receiving, bin confirmation, cost coverage and manually priced unpublished offers to Workbench. The staged schema upgrade preserves the original instance. [Receiving and upgrade guide](docs/verification/m3-receiving.md)
+
 ## M2 isolated technical foundation
 
 - The Windows backup task retries delayed OneDrive uploads within the same run and verifies the signed receipt and encrypted archive. The server continues to capture nightly. [Hosted backup operations](docs/verification/m2-hosted-backups.md)
