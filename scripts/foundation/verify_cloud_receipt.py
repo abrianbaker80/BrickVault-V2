@@ -6,9 +6,11 @@ import hashlib
 import base64
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -18,6 +20,7 @@ import uuid
 import cloud_receipt as cloud
 import backup_mirror
 import onedrive_reader
+from instance import NO_WINDOW
 from offhost import FORMAT, RecoveryError
 
 
@@ -76,7 +79,8 @@ class CloudReceipts(unittest.TestCase):
 
     def keygen(self, path):
         subprocess.run(
-            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", path], check=True
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", path],
+            check=True, creationflags=NO_WINDOW,
         )
         return " ".join(path.with_suffix(".pub").read_text().split()[:2])
 
@@ -109,6 +113,31 @@ class CloudReceipts(unittest.TestCase):
             json.dumps({"state": "ready", "verifiedAt": "enrollment"})
         )
         return profile
+
+    @unittest.skipUnless(os.name == "nt", "Windows windowless DPAPI credential pipe")
+    def test_windowless_password_pipe(self):
+        secret = self.root / "sample password.dpapi"
+        args = onedrive_reader.password_command(secret)
+        subprocess.run([*args, "-Initialize"], check=True, creationflags=NO_WINDOW)
+        expected = subprocess.run(args, capture_output=True, check=True, creationflags=NO_WINDOW).stdout
+        with (
+            patch.object(sys, "argv", ["onedrive_reader.py", "reader-password", "--protected-file", str(secret)]),
+            patch.object(subprocess, "run") as launch,
+        ):
+            onedrive_reader.main()
+            self.assertEqual(launch.call_args.args[0], args)
+            self.assertEqual(launch.call_args.kwargs["creationflags"], subprocess.CREATE_NO_WINDOW)
+            self.assertIsNone(launch.call_args.kwargs.get("stdout"))
+        base = onedrive_reader.command(self.root, "rclone")
+        windowless = Path(sys.executable).with_name("pythonw.exe")
+        cli = [windowless.as_posix(), "-E", "-s", Path(onedrive_reader.__file__).resolve().as_posix(),
+               "reader-password", "--protected-file", (self.root / "reader.dpapi").as_posix()]
+        self.assertEqual(base[base.index("--password-command") + 1], subprocess.list2cmdline(cli))
+        secret.rename(self.root / "reader.dpapi")
+        # Capture the same stdout pipe that rclone supplies to its GUI-subsystem child.
+        actual = subprocess.run(cli, capture_output=True, check=True, creationflags=NO_WINDOW).stdout
+        self.assertEqual(len(base64.b64decode(actual)), 48)
+        self.assertTrue(actual == expected, "The credential pipe changed the generated password bytes.")
 
     def test_onedrive_signed_mirror_and_independent_download(self):
         self.publish()
@@ -202,6 +231,9 @@ class CloudReceipts(unittest.TestCase):
         other_signed = cloud.encoded({"receipt": different, "signature": signature})
 
         def transfer(command, **kwargs):
+            # Exercise every child of a real catch-up, including directory ACLs,
+            # SSH list/get, signature verification and OneDrive list/copy.
+            self.assertEqual(kwargs.get("creationflags"), getattr(subprocess, "CREATE_NO_WINDOW", 0))
             if command[0] == "ssh":
                 controller_reads.append(command[-1])
                 if command[-1] == "list":

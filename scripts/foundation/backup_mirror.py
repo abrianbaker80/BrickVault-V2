@@ -24,7 +24,7 @@ from cloud_receipt import (
     validated_pin,
     verify_sidecar,
 )
-from instance import child_env, write_private
+from instance import NO_WINDOW, child_env, write_private
 from offhost import (
     POINT,
     RecoveryError,
@@ -269,6 +269,7 @@ def sync_point(ssh, target, state, receipt, trust):
             with destination.open("xb") as output:
                 subprocess.run(
                     [*ssh, "get " + point],
+                    creationflags=NO_WINDOW,
                     env=child_env(),
                     stdin=subprocess.DEVNULL,
                     stdout=output,
@@ -566,6 +567,7 @@ def catch_up(config):
             trust = load_small(outside_checkout(config["receiptTrust"]))
             response = subprocess.run(
                 [*ssh, "list"],
+                creationflags=NO_WINDOW,
                 env=child_env(),
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
