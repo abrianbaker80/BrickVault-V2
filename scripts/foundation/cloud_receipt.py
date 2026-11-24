@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import uuid
 
-from instance import child_env
+from instance import NO_WINDOW, child_env
 from offhost import (
     FORMAT,
     HEX,
@@ -80,6 +80,7 @@ def receipt_body(receipt, point, trust):
 def ssh_keygen(args, content):
     result = subprocess.run(
         ["ssh-keygen", "-Y", *args],
+        creationflags=NO_WINDOW,
         input=content,
         capture_output=True,
         env=child_env(),

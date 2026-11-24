@@ -84,6 +84,7 @@ def private_dir(path):
             ],
             check=True,
             env=child_env(),
+            creationflags=NO_WINDOW,
             stdout=subprocess.DEVNULL,
         )
     else:

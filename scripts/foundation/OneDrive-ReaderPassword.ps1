@@ -10,7 +10,7 @@ if ($Initialize) {
         try { $file.Write($sealed); $file.Flush($true) } finally { $file.Dispose() }
     } finally { [Array]::Clear($random) }
 } else {
-    # rclone invokes this loader directly through --password-command.
+    # Write the config password only to the pipe inherited from rclone.
     $random = [Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($ProtectedFile), $null, $scope)
     try { [Console]::Out.WriteLine([Convert]::ToBase64String($random)) } finally { [Array]::Clear($random) }
 }
