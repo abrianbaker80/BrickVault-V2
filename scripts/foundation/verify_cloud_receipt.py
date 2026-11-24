@@ -299,6 +299,114 @@ class CloudReceipts(unittest.TestCase):
                 self.download()
             self.assertFalse(self.output.exists())
 
+    def test_rotated_pins_support_retained_catch_up_and_provider_recovery(self):
+        self.publish()
+        old_pin = cloud.load_small(self.trust)
+        original_trust = self.trust.read_bytes()
+        new_key = self.root / "next-signing"
+        new_pin = old_pin | {"publicKey": self.keygen(new_key)}
+        incoming = self.root / "incoming.json"
+        incoming.write_bytes(cloud.encoded(new_pin))
+        history = self.root / "rotated.json"
+        cutoff = "20250518T010204Z"
+        cloud.rotate_trust(self.trust, incoming, cutoff, history)
+        self.assertEqual(self.trust.read_bytes(), original_trust)
+
+        next_point = cutoff + "-" + uuid.uuid4().hex
+        next_receipt = self.receipt | {"point": next_point}
+        shutil.copyfile(self.archive, self.provider / (next_point + ".age"))
+        cloud.publish_signed(None, self.controller, next_receipt, new_key, history)
+        listing = []
+        for entry in (self.receipt, next_receipt):
+            point = entry["point"]
+            output = self.root / ("restore-" + point)
+            cloud.download_signed(None, output, point, history)
+            self.assertEqual(cloud.verify_directory(output, point, history), entry)
+            signed = (self.controller / (point + cloud.SIDECAR)).read_bytes()
+            listing.append(entry | {"signedReceipt": base64.b64encode(signed).decode()})
+        original_run = subprocess.run
+
+        def controller(command, **kwargs):
+            if command[0] != "ssh":
+                return original_run(command, **kwargs)
+            if command[-1] == "list":
+                return SimpleNamespace(
+                    stdout=b"".join(cloud.encoded(row) for row in listing)
+                )
+            point = command[-1].removeprefix("get ")
+            self.assertIn(point, (self.point, next_point))
+            kwargs["stdout"].write((self.provider / (point + ".age")).read_bytes())
+            return SimpleNamespace(returncode=0)
+
+        settings = {
+            "state": self.root / "state",
+            "mirror": self.root / "mirror",
+            "receiptTrust": history,
+            "sshConfig": "fixture",
+        }
+        with patch.object(subprocess, "run", side_effect=controller):
+            backup_mirror.catch_up(settings)
+        status = json.loads((settings["state"] / "status.json").read_text())
+        self.assertEqual(
+            (status["state"], status["point"], status["copied"]),
+            ("verified-local", next_point, 2),
+        )
+
+        forged = self.root / "forged"
+        outsider = self.root / "untrusted-key"
+        self.keygen(outsider)
+        for body, signer in (
+            (self.receipt, new_key),
+            (next_receipt, self.key),
+            (self.receipt, outsider),
+            (next_receipt, outsider),
+            (self.receipt | {"workspaceId": str(uuid.uuid4())}, self.key),
+            (next_receipt | {"sourceInstance": str(uuid.uuid4())}, new_key),
+        ):
+            signature = cloud.ssh_keygen(
+                ["sign", "-f", signer, "-n", cloud.NAMESPACE], cloud.encoded(body)
+            )
+            forged.write_bytes(
+                cloud.encoded({"receipt": body, "signature": signature.decode()})
+            )
+            with self.subTest(
+                point=body["point"], signer=signer.name
+            ), self.assertRaises(RecoveryError):
+                cloud.verify_sidecar(forged, body["point"], cloud.load_small(history))
+
+    def test_historical_cutovers_are_complete_and_unambiguous(self):
+        pin = cloud.load_small(self.trust)
+        first = pin | {"before": "20250101T000000Z"}
+        second = pin | {"before": "20260101T000000Z", "sourceId": str(uuid.uuid4())}
+        history = pin | {"previous": [first, second]}
+        self.assertIs(cloud.signing_pin(history, self.point), second)
+        for bad in (
+            [second, first],
+            [first, first],
+            [first | {"before": "20250230T000000Z"}],
+            [first | {"workspaceId": "invalid"}],
+            [first | {"publicKey": "ssh-ed25519 AAAA"}],
+            [{"before": "20250101T000000Z"}],
+            None,
+        ):
+            with self.subTest(bad=bad), self.assertRaises(RecoveryError):
+                cloud.signing_pin(pin | {"previous": bad}, self.point)
+        incoming = self.root / "independent-pin.json"
+        outgoing = self.root / "combined.json"
+        incoming.write_bytes(cloud.encoded(pin | {"workspaceId": str(uuid.uuid4())}))
+        with self.assertRaises(RecoveryError):
+            cloud.rotate_trust(self.trust, incoming, "20270101T000000Z", outgoing)
+        self.assertFalse(outgoing.exists())
+        self.trust.write_bytes(cloud.encoded(history))
+        incoming.write_bytes(
+            cloud.encoded(pin | {"publicKey": self.keygen(self.root / "next-key")})
+        )
+        cloud.rotate_trust(self.trust, incoming, "20270101T000000Z", outgoing)
+        combined = cloud.load_small(outgoing)
+        self.assertEqual(
+            combined["previous"], [first, second, pin | {"before": "20270101T000000Z"}]
+        )
+
     def test_tamper_substitution_and_conflict(self):
         self.publish()
         side = self.provider / (self.point + cloud.SIDECAR)

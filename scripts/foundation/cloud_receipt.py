@@ -1,6 +1,8 @@
 """Sign controller receipts and verify provider copies with an independent public key."""
 
 import argparse
+import base64
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -19,6 +21,7 @@ from offhost import (
     capture_transport,
     failure_reason,
     outside_checkout,
+    point_time,
     transport,
     validate_point,
     verify_file,
@@ -89,20 +92,106 @@ def ssh_keygen(args, content):
     return result.stdout
 
 
+def validate_pin(pin):
+    if not isinstance(pin, dict):
+        raise RecoveryError("Invalid signing pin in independently held receipt trust.")
+    public = str(pin.get("publicKey", "")).split()
+    if len(public) != 2 or public[0] != "ssh-ed25519":
+        raise RecoveryError("Use an independently pinned Ed25519 public key.")
+    try:
+        key = base64.b64decode(public[1], validate=True)
+    except ValueError as exc:
+        raise RecoveryError("Invalid OpenSSH public-key encoding.") from exc
+    # OpenSSH encodes the algorithm and raw 32-byte Ed25519 key as two SSH strings.
+    prefix = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20"
+    if not key.startswith(prefix) or len(key) != len(prefix) + 32:
+        raise RecoveryError("Invalid OpenSSH Ed25519 public key.")
+    try:
+        uuid.UUID(str(pin["sourceId"]))
+        uuid.UUID(str(pin["workspaceId"]))
+    except (ValueError, KeyError) as exc:
+        raise RecoveryError(
+            "Signing pins require their source and workspace IDs."
+        ) from exc
+
+
+def signing_periods(trust):
+    validate_pin(trust)
+    previous = trust.get("previous", [])
+    if not isinstance(previous, list):
+        raise RecoveryError("Historical signing pins must be an ordered list.")
+    last_cutover = ""
+    for pin in previous:
+        validate_pin(pin)
+        cutoff = pin.get("before")
+        if not isinstance(cutoff, str) or not re.fullmatch(
+            r"[0-9]{8}T[0-9]{6}Z", cutoff
+        ):
+            raise RecoveryError(
+                "A historical signing pin needs an exclusive UTC cutover."
+            )
+        try:
+            datetime.strptime(cutoff, "%Y%m%dT%H%M%SZ")
+        except ValueError as exc:
+            raise RecoveryError(
+                "Invalid UTC cutover for historical signing pin."
+            ) from exc
+        if cutoff <= last_cutover:
+            raise RecoveryError(
+                "Historical signing cutovers must be strictly increasing."
+            )
+        last_cutover = cutoff
+    return previous
+
+
+def signing_pin(trust, point):
+    """Select a single operator-pinned key and lineage for the signed capture time."""
+    captured = point_time(point).strftime("%Y%m%dT%H%M%SZ")
+    for pin in signing_periods(trust):
+        if captured < pin["before"]:
+            return pin
+    return trust
+
+
+def rotate_trust(current_file, new_pin_file, cutover, output):
+    """Build a new operator-owned trust file from independently authenticated inputs."""
+    current = load_small(current_file)
+    previous = signing_periods(current)
+    new = load_small(new_pin_file)
+    validate_pin(new)
+    if "previous" in new:
+        raise RecoveryError(
+            "Supply the single incoming controller pin and its lineage."
+        )
+    if any(
+        uuid.UUID(new[field]) != uuid.UUID(current[field])
+        for field in ("sourceId", "workspaceId")
+    ):
+        raise RecoveryError(
+            "A signing-key rotation must retain the commissioned source and workspace IDs."
+        )
+    fields = ("publicKey", "sourceId", "workspaceId")
+    outgoing = {field: current[field] for field in fields} | {"before": cutover}
+    combined = {field: new[field] for field in fields} | {
+        "previous": [*previous, outgoing]
+    }
+    output = outside_checkout(output)
+    with tempfile.TemporaryDirectory(dir=output.parent) as temp:
+        stage = Path(temp) / "trust.json"
+        stage.write_bytes(encoded(combined))
+        signing_periods(load_small(stage))
+        publish_local(stage, output)
+
+
 def verify_sidecar(sidecar, point, trust):
+    pin = signing_pin(trust, point)
     envelope = load_small(sidecar)
     if not isinstance(envelope, dict) or set(envelope) != {"receipt", "signature"}:
         raise RecoveryError("Invalid signed receipt envelope.")
-    receipt = receipt_body(envelope["receipt"], point, trust)
+    receipt = receipt_body(envelope["receipt"], point, pin)
     if envelope["receipt"] != receipt:
         raise RecoveryError("Unexpected fields in the signed receipt.")
-    public = trust["publicKey"].split()
-    if (
-        len(public) != 2
-        or public[0] != "ssh-ed25519"
-        or not re.fullmatch(r"[A-Za-z0-9+/]+=*", public[1])
-    ):
-        raise RecoveryError("Use an independently pinned Ed25519 public key.")
+    public = pin["publicKey"].split()
     with tempfile.TemporaryDirectory() as tmp:
         allowed = Path(tmp) / "allowed"
         allowed.write_bytes((SIGNER + " " + " ".join(public) + "\n").encode("ascii"))
@@ -119,7 +208,7 @@ def publish_signed(route, folder, receipt, signing_key, trust_file):
     """Publish the signed sidecar last, after the caller has verified the provider ciphertext."""
     trust = load_small(trust_file)
     point = validate_point(receipt["point"])
-    body = receipt_body(receipt, point, trust)
+    body = receipt_body(receipt, point, signing_pin(trust, point))
     with tempfile.TemporaryDirectory(dir=folder) as tmp:
         scratch = Path(tmp)
         sidecar = scratch / (point + SIDECAR)
@@ -235,8 +324,21 @@ def main():
     download.add_argument(
         "--point", help="Defaults to the newest signed point listed in the provider."
     )
+    rotation = actions.add_parser("rotate-trust")
+    rotation.add_argument("--trust", required=True, type=Path)
+    rotation.add_argument("--new-pin", required=True, type=Path)
+    rotation.add_argument(
+        "--cutover",
+        required=True,
+        help="First UTC capture second using the incoming key, YYYYMMDDTHHMMSSZ.",
+    )
+    rotation.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     try:
+        if args.action == "rotate-trust":
+            rotate_trust(args.trust, args.new_pin, args.cutover, args.output)
+            print("Prepared independently pinned receipt trust history.")
+            return
         point = args.point
         if args.action == "verify":
             verify_directory(args.directory, point, args.trust)

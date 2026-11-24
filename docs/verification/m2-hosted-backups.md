@@ -17,7 +17,7 @@ The Workbench guest exports a PostgreSQL snapshot and its matching application r
 | `guestAccount`, `guestKey` | Guest service account and absolute path to the controller's dedicated capture key. |
 | `knownHosts`, `hostKeyAlias` | Pinned guest host-key file and its exact alias. |
 | `sourceId`, `workspaceId` | Expected source and workspace UUIDs. |
-| `receiptSigningKey`, `receiptTrust` | Dedicated OpenSSH Ed25519 private signing key and independently pinned public-key/lineage JSON. Keep a copy of the trust file with external key custody. |
+| `receiptSigningKey`, `receiptTrust` | Dedicated OpenSSH Ed25519 private signing key and independently pinned public-key/lineage JSON. At rotation, commission the combined history on the controller and each workstation and retain a copy in recovery custody. [Receipt signing-key rotation](m2-cloud-receipts.md#rotate-the-controller-signing-key) |
 | `transport`, `controllerState` | Absolute paths to the protected transport descriptor and private controller state. |
 | `maxBytes`, `reserveBytes` | Numeric archive size cap and free disk reserve. Capturing requires room for two copies in addition to the reserve. |
 | `freshnessHours` | Maximum permitted capture age, e.g. 30 hours for the nightly schedule. |
