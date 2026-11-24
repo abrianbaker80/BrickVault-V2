@@ -12,6 +12,8 @@
 
 - Added a supervised Linux guest, a private LAN gateway and a workstation-only Firefox launcher. Encrypted nightly backups use an independent controller and the existing storage provider. [Server setup](docs/verification/m2-foundation.md#run-workbench-on-the-private-server) · [Backup operations](docs/verification/m2-hosted-backups.md)
 
+- Verified recovery from a signed cloud backup into a fresh Linux guest. After reboot, Firefox saw the original workspace, audit entries and command receipts. [Full-guest rehearsal](docs/verification/m2-foundation.md#rehearse-a-full-guest-rebuild)
+
 ## M1 design and framework comparison accepted
 
 - Added two interactive visual directions with fictional inventory, receiving, fulfillment and recovery records. Both native inventory registers share the same task tests. [M1 review](prototypes/m1/REVIEW.md)
