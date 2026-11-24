@@ -126,14 +126,19 @@ export const api = {
     if (after) query.set('after', after)
     return read('inventory/positions/' + encodeURIComponent(id) + '/movements?' + query, valid.PositionMovementPage)
   },
-  async positionTimeline(position: StockPosition, after: string) {
-    const id = position.layer.placementId
+  async positionTimeline(id: string, after: string, previous?: StockPosition) {
     const query = new URLSearchParams({ limit: '25' })
     if (after) query.set('after', after)
     const page = await read('inventory/positions/' + encodeURIComponent(id) + '/timeline?' + query, valid.StockPositionTimeline)
-    if (page.positionId !== id || page.originPlacementId !== position.originPlacementId ||
+    const position = page.position
+    if (page.positionId !== id || position.layer.placementId !== id || page.originPlacementId !== position.originPlacementId ||
         page.purchaseId !== position.layer.purchaseId || page.deliveryId !== position.layer.deliveryId ||
-        page.location.id !== position.location.id || page.location.revision < position.location.revision) throw new ContractFailure()
+        page.location.id !== position.location.id || page.location.revision !== position.location.revision ||
+        page.location.code !== position.location.code || page.location.name !== position.location.name ||
+        position.layer.catalogId !== position.layer.currentCatalog.id) throw new ContractFailure()
+    if (previous && (position.originPlacementId !== previous.originPlacementId || position.location.id !== previous.location.id ||
+        position.layer.purchaseId !== previous.layer.purchaseId || position.layer.deliveryId !== previous.layer.deliveryId ||
+        position.layer.catalogId !== previous.layer.catalogId || position.location.revision < previous.location.revision)) throw new ContractFailure()
     for (const event of page.events) {
       if (event.locationId !== page.location.id ||
           (event.kind === 'count' && (event.id !== event.observationId || event.ledgerQuantityAtWitness === null)) ||

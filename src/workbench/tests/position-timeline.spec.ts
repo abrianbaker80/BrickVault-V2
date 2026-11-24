@@ -6,6 +6,8 @@ import { countReceiptLink, lossReceiptLink } from '../src/countLinks'
 import type { PositionTimelinePage } from '../src/api'
 
 const timeline = (page: Page) => page.getByRole('region', { name: 'Position timeline' })
+const inspector = (page: Page) => page.locator('[aria-labelledby="position-title"]')
+const onHand = (page: Page) => inspector(page).getByText('Physical on hand', { exact: true }).locator('+ dd')
 const endpoint = (id: string) => '/api/v1/inventory/positions/' + id + '/timeline'
 
 test('activity reconstructs a depleted position with original backing, build reservations, movement and exact count and loss receipts', async ({page}, info) => {
@@ -95,8 +97,12 @@ test('timeline paging retains confirmed evidence across partial, failed and wron
   await expect(rows).toHaveCount(25)
   const stamp = panel.getByText(/^Timeline read /)
   const prior = await stamp.textContent()
+  await expect(onHand(page)).toHaveText('6')
+  const positionStamp = inspector(page).getByText(/^Position read /)
+  const priorPositionStamp = await positionStamp.textContent()
   const matches = (url:URL) => url.pathname===path && url.searchParams.get('after')===first.nextAfter && url.searchParams.get('limit')==='25'
-  await page.route(matches,r=>r.fulfill({json:{...first,complete:false,events:[],nextAfter:null}}),{times:1})
+  await page.route(matches,r=>r.fulfill({json:{...first,complete:false,events:[],nextAfter:null,
+    position:{...first.position,layer:{...first.position.layer,quantity:999}}}}),{times:1})
   const older = panel.getByRole('button',{name:'Older events'})
   await older.focus()
   await page.keyboard.press('Enter')
@@ -106,7 +112,11 @@ test('timeline paging retains confirmed evidence across partial, failed and wron
   await expect(panel).not.toContainText('No events recorded')
   await expect(rows).toHaveCount(25)
   await expect(stamp).toHaveText(prior!)
+  await expect(onHand(page)).toHaveText('6')
+  await expect(positionStamp).toHaveText(priorPositionStamp!)
   for (const overrides of [{purchaseId:randomUUID()}, {deliveryId:randomUUID()}, {positionId:randomUUID()},
+    {position:{...first.position,layer:{...first.position.layer,placementId:randomUUID(),quantity:999}}},
+    {position:{...first.position,location:{...first.location,name:'Unrelated bin'}}},
     {events:[{...first.events[0],locationId:randomUUID(),reason:'Unrelated receipt'}]}]) {
     await page.route(matches,r=>r.fulfill({json:{...first,...overrides}}),{times:1})
     const done = page.waitForResponse(r=>matches(new URL(r.url())))
@@ -115,20 +125,26 @@ test('timeline paging retains confirmed evidence across partial, failed and wron
     await expect(retry).toBeFocused()
     await expect(panel).toContainText('could not verify the server response')
     await expect(panel).not.toContainText('Unrelated receipt')
+    await expect(onHand(page)).toHaveText('6')
+    await expect(positionStamp).toHaveText(priorPositionStamp!)
     await expect(stamp).toHaveText(prior!)
   }
   await page.route(matches,r=>r.abort('connectionreset'),{times:1})
   await retry.click()
   await expect(panel).toContainText('Showing the last confirmed timeline page.')
   await expect(retry).toBeFocused()
+  await f.write('receiving/transfers',32,{purchaseId:f.paid.purchaseId,sourcePlacementId:f.position,
+    sourceLocationId:f.a.id,confirmedSourceLocationCode:f.a.code,destinationLocationId:f.empty.id,
+    confirmedDestinationLocationCode:f.empty.code,quantity:1,reason:'One unit moved before the next page',backing:[]})
   await page.keyboard.press('Enter')
   await expect(panel.getByRole('heading',{name:'Position timeline'})).toBeFocused()
   await expect(panel).toContainText('4 shown · Timeline page 2')
   await expect(rows.last()).toContainText('Put away')
+  await expect(onHand(page)).toHaveText('5')
   await panel.getByRole('button',{name:'Newer events'}).focus()
   await page.keyboard.press('Enter')
   await expect(panel).toContainText('25 shown · Timeline page 1')
-  await expect(rows.first()).toContainText('Shelf witness 27')
+  await expect(rows.first()).toContainText('One unit moved before the next page')
 })
 
 test('undated facts retain their revision and a late response cannot populate a newly selected position', async ({page,context}) => {
@@ -137,18 +153,24 @@ test('undated facts retain their revision and a late response cannot populate a 
   const base: PositionTimelinePage = await (await page.request.get(originalPath)).json()
   expect(base.events.map(e=>e.kind)).toEqual(['offer-backing','putaway'])
   const firstRead = (u:URL) => u.pathname === originalPath && !u.searchParams.has('after')
-  await page.route(firstRead,r=>r.fulfill({json:{...base,complete:false,events:[]}}),{times:1})
+  await page.route(firstRead,r=>r.fulfill({json:{...base,complete:false,
+    events:[{...base.events[0],reason:'Unconfirmed event'}],position:{...base.position,layer:{...base.position.layer,quantity:999}}}}))
   await page.goto('/#inventory/'+f.position)
   const panel = timeline(page)
   await expect(panel).toContainText('Partial timeline read.')
   await expect(panel).not.toContainText('No events recorded')
+  await expect(onHand(page)).toHaveCount(0)
+  await expect(panel.getByRole('listitem')).toHaveCount(0)
+  await expect(panel).not.toContainText('Unconfirmed event')
+  await page.unroute(firstRead)
   const archived = {...base,hasUndatedEvents:true,events:base.events.map(e=>({...e,occurredAt:null}))}
-  await page.route(firstRead,r=>r.fulfill({json:archived}),{times:1})
+  await page.route(firstRead,r=>r.fulfill({json:archived}))
   await panel.getByRole('button',{name:'Retry timeline page 1'}).click()
   await expect(panel).toContainText('Some events have no recorded time.')
   await expect(panel.getByRole('listitem').first()).toContainText('Revision 5 · Time not recorded')
   await expect(panel.getByRole('listitem').last()).toContainText('Revision 3 · Time not recorded')
 
+  await page.unroute(firstRead)
   const next = await f.write('receiving/transfers',5,{ purchaseId:f.paid.purchaseId,sourcePlacementId:f.position,
     sourceLocationId:f.a.id,confirmedSourceLocationCode:f.a.code,destinationLocationId:f.empty.id,
     confirmedDestinationLocationCode:f.empty.code,quantity:1,reason:'One pouch to a different bin',backing:[] })
@@ -167,7 +189,48 @@ test('undated facts retain their revision and a late response cannot populate a 
   await expect(panel).toContainText('Showing the last confirmed timeline page.')
   await expect(panel).not.toContainText('Time not recorded')
   await expect(panel).not.toContainText('Offer backing added')
+  await expect(onHand(page)).toHaveText('1')
   await context.setOffline(false)
   await expect(panel).toContainText('One pouch to a different bin')
   await expect(panel.getByText('Showing the last confirmed timeline page.',{exact:false})).toHaveCount(0)
+})
+
+test('a competing transfer between register selection and timeline read shows the paired zero balance and movement', async ({page}) => {
+  const f = await fixture(page)
+  await page.getByRole('link',{name:'Inventory'}).click()
+  const query = page.getByRole('searchbox',{name:'Search stock positions'})
+  await query.fill(f.paid.purchase)
+  await query.press('Enter')
+  const register = page.getByRole('region',{name:'Stock register'})
+  const select = register.locator('[data-position="'+f.position+'"]')
+  await expect(select.locator('xpath=ancestor::tr')).toContainText('6 on hand')
+
+  const path = endpoint(f.position)
+  let release!:()=>void
+  const gate = new Promise<void>(resolve=>{release=resolve})
+  await page.route(url=>url.pathname===path,async route=>{await gate;await route.continue()},{times:1})
+  const reads: string[] = []
+  page.on('request',r=>{
+    const url = new URL(r.url())
+    if (url.pathname===path || url.searchParams.get('positionId')===f.position) reads.push(url.pathname)
+  })
+  const first = page.waitForRequest(r=>new URL(r.url()).pathname===path)
+  const result = page.waitForResponse(r=>new URL(r.url()).pathname===path)
+  await select.click()
+  await first
+  try {
+    await expect(inspector(page)).toContainText('Reading position balances and activity')
+    await expect(onHand(page)).toHaveCount(0)
+    await f.write('receiving/transfers',5,{purchaseId:f.paid.purchaseId,sourcePlacementId:f.position,sourceLocationId:f.a.id,
+      confirmedSourceLocationCode:f.a.code,destinationLocationId:f.empty.id,confirmedDestinationLocationCode:f.empty.code,
+      quantity:6,reason:'A second session moved the entire position',moveAllBacking:true,backing:[]})
+  } finally {release()}
+  const snapshot: PositionTimelinePage = await (await result).json()
+  expect(snapshot.position.layer.quantity).toBe(0)
+  expect(snapshot.events[0]).toMatchObject({kind:'transfer-out',physicalDelta:-6,offerBackedDelta:-3})
+  await expect(onHand(page)).toHaveText('0')
+  await expect(inspector(page)).toContainText('No units remain in this position.')
+  await expect(timeline(page).getByRole('listitem').first()).toContainText('A second session moved the entire position')
+  await expect(select.locator('xpath=ancestor::tr')).toContainText('6 on hand')
+  expect(reads).toEqual([path])
 })

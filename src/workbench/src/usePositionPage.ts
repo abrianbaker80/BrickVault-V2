@@ -5,7 +5,7 @@ export type PositionReadState = 'ready' | 'loading' | 'unavailable'
 
 export function usePositionPage<T extends { complete: boolean; nextAfter: string | null }>(
   props: { asOf: string; state: PositionReadState },
-  read: (after: string) => Promise<T>,
+  read: (after: string, previous: T | null) => Promise<T>,
   onFailure: (reason: unknown) => void,
 ) {
   const page = shallowRef<T | null>(null)
@@ -27,7 +27,7 @@ export function usePositionPage<T extends { complete: boolean; nextAfter: string
       if (!loading.value) return
       const moved = page.value && cursors.at(-1) !== confirmed.value.at(-1)
       try {
-        const result = await read(cursors.at(-1)!)
+        const result = await read(cursors.at(-1)!, page.value)
         if (!active) return
         if (result.nextAfter !== null && cursors.includes(result.nextAfter)) throw new ContractFailure()
         partial.value = !result.complete
