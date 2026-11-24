@@ -10,7 +10,7 @@ export function useWorkbench(page: Ref<string>) {
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
   const error = ref('')
-  const notice = ref<{ message: string; correlationId: string } | null>(null)
+  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string } | null>(null)
   const pending = shallowRef<Command[]>([])
   const held = shallowRef<Held[]>([])
   const journalError = ref('')
@@ -152,7 +152,7 @@ export function useWorkbench(page: Ref<string>) {
       forget(command)
       loadPending()
       notice.value = { message: 'Saved ' + commandLabel(command) + ' · revision ' + receipt.revision + '.',
-        correlationId: receipt.correlationId }
+        correlationId: receipt.correlationId, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
       await refresh()
       return receipt
     } catch (reason) {
@@ -163,7 +163,8 @@ export function useWorkbench(page: Ref<string>) {
       } else if (reason instanceof ApiFailure && reason.detail &&
           ['invalid_reference', 'duplicate_reference', 'invalid_receiving', 'duplicate_receiving_reference',
             'revision_conflict', 'command_mismatch', 'catalog_ineligible', 'catalog_reconfirmation_required', 'bin_confirmation_mismatch',
-            'quantity_unavailable', 'delivery_mismatch', 'backing_mismatch'].includes(reason.detail.code)) {
+            'quantity_unavailable', 'delivery_mismatch', 'backing_mismatch', 'invalid_transfer', 'transfer_source_mismatch',
+            'transfer_bin_confirmation_mismatch', 'transfer_quantity_unavailable', 'transfer_backing_unavailable', 'unknown_location'].includes(reason.detail.code)) {
         forget(command)
         loadPending()
         if (reason.status === 409) await refresh()

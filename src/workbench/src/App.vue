@@ -154,7 +154,9 @@ function openForm() {
               <Receiving v-if="receiving" :key="session.workspaceId" :stock="receiving" :workspace="workspace" :workspace-id="session.workspaceId" :enabled="canCreate" :uncertain="pending.length > 0 && !submitting" :dispatch="record" />
               <p v-else role="status">{{ readState === 'loading' ? 'Loading receiving records…' : 'Receiving records are unavailable.' }}</p>
             </template>
-            <Register v-else :key="session.workspaceId + page" :page="page" :workspace="workspace" :connected="readState !== 'disconnected'" @failure="expired" />
+            <Register v-else :key="session.workspaceId + page" :page="page" :workspace="workspace" :connected="readState !== 'disconnected'"
+              :transfers="{ enabled: canCreate, pending: pending.length > 0, feedback: error || journalError, workspaceId: session.workspaceId, dispatch: record }"
+              :confirmed-source-id="notice?.sourceLocationId" @failure="expired" />
           </div>
           <RecordForm v-if="dialogKind" :kind="dialogKind" :enabled="canCreate" :saving="submitting"
             :error="error || journalError || (readState === 'disconnected' ? 'Reconnect before sending.' : '')" @close="closeForm" @save="submit" />
