@@ -28,6 +28,7 @@ try
     var sessions = new Sessions(db, settings);
     var references = new References(db);
     var receiving = new Receiving(db);
+    var bins = new BinStock(db);
     var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
     {
         Args = [], EnvironmentName = "Development", ContentRootPath = AppContext.BaseDirectory
@@ -100,6 +101,7 @@ try
     api.MapPost("/catalog", (HttpContext c, CancellationToken ct) => Save<CatalogCommand>(c, references.Save, ct));
     api.MapPost("/locations", (HttpContext c, CancellationToken ct) => Save<LocationCommand>(c, references.Save, ct));
     api.MapGet("/receiving", (CancellationToken ct) => receiving.Snapshot(ct));
+    api.MapGet("/receiving/bins/{locationId:guid}", (Guid locationId, CancellationToken ct) => bins.Snapshot(locationId, ct));
     api.MapPost("/receiving/purchases", (HttpContext c, CancellationToken ct) => Save<PurchaseCommand>(c, receiving.Save, ct));
     api.MapPost("/receiving/deliveries", (HttpContext c, CancellationToken ct) => Save<DeliveryCommand>(c, receiving.Save, ct));
     api.MapPost("/receiving/putaway", (HttpContext c, CancellationToken ct) => Save<PutawayCommand>(c, receiving.Save, ct));
