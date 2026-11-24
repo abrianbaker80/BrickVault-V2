@@ -198,7 +198,7 @@ test('purchase selection remains bound to its link across refresh and same-page 
   await page.goto('/#receiving/' + randomUUID())
   await expect(page.getByText('The selected purchase is unavailable in this read.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Receive delivery' })).toHaveCount(0)
-  await page.getByLabel('Purchase', { exact: true }).selectOption(first)
+  await page.getByRole('combobox', { name: 'Purchase', exact: true }).selectOption(first)
   await expect(page.getByRole('heading', { name: 'PO-A-' + key })).toBeVisible()
 })
 
