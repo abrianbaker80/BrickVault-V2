@@ -355,7 +355,7 @@ test('a posted shortage unblocks its remaining stock on return to the same bin a
 
   await transfer.click()
   const move = page.getByRole('dialog', { name: 'Transfer stock', exact: true })
-  await move.getByLabel('Destination bin', { exact: true }).selectOption(f.b.id)
+  await move.getByRole('combobox', { name: 'Destination bin', exact: true }).selectOption(f.b.id)
   await move.getByLabel('Confirm source bin code').fill(f.a.code)
   await move.getByLabel('Confirm destination bin code').fill(f.b.code)
   await move.getByLabel('Count moved').fill('1')
