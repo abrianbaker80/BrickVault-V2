@@ -22,6 +22,7 @@ const amount = (value: number | null) => money(value, props.purchase.currency)
         <li v-for="d in purchase.deliveries" :key="d.id">
           <div class="receipt-line-head"><strong>{{ d.reference }}</strong><span>{{ d.quantity }} received</span></div>
           <small>{{ d.catalogId ? itemLabel(catalog, d.catalogId, d.catalogRevision) : 'Mixed delivery' }} · Item cost {{ amount(d.itemCostMinor) }}</small>
+          <small v-if="d.lostQuantity">{{ d.lostQuantity }} lost · Allocated item cost {{ amount(d.allocatedLostItemCostMinor) }} · Remaining delivery cost {{ amount(d.remainingItemCostMinor) }}</small>
           <ul class="bin-rows">
             <li v-if="d.intakeQuantity"><span>{{ d.catalogId ? 'Intake' : 'Quarantine' }}</span><strong>{{ d.intakeQuantity }}</strong></li>
             <li v-for="p in d.placements" :key="p.id"><span>Bin {{ p.locationCode }}<small>{{ itemLabel(catalog, p.catalogId, p.catalogRevision) }}</small></span><strong>{{ p.quantity }}</strong></li>
@@ -50,7 +51,7 @@ const amount = (value: number | null) => money(value, props.purchase.currency)
         <li v-for="offer in purchase.offers" :key="offer.id">
           <div class="receipt-line-head"><strong>{{ money(offer.unitPriceMinor, offer.currency) }} per unit</strong><span>{{ offer.backedQuantity }} backed</span></div>
           <small>{{ itemLabel(catalog, offer.catalogId, offer.catalogRevision) }}</small>
-          <p v-if="!offer.backingCurrent" class="warning">The backing needs renewed catalog confirmation. Check the item revision before using this offer.</p>
+          <p v-if="offer.backedQuantity && !offer.backingCurrent" class="warning">The backing needs renewed catalog confirmation. Check the item revision before using this offer.</p>
           <ul class="bin-rows"><li v-for="b in offer.backing" :key="b.placementId"><span>{{ positions.get(b.placementId) }}</span><strong>{{ b.quantity }}</strong></li></ul>
         </li>
       </ul>

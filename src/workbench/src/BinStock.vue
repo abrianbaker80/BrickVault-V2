@@ -67,7 +67,7 @@ async function closeTransfer() {
 }
 const arrivals = computed(() => new Map(stock.value?.movements.map(move => [move.destinationPlacementId, move])))
 
-watch(() => [props.location.id, props.location.revision, props.asOf, props.connected, inspectingCount.value || Boolean(props.countLink?.holdPositionId)] as const,
+watch(() => [props.location.id, props.location.revision, props.asOf, props.connected, inspectingCount.value || Boolean(props.countLink?.holdPositionId || props.countLink?.lossPositionId)] as const,
   async ([id, revision, , connected, countOnly], _, onCleanup) => {
     let current = true
     onCleanup(() => { current = false })

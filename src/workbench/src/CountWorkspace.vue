@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CountPostingLink from './CountPostingLink.vue'
 import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, ContractFailure, explain } from './api'
 import type { Catalog, CountPosition, CountSnapshot, Location, TransferControls } from './api'
@@ -121,7 +122,8 @@ async function submit() {
             <dt>Unidentified surplus</dt><dd>{{ receipt.unidentifiedSurplusQuantity }}</dd></dl>
           <p v-if="receipt.unidentifiedSurplusQuantity">Surplus units await identification before they can enter stock.</p>
           <p><strong>{{ receipt.reason }}</strong><br>{{ time(receipt.observedAt) }} · Witnessed in {{ receipt.locationCode }}</p>
-          <p class="field-hint">Observation only. No stock adjustment posted.</p>
+          <CountPostingLink :key="receipt.id" :bin="location.id" :position="receipt.positionId" :observation="receipt.id"
+            :as-of="asOf" :connected="connected" @failure="emit('failure', $event)" />
           <details><summary>Receipt identifiers</summary><small>Observation {{ receipt.id }}</small><small>Position {{ receipt.positionId }}</small>
             <small>Command {{ receipt.commandId }}</small><small>Correlation ID {{ receipt.correlationId }}</small></details>
           <a :href="countPositionLink(location.id, receipt.positionId)">See counts for this position</a>
