@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
-import time
+from time import monotonic
 from urllib.parse import parse_qs, urlsplit
 
 from cloud_receipt import FIELDS, SIDECAR, load_small, verify_directory, verify_sidecar
@@ -40,7 +40,7 @@ class ReadbackDeadline(RecoveryError):
 def remaining_timeout(limit, deadline):
     if deadline is None:
         return limit
-    remaining = deadline - time.monotonic()
+    remaining = deadline - monotonic()
     if remaining <= 0:
         raise ReadbackDeadline("OneDrive provider retry window expired.")
     return min(limit, remaining)
