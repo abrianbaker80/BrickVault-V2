@@ -73,10 +73,11 @@ internal sealed class Receiving(NpgsqlDataSource db)
         }
         catch (PostgresException ex) when (ex.ConstraintName is
             "receiving_quantity" or "receiving_catalog" or "receiving_catalog_reconfirmation" or
-            "receiving_delivery" or "receiving_bin" or "receiving_backing")
+            "receiving_delivery" or "receiving_bin" or "receiving_backing" or "stock_shortage_open")
         {
             throw ex.ConstraintName switch
             {
+                "stock_shortage_open" => Fault.StockShortageOpen(),
                 "receiving_quantity" => Rejected("quantity_unavailable", "There are fewer units available for this action."),
                 "receiving_catalog" => Rejected("catalog_ineligible", "Confirm a matching, eligible catalog identity and condition."),
                 "receiving_catalog_reconfirmation" => Rejected("catalog_reconfirmation_required",
@@ -137,6 +138,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
             SELECT delivery_id,p.id,p.catalog_id,p.catalog_revision,p.location_id,p.location_code,p.quantity,
                 COALESCE((SELECT sum(b.quantity) FROM brickvault.current_offer_backing b WHERE b.placement_id=p.id),0)::integer,
                 c.integration_eligible AND c.revision=p.catalog_revision
+                    AND NOT EXISTS (SELECT 1 FROM brickvault.stock_shortage_cases sc WHERE sc.position_id=p.id)
             FROM brickvault.current_placement_stock p JOIN brickvault.catalog c ON c.id=p.catalog_id
             WHERE p.quantity > 0
             ORDER BY p.location_code,p.id

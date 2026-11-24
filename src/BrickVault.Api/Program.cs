@@ -29,6 +29,7 @@ try
     var sessions = new Sessions(db, settings);
     var references = new References(db);
     var receiving = new Receiving(db);
+    var counts = new StockCounts(db);
     var bins = new BinStock(db);
     var inventory = new StockRegister(db);
     var transfers = new Transfers(db);
@@ -107,6 +108,9 @@ try
     api.MapPost("/locations", (HttpContext c, CancellationToken ct) => Save<LocationCommand>(c, references.Save, ct));
     api.MapGet("/receiving", (CancellationToken ct) => receiving.LegacySnapshot(ct));
     api.MapGet("/receiving/current", (CancellationToken ct) => receiving.Snapshot(ct));
+    api.MapGet("/receiving/bins/{locationId:guid}/counts",
+        (Guid locationId, CancellationToken ct) => counts.Snapshot(locationId, ct));
+    api.MapPost("/receiving/counts", (HttpContext c, CancellationToken ct) => Save<StockCountCommand>(c, counts.Save, ct));
     api.MapGet("/inventory/positions", (string? q, string? itemType, Guid? locationId, Guid? positionId, Guid? after, int? limit, CancellationToken ct) =>
         inventory.Search(q, itemType, locationId, positionId, after, limit ?? 25, ct));
     api.MapGet("/receiving/bins/{locationId:guid}", (Guid locationId, CancellationToken ct) => bins.Snapshot(locationId, ct));

@@ -119,7 +119,7 @@
           {
             "name": "audit",
             "in": "query",
-            "description": "Select all reference and receiving audit kinds supported by the original workspace contract. Omitting the parameter returns catalog and location activity. Read transfer history in the selected bin movements endpoint.",
+            "description": "Select all reference and receiving audit kinds supported by the original workspace contract. Omitting the parameter returns catalog and location activity. Read transfer history in the selected bin movements endpoint. Count evidence is scoped to the selected bin counts endpoint.",
             "schema": {
               "type": "string",
               "enum": [
@@ -919,6 +919,113 @@
           }
         }
       }
+    },
+    "/api/v1/receiving/counts": {
+      "post": {
+        "operationId": "recordStockCount",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "description": "The authenticated workspaceId captured when the operator prepared the command. Use that same value for every retry. A missing or mismatched workspace returns 409 workspace_mismatch.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockCountCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockCountReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Record a witnessed count against one positive receipt position. A lower count opens a physical shortage for review. The count does not post a stock movement or release a commitment."
+      }
+    },
+    "/api/v1/receiving/bins/{locationId}/counts": {
+      "get": {
+        "operationId": "getBinCounts",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BinCountSnapshot"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Location is not registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read this registered bin's current ledger positions, retained count observations and open physical shortages.",
+        "parameters": [
+          {
+            "name": "locationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -1444,7 +1551,8 @@
               "delivery",
               "putaway",
               "offer",
-              "transfer"
+              "transfer",
+              "count"
             ]
           },
           "correlationId": {
@@ -2994,6 +3102,365 @@
           "backedQuantity",
           "unbackedQuantity",
           "freeToBackQuantity"
+        ],
+        "additionalProperties": false
+      },
+      "StockCountCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "countedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "commandId",
+          "purchaseId",
+          "expectedRevision",
+          "positionId",
+          "locationId",
+          "confirmedLocationCode",
+          "countedQuantity",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "CountPosition": {
+        "type": "object",
+        "properties": {
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deliveryReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "purchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "ledgerQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "offerBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "shortageOpen": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "positionId",
+          "purchaseId",
+          "purchaseReference",
+          "deliveryId",
+          "deliveryReference",
+          "purchaseRevision",
+          "catalogId",
+          "catalogRevision",
+          "ledgerQuantity",
+          "offerBackedQuantity",
+          "shortageOpen"
+        ],
+        "additionalProperties": false
+      },
+      "StockCountObservation": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "expectedPurchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "ledgerQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "offerBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "countedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "missingQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "unidentifiedSurplusQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "observedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "postedAdjustment": {
+            "type": "boolean",
+            "const": false
+          }
+        },
+        "required": [
+          "id",
+          "commandId",
+          "correlationId",
+          "purchaseId",
+          "positionId",
+          "locationId",
+          "locationCode",
+          "expectedPurchaseRevision",
+          "ledgerQuantity",
+          "offerBackedQuantity",
+          "countedQuantity",
+          "missingQuantity",
+          "unidentifiedSurplusQuantity",
+          "reason",
+          "observedAt",
+          "postedAdjustment"
+        ],
+        "additionalProperties": false
+      },
+      "StockShortageCase": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "const": "open"
+          },
+          "openingObservationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "openedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "openingMissingQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "latestObservationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "latestObservedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "latestObservedMissingQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "id",
+          "positionId",
+          "purchaseId",
+          "state",
+          "openingObservationId",
+          "openedAt",
+          "openingMissingQuantity",
+          "latestObservationId",
+          "latestObservedAt",
+          "latestObservedMissingQuantity"
+        ],
+        "additionalProperties": false
+      },
+      "BinCountSnapshot": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "bin-counts"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CountPosition"
+            }
+          },
+          "observations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StockCountObservation"
+            }
+          },
+          "shortages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StockShortageCase"
+            }
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "location",
+          "positions",
+          "observations",
+          "shortages"
+        ],
+        "additionalProperties": false
+      },
+      "StockCountReceipt": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "count"
+            ]
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "commandId",
+          "entityId",
+          "revision",
+          "kind",
+          "correlationId"
         ],
         "additionalProperties": false
       }

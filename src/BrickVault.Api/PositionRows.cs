@@ -11,7 +11,8 @@ internal static class PositionRows
                 COALESCE((SELECT sum(b.quantity) FROM brickvault.current_offer_backing b WHERE b.placement_id=p.id),0)::integer,
                 c.id,c.revision,c.item_type,c.item_number,c.variant,c.name,c.color_id,c.color_state,c.condition,
                 c.completeness,c.source,c.license,c.mapping,c.integration_eligible,
-                buy.revision,p.location_code
+                buy.revision,p.location_code,
+                EXISTS(SELECT 1 FROM brickvault.stock_shortage_cases sc WHERE sc.position_id=p.id)
             """;
     internal const string From = """
             FROM brickvault.current_placement_stock p
@@ -32,6 +33,6 @@ internal static class PositionRows
         return new BinStockLayer(r.GetGuid(0), r.GetGuid(1), r.GetString(2), r.GetGuid(3), r.GetString(4),
             r.GetGuid(5), r.GetGuid(6), r.GetInt32(7), Optional<int>(r, 8), r.GetString(9), r.GetGuid(10),
             recordedRevision, current, r.GetString(12), quantity, backed, unbacked,
-            current.IntegrationEligible && current.Revision == recordedRevision ? unbacked : 0);
+            current.IntegrationEligible && current.Revision == recordedRevision && !r.GetBoolean(31) ? unbacked : 0);
     }
 }

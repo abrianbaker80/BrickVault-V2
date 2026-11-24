@@ -44,8 +44,8 @@ internal sealed class StockRegister(NpgsqlDataSource db)
         var rows = await Rows(connection, tx, "SELECT " + PositionRows.Select +
             ",p.origin_placement_id,loc.id,loc.revision,loc.code,loc.name " + filtered +
             " AND ($6::uuid IS NULL OR p.id>$6) ORDER BY p.id LIMIT $7",
-            r => new StockRegisterRow(PositionRows.ReadLayer(r), r.GetGuid(31),
-                new LocationRow(r.GetGuid(32), r.GetInt32(33), r.GetString(34), r.GetString(35))),
+            r => new StockRegisterRow(PositionRows.ReadLayer(r), r.GetGuid(32),
+                new LocationRow(r.GetGuid(33), r.GetInt32(34), r.GetString(35), r.GetString(36))),
             ct, [.. Filters(), Nullable(NpgsqlDbType.Uuid, after), limit + 1]);
         Guid? next = null;
         if (rows.Count > limit)
