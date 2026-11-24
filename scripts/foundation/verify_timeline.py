@@ -18,6 +18,12 @@ def verify_timeline(client, loss):
             position, purchase, posting["receipt"]["deliveryId"]
         )
         assert page["location"]["id"] == posting["location"]["id"]
+        snapshot = page["position"]
+        layer = snapshot["layer"]
+        assert snapshot["originPlacementId"] == page["originPlacementId"] and snapshot["location"] == page["location"]
+        assert (layer["placementId"], layer["quantity"], layer["backedQuantity"]) == (
+            position, current["balances"]["physicalOnHand"], current["balances"]["backedQuantity"]
+        )
         assert len(page["events"]) <= 3
         events.extend(page["events"])
         cursor = page["nextAfter"]
