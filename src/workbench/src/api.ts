@@ -9,19 +9,23 @@ export type Location = Schema['LocationRow']
 export type Diagnostic = Schema['Diagnostic']
 export type CatalogInput = Omit<Schema['CatalogCommand'], 'commandId' | 'id' | 'expectedRevision'>
 export type LocationInput = Pick<Schema['LocationCommand'], 'code' | 'name'>
-export type BinStockSnapshot = Schema['BinStockSnapshot']
-export type ReceivingWorkspace = Schema['ReceivingWorkspace']
-export type Purchase = Schema['PurchaseRow']
+export type BinTransferSnapshot = Schema['BinTransferSnapshot']
+export type TransferPosition = BinTransferSnapshot['positions'][number]
+export type TransferCommand = Schema['TransferCommand']
+export type TransferControls = { enabled: boolean; pending: boolean; feedback: string; workspaceId: string; dispatch: Dispatch }
+export type ReceivingWorkspace = Schema['CurrentReceivingWorkspace']
+export type Purchase = Schema['CurrentPurchaseRow']
 export type ReceivingCommand = { workspaceId: string } & (
   | { kind: 'purchase'; body: Schema['PurchaseCommand'] }
   | { kind: 'delivery'; body: Schema['DeliveryCommand'] }
   | { kind: 'putaway'; body: Schema['PutawayCommand'] }
-  | { kind: 'offer'; body: Schema['OfferCommand'] })
+  | { kind: 'offer'; body: Schema['OfferCommand'] }
+  | { kind: 'transfer'; body: TransferCommand })
 export type Command = ReceivingCommand | { workspaceId: string } & (
   | { kind: 'catalog'; body: Schema['CatalogCommand'] }
   | { kind: 'location'; body: Schema['LocationCommand'] })
 export type Held = { workspaceId: string | null; commandId: string }
-export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | undefined>
+export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | undefined>
 
 export function commandLabel(command: Command) {
   switch (command.kind) {
@@ -30,6 +34,7 @@ export function commandLabel(command: Command) {
     case 'delivery': return 'Delivery ' + command.body.reference
     case 'putaway': return 'Putaway to ' + command.body.confirmedLocationCode
     case 'offer': return 'Unpublished offer'
+    case 'transfer': return 'Transfer of ' + command.body.quantity + ' from ' + command.body.confirmedSourceLocationCode + ' to ' + command.body.confirmedDestinationLocationCode
   }
 }
 
@@ -39,7 +44,8 @@ const commands = {
   purchase: { path: 'receiving/purchases', valid: valid.PurchaseCommand },
   delivery: { path: 'receiving/deliveries', valid: valid.DeliveryCommand },
   putaway: { path: 'receiving/putaway', valid: valid.PutawayCommand },
-  offer: { path: 'receiving/offers', valid: valid.OfferCommand }
+  offer: { path: 'receiving/offers', valid: valid.OfferCommand },
+  transfer: { path: 'receiving/transfers', valid: valid.TransferCommand }
 }
 
 export class ApiFailure extends Error {
@@ -86,8 +92,8 @@ export const api = {
     await request('session', { method: 'DELETE', headers: { 'X-CSRF-Token': csrf } })
   },
   workspace: (allAudit = false) => read(allAudit ? 'workspace?audit=all' : 'workspace', valid.Workspace),
-  binStock: (id: string) => read('receiving/bins/' + encodeURIComponent(id), valid.BinStockSnapshot),
-  receiving: () => read('receiving', valid.ReceivingWorkspace),
+  binTransfers: (id: string) => read('receiving/bins/' + encodeURIComponent(id) + '/movements', valid.BinTransferSnapshot),
+  receiving: () => read('receiving/current', valid.CurrentReceivingWorkspace),
   diagnostic: (id: string) => read('diagnostics/' + encodeURIComponent(id), valid.Diagnostic),
   async save(command: Command, csrf: string) {
     const options = {
@@ -96,7 +102,8 @@ export const api = {
     }
     const path = commands[command.kind].path
     const receipt = command.kind === 'catalog' || command.kind === 'location'
-      ? await read(path, valid.Receipt, options) : await read(path, valid.ReceivingReceipt, options)
+      ? await read(path, valid.Receipt, options)
+      : command.kind === 'transfer' ? await read(path, valid.TransferReceipt, options) : await read(path, valid.ReceivingReceipt, options)
     if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind) throw new ContractFailure()
     return receipt
   }

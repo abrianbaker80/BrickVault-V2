@@ -1,4 +1,4 @@
-"""Stage the receiving release on an independent copy of a stopped M2 instance."""
+"""Stage a schema upgrade on an independent copy of a stopped instance."""
 
 import os
 from pathlib import Path
@@ -6,8 +6,38 @@ import shutil
 import tempfile
 
 from instance import Instance, RELEASE, ROOT, private_dir
-from recovery import FACTS, RECEIVING_FACTS, signatures
+from recovery import RECEIVING_FACTS, signatures
 from runtime import exclusive, operation
+
+
+def verify_opening_stock(instance):
+    """The v4 opening projection must reproduce every v3 placement and allocation."""
+    matches = instance.sql("""
+        WITH original AS (
+            SELECT id,id AS origin_placement_id,purchase_id,catalog_id,catalog_revision,
+                   location_id,location_code,quantity AS introduced_quantity,delivery_id,quantity
+            FROM brickvault.placements
+        ), current AS (
+            SELECT id,origin_placement_id,purchase_id,catalog_id,catalog_revision,
+                   location_id,location_code,introduced_quantity,delivery_id,quantity
+            FROM brickvault.current_placement_stock
+        ), backing AS (
+            SELECT offer_id,placement_id,quantity FROM brickvault.offer_backing
+        ), projected AS (
+            SELECT offer_id,placement_id,quantity FROM brickvault.current_offer_backing
+        )
+        SELECT NOT EXISTS (
+            (TABLE original EXCEPT ALL TABLE current) UNION ALL
+            (TABLE current EXCEPT ALL TABLE original)
+        ) AND NOT EXISTS (
+            (TABLE backing EXCEPT ALL TABLE projected) UNION ALL
+            (TABLE projected EXCEPT ALL TABLE backing)
+        );
+    """)
+    if matches != "t":
+        raise ValueError(
+            "Opening position or offer backing differs from receiving history."
+        )
 
 
 def stage_upgrade(source, output, release=RELEASE):
@@ -66,23 +96,34 @@ def stage_upgrade(source, output, release=RELEASE):
                 try:
                     candidate.pg_start()
                     before = signatures(candidate, candidate.database)
-                    if before["schema_version"]["rows"] != 2:
-                        raise ValueError("This upgrade requires the M2 schema.")
                     candidate.migrate()
                     candidate.grants()
                     after = signatures(candidate, candidate.database)
                     if (
-                        after["schema_version"]["rows"] != 3
+                        after["schema_version"]["rows"]
+                        <= before["schema_version"]["rows"]
                         or any(
                             before[t] != after[t]
-                            for t in FACTS
+                            for t in before
                             if t != "schema_version"
                         )
-                        or any(after[t]["rows"] for t in RECEIVING_FACTS)
+                        or any(
+                            after[t]["rows"] for t in RECEIVING_FACTS if t not in before
+                        )
+                        or any(
+                            after[t]["rows"]
+                            for t in (
+                                "placement_transfers",
+                                "placement_transfer_backing",
+                            )
+                            if t in after
+                        )
                     ):
                         raise ValueError(
                             "The staged upgrade failed its business-record checks."
                         )
+                    if "placement_positions" in after:
+                        verify_opening_stock(candidate)
                 finally:
                     candidate.pg_stop()
                 stage.rename(output / "instance")

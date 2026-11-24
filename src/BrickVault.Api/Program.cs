@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using BrickVault.Api;
+using Microsoft.AspNetCore.Http.Features;
 using Npgsql;
 
 try
@@ -29,6 +30,7 @@ try
     var references = new References(db);
     var receiving = new Receiving(db);
     var bins = new BinStock(db);
+    var transfers = new Transfers(db);
     var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
     {
         Args = [], EnvironmentName = "Development", ContentRootPath = AppContext.BaseDirectory
@@ -70,6 +72,8 @@ try
             {
                 Fault known => known,
                 JsonException => new Fault(400, "invalid_json", "The request must match the version 1 JSON contract."),
+                BadHttpRequestException { StatusCode: StatusCodes.Status413PayloadTooLarge } => new Fault(413,
+                    "request_too_large", "This request exceeds the allowed size. Reduce the payload and submit it again."),
                 BadHttpRequestException bad => new Fault(bad.StatusCode, "invalid_request", "The request could not be read."),
                 NpgsqlException or TimeoutException or InvalidOperationException => new Fault(503, "foundation_unavailable",
                     "The foundation service is unavailable. Retry the same command after recovery."),
@@ -100,8 +104,13 @@ try
         references.Workspace(ct, c.Request.Query["audit"] == "all"));
     api.MapPost("/catalog", (HttpContext c, CancellationToken ct) => Save<CatalogCommand>(c, references.Save, ct));
     api.MapPost("/locations", (HttpContext c, CancellationToken ct) => Save<LocationCommand>(c, references.Save, ct));
-    api.MapGet("/receiving", (CancellationToken ct) => receiving.Snapshot(ct));
+    api.MapGet("/receiving", (CancellationToken ct) => receiving.LegacySnapshot(ct));
+    api.MapGet("/receiving/current", (CancellationToken ct) => receiving.Snapshot(ct));
     api.MapGet("/receiving/bins/{locationId:guid}", (Guid locationId, CancellationToken ct) => bins.Snapshot(locationId, ct));
+    api.MapGet("/receiving/bins/{locationId:guid}/movements",
+        (Guid locationId, CancellationToken ct) => bins.Movements(locationId, ct));
+    api.MapPost("/receiving/transfers", (HttpContext c, CancellationToken ct) =>
+        Save<TransferCommand>(c, transfers.Save, ct, TransferCommand.MaxRequestBodyBytes));
     api.MapPost("/receiving/purchases", (HttpContext c, CancellationToken ct) => Save<PurchaseCommand>(c, receiving.Save, ct));
     api.MapPost("/receiving/deliveries", (HttpContext c, CancellationToken ct) => Save<DeliveryCommand>(c, receiving.Save, ct));
     api.MapPost("/receiving/putaway", (HttpContext c, CancellationToken ct) => Save<PutawayCommand>(c, receiving.Save, ct));
@@ -144,9 +153,17 @@ catch (Exception e)
 }
 
 static async Task<Receipt> Save<T>(HttpContext c, Func<T, Guid, CancellationToken, Task<Receipt>> write,
-    CancellationToken ct) where T : class
+    CancellationToken ct, int? bodyLimit = null) where T : class
 {
     ((Session)c.Items[typeof(Session)]!).RequireWorkspace(c.Request.Headers);
+    if (bodyLimit is int limit)
+    {
+        if (c.Request.ContentLength > limit)
+            throw new BadHttpRequestException("Request body too large.", StatusCodes.Status413PayloadTooLarge);
+        var size = c.Features.Get<IHttpMaxRequestBodySizeFeature>() ??
+            throw new InvalidOperationException("The server does not expose a request body limit.");
+        size.MaxRequestBodySize = limit;
+    }
     if (!c.Request.HasJsonContentType()) throw new Fault(415, "json_required", "Use the application/json content type.");
     var request = await c.Request.ReadFromJsonAsync<T>(Wire.Json, ct) ?? throw Fault.Invalid();
     var receipt = await write(request, (Guid)c.Items[typeof(Guid)]!, ct);

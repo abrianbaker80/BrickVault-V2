@@ -27,6 +27,14 @@ FACTS = (
 RECEIVING_FACTS = ("purchases", "deliveries", "placements", "offers", "offer_backing")
 
 
+TRANSFER_FACTS = ("placement_positions", "placement_transfers", "placement_transfer_backing")
+SCHEMA_FACTS = {
+    2: FACTS,
+    3: FACTS + RECEIVING_FACTS,
+    4: FACTS + RECEIVING_FACTS + TRANSFER_FACTS,
+}
+
+
 def digest(path):
     with path.open("rb") as f:
         return hashlib.file_digest(f, "sha256").hexdigest()
@@ -85,11 +93,9 @@ def signatures(s, database, token=None):
         database,
         role="bv_migrator",
     )
-    if versions == "1\n2":
-        tables = FACTS
-    elif versions == "1\n2\n3":
-        tables = FACTS + RECEIVING_FACTS
-    else:
+    history = versions.splitlines()
+    tables = SCHEMA_FACTS.get(len(history))
+    if tables is None or history != [str(i) for i in range(1, len(history) + 1)]:
         raise ValueError("Unsupported database schema history for backup verification.")
     groups = {}
     for table in tables:
@@ -216,7 +222,7 @@ def restore(s, source, identity, target):
             1,
             "foundation",
             "v1",
-        ) or m.get("schema") not in (2, 3):
+        ) or m.get("schema") not in SCHEMA_FACTS:
             raise ValueError("Unsupported backup format or release contract.")
         if digest(dump) != m.get("dumpSha256") or release_files(s) != m.get("release"):
             raise ValueError(
