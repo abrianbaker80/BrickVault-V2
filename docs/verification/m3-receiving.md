@@ -29,7 +29,7 @@ A receipt cost applies to the entire delivery in its recorded currency. Two posi
 
 Open the position in **Inventory**. **All activity** lists events for that position from newest to oldest. The earliest stock entry identifies the original putaway or the transfer that brought the pieces into this bin. A transfer identifies the other position. Draft-offer backing and build reservations affect how many pieces are committed. A witnessed count records what the operator saw. A posted loss reduces the physical balance. Open its receipt to see the exact offer reductions and the reason for the posting. Choose **Transfers only** to trace the route between bins.
 
-For example, a putaway of ten pieces followed by a count of five still represents ten on hand until the loss is posted. A five-piece loss then takes the position to five on hand. The count and the posting link to separate receipts. The position remains available by exact ID if its balance later reaches zero. [Position timeline qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/29)
+Each event carries the purchase revision that recorded it. This orders entries even when an older record has no timestamp. For example, a putaway of ten pieces followed by a count of five still represents ten on hand until the loss is posted. A five-piece loss then takes the position to five on hand. The count and the posting link to separate receipts. The position remains available by exact ID if its balance later reaches zero. [Position timeline qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/29)
 
 ## Witness a stock count and review a shortage
 

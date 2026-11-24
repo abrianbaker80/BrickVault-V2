@@ -13,6 +13,7 @@ def verify_timeline(client, loss):
     while True:
         page = client.call(path + "?" + urlencode(query))
         assert page["complete"] and page["asOf"] and page["scope"] == "position-timeline"
+        assert page["hasUndatedEvents"] is False
         assert (page["positionId"], page["purchaseId"], page["deliveryId"]) == (
             position, purchase, posting["receipt"]["deliveryId"]
         )
@@ -30,6 +31,8 @@ def verify_timeline(client, loss):
     assert [e["kind"] for e in reversed(events)] == [
         "putaway", "offer-backing", "offer-backing", "hold", "hold", "count", "hold-release", "stock-loss"
     ]
+    revisions = [event["purchaseRevision"] for event in events]
+    assert revisions == sorted(set(revisions), reverse=True)
     balance = current["balances"]
     assert sum(e["physicalDelta"] for e in events) == balance["physicalOnHand"] == 5
     assert sum(e["reservedDelta"] for e in events) == balance["reserved"] == 2
