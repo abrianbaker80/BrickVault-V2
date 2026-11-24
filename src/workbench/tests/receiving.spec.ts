@@ -173,6 +173,7 @@ test('purchase selection remains bound to its link across refresh and same-page 
   await page.goto('/#receiving')
   await page.getByLabel('Password').fill(process.env.BV_OWNER_PASSWORD!)
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'New purchase' })).toBeEnabled()
   const session = await (await page.request.get('/api/v1/session')).json()
   async function purchase(reference: string) {
     const response = await page.request.post('/api/v1/receiving/purchases', {
