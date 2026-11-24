@@ -110,6 +110,15 @@ internal sealed class Receiving(NpgsqlDataSource db)
         await backing.ExecuteNonQueryAsync(token);
     }
 
+    public async Task<ReceivingWorkspace> LegacySnapshot(CancellationToken token)
+    {
+        var snapshot = await Snapshot(token);
+        if (snapshot.Purchases.SelectMany(p => p.Offers).Any(offer => offer.Backing.Count > 64))
+            throw new Fault(426, "receiving_client_upgrade_required",
+                "This offer spans more stock positions than this client supports. Update Workbench to read the full receiving snapshot.");
+        return snapshot;
+    }
+
     public async Task<ReceivingWorkspace> Snapshot(CancellationToken token)
     {
         await using var connection = await db.OpenConnectionAsync(token);

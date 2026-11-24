@@ -18,6 +18,9 @@ internal sealed record TransferCommand
     public required int Quantity { get; init; }
     public required string Reason { get; init; }
     public required TransferBacking[] Backing { get; init; }
+    // Keep the digest of a previously prepared explicit transfer unchanged.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool MoveAllBacking { get; init; }
 
     private static bool TextFits(string? value, int max) => value is { Length: > 0 } &&
         value.Length <= max && value == value.Trim() && !value.Any(char.IsControl);
@@ -29,10 +32,10 @@ internal sealed record TransferCommand
             SourcePlacementId == Guid.Empty || SourceLocationId == Guid.Empty || DestinationLocationId == Guid.Empty ||
             SourceLocationId == DestinationLocationId || !TextFits(ConfirmedSourceLocationCode, 48) ||
             !TextFits(ConfirmedDestinationLocationCode, 48) || !ValidQuantity(Quantity) || !TextFits(Reason, 200) ||
-            Backing is not { Length: <= 64 } ||
+            Backing is null || (MoveAllBacking && Backing.Length != 0) ||
             Backing.Any(b => b is null || b.OfferId == Guid.Empty || !ValidQuantity(b.Quantity)) ||
             Backing.Select(b => b.OfferId).Distinct().Count() != Backing.Length)
-            throw new Fault(400, "invalid_transfer", "Supply both bin confirmations, a quantity, a reason and distinct offer allocations.");
+            throw new Fault(400, "invalid_transfer", "Supply both bin confirmations, a quantity and a reason. Choose distinct offer allocations or all backing.");
     }
 
     public byte[] Digest() => SHA256.HashData(Encoding.UTF8.GetBytes(

@@ -33,7 +33,23 @@ internal sealed class Transfers(NpgsqlDataSource db)
                 request.ConfirmedDestinationLocationCode, request.Quantity, request.Reason))
                 await movement.ExecuteNonQueryAsync(token);
 
-            if (request.Backing.Length > 0)
+            if (request.MoveAllBacking)
+            {
+                // The purchase row is still locked and the move has provisionally reduced the source.
+                await using var remaining = Query(connection, tx, """
+                    SELECT quantity FROM brickvault.current_placement_stock WHERE id=$1
+                    """, request.SourcePlacementId);
+                if (await remaining.ExecuteScalarAsync(token) is not 0)
+                    throw new Fault(409, "transfer_all_backing_requires_full",
+                        "Moving all backing requires the full source quantity. Choose offer quantities for a partial transfer.");
+                await using var all = Query(connection, tx, """
+                    INSERT INTO brickvault.placement_transfer_backing(transfer_id,offer_id,quantity)
+                    SELECT $1,offer_id,quantity FROM brickvault.current_offer_backing
+                    WHERE placement_id=$2 ORDER BY offer_id
+                    """, id, request.SourcePlacementId);
+                await all.ExecuteNonQueryAsync(token);
+            }
+            else if (request.Backing.Length > 0)
             {
                 await using var backing = Query(connection, tx, """
                     INSERT INTO brickvault.placement_transfer_backing(transfer_id,offer_id,quantity)

@@ -101,7 +101,8 @@ try
         references.Workspace(ct, c.Request.Query["audit"] == "all"));
     api.MapPost("/catalog", (HttpContext c, CancellationToken ct) => Save<CatalogCommand>(c, references.Save, ct));
     api.MapPost("/locations", (HttpContext c, CancellationToken ct) => Save<LocationCommand>(c, references.Save, ct));
-    api.MapGet("/receiving", (CancellationToken ct) => receiving.Snapshot(ct));
+    api.MapGet("/receiving", (CancellationToken ct) => receiving.LegacySnapshot(ct));
+    api.MapGet("/receiving/current", (CancellationToken ct) => receiving.Snapshot(ct));
     api.MapGet("/receiving/bins/{locationId:guid}", (Guid locationId, CancellationToken ct) => bins.Snapshot(locationId, ct));
     api.MapGet("/receiving/bins/{locationId:guid}/movements",
         (Guid locationId, CancellationToken ct) => bins.Movements(locationId, ct));

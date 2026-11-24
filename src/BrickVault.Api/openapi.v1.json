@@ -617,6 +617,16 @@
                 }
               }
             }
+          },
+          "426": {
+            "description": "Upgrade Workbench to read offers spanning more than 64 positions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -775,6 +785,34 @@
           }
         },
         "description": "Move an explicitly allocated portion of one confirmed placement to another registered bin. The receipt entityId identifies both the movement and its newly introduced destination position."
+      }
+    },
+    "/api/v1/receiving/current": {
+      "get": {
+        "operationId": "getCurrentReceiving",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentReceivingWorkspace"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read a complete receiving snapshot, including all positions backing each offer after transfers."
       }
     }
   },
@@ -2270,7 +2308,11 @@
             "items": {
               "$ref": "#/components/schemas/TransferBacking"
             },
-            "maxItems": 64
+            "description": "Explicitly selected offer quantities. Supply an empty array when moving all backing or only unbacked units. The API request body limit is 16 KiB."
+          },
+          "moveAllBacking": {
+            "type": "boolean",
+            "description": "Explicitly move all source offer backing. Requires the full physical source quantity and an empty backing array."
           }
         },
         "required": [
@@ -2286,7 +2328,29 @@
           "reason",
           "backing"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "moveAllBacking"
+              ],
+              "properties": {
+                "moveAllBacking": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "backing": {
+                  "maxItems": 0,
+                  "type": "array"
+                }
+              }
+            }
+          }
+        ]
       },
       "TransferBacking": {
         "type": "object",
@@ -2577,6 +2641,164 @@
           "revision",
           "kind",
           "correlationId"
+        ],
+        "additionalProperties": false
+      },
+      "CurrentOfferRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "unitPriceMinor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000000
+          },
+          "backing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackingRow"
+            },
+            "minItems": 1
+          },
+          "backedQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "publishedQuantity": {
+            "type": "integer",
+            "const": 0
+          },
+          "backingCurrent": {
+            "type": "boolean",
+            "description": "False when catalog eligibility or its recorded revision has changed. The internal offer remains unpublished."
+          }
+        },
+        "required": [
+          "id",
+          "catalogId",
+          "catalogRevision",
+          "currency",
+          "unitPriceMinor",
+          "backing",
+          "backedQuantity",
+          "publishedQuantity",
+          "backingCurrent"
+        ],
+        "additionalProperties": false
+      },
+      "CurrentPurchaseRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "reference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "orderedQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "pendingChargeMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "deliveries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryRow"
+            }
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurrentOfferRow"
+            }
+          },
+          "balances": {
+            "$ref": "#/components/schemas/StockBalances"
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "reference",
+          "source",
+          "currency",
+          "orderedQuantity",
+          "pendingChargeMinor",
+          "deliveries",
+          "offers",
+          "balances"
+        ],
+        "additionalProperties": false
+      },
+      "CurrentReceivingWorkspace": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "receiving"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean",
+            "const": true
+          },
+          "purchases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurrentPurchaseRow"
+            }
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "purchases"
         ],
         "additionalProperties": false
       }
