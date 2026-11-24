@@ -28,10 +28,12 @@ RECEIVING_FACTS = ("purchases", "deliveries", "placements", "offers", "offer_bac
 
 
 TRANSFER_FACTS = ("placement_positions", "placement_transfers", "placement_transfer_backing")
+COUNT_FACTS = ("stock_count_observations", "stock_shortage_cases")
 SCHEMA_FACTS = {
     2: FACTS,
     3: FACTS + RECEIVING_FACTS,
     4: FACTS + RECEIVING_FACTS + TRANSFER_FACTS,
+    5: FACTS + RECEIVING_FACTS + TRANSFER_FACTS + COUNT_FACTS,
 }
 
 
@@ -97,6 +99,10 @@ def signatures(s, database, token=None):
     tables = SCHEMA_FACTS.get(len(history))
     if tables is None or history != [str(i) for i in range(1, len(history) + 1)]:
         raise ValueError("Unsupported database schema history for backup verification.")
+    return row_signatures(s, database, tables, session)
+
+
+def row_signatures(s, database, tables, session="BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n"):
     groups = {}
     for table in tables:
         stmt = (

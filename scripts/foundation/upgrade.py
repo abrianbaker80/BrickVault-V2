@@ -6,7 +6,7 @@ import shutil
 import tempfile
 
 from instance import Instance, RELEASE, ROOT, private_dir
-from recovery import RECEIVING_FACTS, signatures
+from recovery import row_signatures, signatures
 from runtime import exclusive, operation
 
 
@@ -96,6 +96,10 @@ def stage_upgrade(source, output, release=RELEASE):
                 try:
                     candidate.pg_start()
                     before = signatures(candidate, candidate.database)
+                    projections = ("current_placement_stock", "current_offer_backing")
+                    opening = None
+                    if "placement_positions" in before:
+                        opening = row_signatures(candidate, candidate.database, projections)
                     candidate.migrate()
                     candidate.grants()
                     after = signatures(candidate, candidate.database)
@@ -108,21 +112,17 @@ def stage_upgrade(source, output, release=RELEASE):
                             if t != "schema_version"
                         )
                         or any(
-                            after[t]["rows"] for t in RECEIVING_FACTS if t not in before
-                        )
-                        or any(
-                            after[t]["rows"]
-                            for t in (
-                                "placement_transfers",
-                                "placement_transfer_backing",
-                            )
-                            if t in after
+                            after[t]["rows"] for t in after.keys() - before.keys()
+                            if t != "placement_positions"
                         )
                     ):
                         raise ValueError(
                             "The staged upgrade failed its business-record checks."
                         )
-                    if "placement_positions" in after:
+                    if opening is not None:
+                        if row_signatures(candidate, candidate.database, projections) != opening:
+                            raise ValueError("Existing stock positions or offer allocations changed during upgrade.")
+                    elif "placement_positions" in after:
                         verify_opening_stock(candidate)
                 finally:
                     candidate.pg_stop()

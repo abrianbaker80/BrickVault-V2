@@ -330,6 +330,11 @@ class Instance:
                 IF (SELECT max(version) FROM brickvault.schema_version) >= 4 THEN
                     GRANT INSERT ON brickvault.placement_transfers,brickvault.placement_transfer_backing TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 5 THEN
+                    GRANT INSERT (id,command_id,purchase_id,position_id,location_id,location_code,
+                        expected_purchase_revision,counted_quantity,reason)
+                        ON brickvault.stock_count_observations TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,
