@@ -57,4 +57,3 @@ internal sealed class StockRegister(NpgsqlDataSource db)
         return new StockRegisterPage("inventory-positions", total.AsOf, true, total.Count, total.Units, next, rows);
     }
 }
-
