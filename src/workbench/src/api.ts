@@ -28,12 +28,14 @@ export type ReceivingCommand = { workspaceId: string } & (
   | { kind: 'putaway'; body: Schema['PutawayCommand'] }
   | { kind: 'offer'; body: Schema['OfferCommand'] }
   | { kind: 'transfer'; body: TransferCommand }
-  | { kind: 'count'; body: Schema['StockCountCommand'] })
+  | { kind: 'count'; body: Schema['StockCountCommand'] }
+  | { kind: 'hold'; body: Schema['StockHoldCommand'] }
+  | { kind: 'hold-release'; locationId: string; positionId: string; body: Schema['StockHoldReleaseCommand'] })
 export type Command = ReceivingCommand | { workspaceId: string } & (
   | { kind: 'catalog'; body: Schema['CatalogCommand'] }
   | { kind: 'location'; body: Schema['LocationCommand'] })
 export type Held = { workspaceId: string | null; commandId: string }
-export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | undefined>
+export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | undefined>
 
 export function commandLabel(command: Command) {
   switch (command.kind) {
@@ -42,6 +44,8 @@ export function commandLabel(command: Command) {
     case 'delivery': return 'Delivery ' + command.body.reference
     case 'putaway': return 'Putaway to ' + command.body.confirmedLocationCode
     case 'offer': return 'Unpublished offer'
+    case 'hold': return 'Build hold for ' + command.body.purpose
+    case 'hold-release': return 'Release of ' + command.body.quantity + (command.body.quantity === 1 ? ' held unit' : ' held units')
     case 'count': return 'Stock count of ' + command.body.countedQuantity + ' in ' + command.body.confirmedLocationCode
     case 'transfer': return 'Transfer of ' + command.body.quantity + ' from ' + command.body.confirmedSourceLocationCode + ' to ' + command.body.confirmedDestinationLocationCode
   }
@@ -55,6 +59,8 @@ const commands = {
   putaway: { path: 'receiving/putaway', valid: valid.PutawayCommand },
   offer: { path: 'receiving/offers', valid: valid.OfferCommand },
   count: { path: 'receiving/counts', valid: valid.StockCountCommand },
+  hold: { path: 'receiving/holds', valid: valid.StockHoldCommand },
+  'hold-release': { path: 'receiving/holds/release', valid: valid.StockHoldReleaseCommand },
   transfer: { path: 'receiving/transfers', valid: valid.TransferCommand }
 }
 
@@ -113,6 +119,26 @@ export const api = {
     if (after) query.set('after', after)
     return read('inventory/positions/' + encodeURIComponent(id) + '/movements?' + query, valid.PositionMovementPage)
   },
+  async positionHolds(binId: string, positionId: string, after = '', commandId = '') {
+    const params = new URLSearchParams({ limit: '25' })
+    if (after) params.set('after', after)
+    if (commandId) params.set('commandId', commandId)
+    const result = await read('receiving/bins/' + encodeURIComponent(binId) + '/positions/' +
+      encodeURIComponent(positionId) + '/holds?' + params, valid.StockHoldPositionSnapshot)
+    if (result.location.id !== binId || result.positionId !== positionId ||
+        (commandId && (result.holds.length !== 1 || result.holds[0].commandId !== commandId))) throw new ContractFailure()
+    return result
+  },
+  async holdReleases(binId: string, positionId: string, holdId: string, after = '', commandId = '') {
+    const params = new URLSearchParams({ limit: '25' })
+    if (after) params.set('after', after)
+    if (commandId) params.set('commandId', commandId)
+    const result = await read('receiving/bins/' + encodeURIComponent(binId) + '/positions/' +
+      encodeURIComponent(positionId) + '/holds/' + encodeURIComponent(holdId) + '/releases?' + params, valid.StockHoldReleasePage)
+    if (result.holdId !== holdId || (commandId && (result.releases.length !== 1 ||
+        result.releases[0].commandId !== commandId))) throw new ContractFailure()
+    return result
+  },
   async binCounts(binId: string, query: { positionId?: string; observationId?: string; commandId?: string; after?: string; limit?: string }) {
     const result = await read('receiving/bins/' + encodeURIComponent(binId) + '/counts?' + new URLSearchParams(query), valid.BinCountSnapshot)
     const scoped = Boolean(query.positionId || query.commandId || query.observationId)
@@ -125,7 +151,7 @@ export const api = {
     return result
   },
   binTransfers: (id: string) => read('receiving/bins/' + encodeURIComponent(id) + '/movements', valid.BinTransferSnapshot),
-  receiving: () => read('receiving/current', valid.CurrentReceivingWorkspace),
+  receiving: () => read('receiving/current?holds=true', valid.CurrentReceivingWorkspace),
   diagnostic: (id: string) => read('diagnostics/' + encodeURIComponent(id), valid.Diagnostic),
   async save(command: Command, csrf: string) {
     const options = {
@@ -135,6 +161,7 @@ export const api = {
     const path = commands[command.kind].path
     const receipt = command.kind === 'catalog' || command.kind === 'location'
       ? await read(path, valid.Receipt, options)
+      : command.kind === 'hold' || command.kind === 'hold-release' ? await read(path, valid.StockHoldReceipt, options)
       : command.kind === 'count' ? await read(path, valid.StockCountReceipt, options)
       : command.kind === 'transfer' ? await read(path, valid.TransferReceipt, options) : await read(path, valid.ReceivingReceipt, options)
     if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind) throw new ContractFailure()
@@ -161,7 +188,8 @@ export function readJournal(activeId: string) {
     const { workspaceId, kind, body } = value
     if (!uuid.test(workspaceId) || key !== journalKey(workspaceId, body.commandId)) throw new Error('Invalid recovery identity')
     if (workspaceId !== activeId) held.push({ workspaceId, commandId: body.commandId })
-    else if (Object.hasOwn(commands, kind) && commands[kind as Command['kind']].valid(body)) queued.push(value)
+    else if (Object.hasOwn(commands, kind) && commands[kind as Command['kind']].valid(body) &&
+        (kind !== 'hold-release' || (uuid.test(value.locationId) && uuid.test(value.positionId)))) queued.push(value)
     else throw new Error('Invalid recovery record')
   }
   return { commands: queued, held }
@@ -169,7 +197,7 @@ export function readJournal(activeId: string) {
 
 export function remember(command: Command) {
   const validBody = commands[command.kind].valid(command.body)
-  if (!validBody) throw new InvalidCommand('Check the required fields and quantities before saving.')
+  if (!validBody || (command.kind === 'hold-release' && (!uuid.test(command.locationId) || !uuid.test(command.positionId)))) throw new InvalidCommand('Check the required fields and quantities before saving.')
   localStorage.setItem(journalKey(command.workspaceId, command.body.commandId), JSON.stringify(command))
 }
 export function forget(command: Command) {

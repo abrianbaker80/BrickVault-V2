@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Added named project holds on individual receipt positions. A witnessed shortage keeps each hold in place until an operator selects a project, quantity and reason for release. [Build holds](https://github.com/abrianbaker80/BrickVault-V2/issues/23)
+
 - Added witnessed counts with bin confirmation, replayable receipts and a shortage case that protects the affected position. Each recount preserves the prior observation and original receipt cost. [Witnessed counts](https://github.com/abrianbaker80/BrickVault-V2/issues/22)
 
 - Added the Inventory register for finding physical stock across bins, checking its receipt cost and following a selected position’s movement history. [Inventory register](https://github.com/abrianbaker80/BrickVault-V2/issues/19)

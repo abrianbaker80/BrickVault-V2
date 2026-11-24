@@ -29,7 +29,7 @@ A receipt cost applies to the entire delivery in its recorded currency. Two posi
 
 Use a fictional identified position in a registered bin. In the signed-in count workflow, choose the position, confirm its bin code and enter the counted quantity and reason. The count records the operator's observation and the ledger facts at the compared revision. A lower count opens a physical shortage for that position and blocks new offer backing and outbound transfers from it. Existing offers retain their original backing. A surplus has unidentified source and remains observation evidence. A later count does not close an open case. [Owner policy and qualification case](https://github.com/abrianbaker80/BrickVault-V2/issues/22)
 
-The isolated backend slice has count observations and physical shortage cases. Position history is paged. The open case summary and direct receipt lookup remain available independently of which observation page is shown. A count does not post a movement, authorize sale, release an internal hold or create buyer demand. Unpublished offer backing is reported separately and is not order or hold evidence. Qualification of the existing-hold and buyer-obligation case still requires the corresponding authority and commands.
+The isolated backend slice has count observations and physical shortage cases. Position history is paged. The open case summary and direct receipt lookup remain available independently of which observation page is shown. A count does not post a movement, authorize sale, release an internal hold or create buyer demand. Unpublished offer backing is reported separately and is not order or hold evidence. The build-hold workflow below covers explicit release of an existing internal reservation. Buyer-obligation qualification awaits trusted order intake.
 
 ### Transaction and decision design
 
@@ -41,6 +41,14 @@ The isolated backend slice has count observations and physical shortage cases. P
 | Confirm resolution | Keep the unbacked remainder open while any required quantity remains unresolved. A count, a posted loss and an allocation decision remain separately identifiable. Reconcile physical, unavailable, reserved and free stock, retained costs and all obligation quantities against their ledgers before closing. |
 
 For the count slice, test a lower count, duplicate command and stale revision, typed bin mismatch, a subsequent unidentified surplus and rejected writes against the affected position. Read the original receipt cost and offer backing back from PostgreSQL. Before accepting the full D09 workflow, qualify two existing build holds, an identified customer requirement, exact partial owner release, a competing decision, exact replay and the unresolved remainder. Use fictional evidence until each real source has separate qualification.
+
+## Reserve pieces for a project or release a hold
+
+In **Locations**, open a bin and choose **Build holds** for the receipt layer. Check the ledger quantity, existing offer backing, project reservations and quantity available for a new hold. Choose **Create build hold**, name the project, confirm the physical bin code, and record the quantity and reason.
+
+If a count shows fewer pieces than expected, follow **Review build holds for this shortage** from the count receipt. Compare the latest count with the ledger and select the named project's **Release pieces** button. Enter how many pieces to release and why. The project's release history links the decision to the witnessed count. The other projects retain their reservations. The shortage stays open for a separate ledger adjustment. Customer-order demand and allocation require trusted order intake in M4.
+
+In an isolated workspace, receive ten pieces at a documented cost, back an unpublished offer with two, then hold three for one project and four for another. Count five. Verify that both reservations still show in full and new reservations are blocked. Release two pieces from the second project. Check that the first still holds three, the second holds two, the offer still backs two and the ledger still shows ten. Retry the saved release and verify its original receipt, then repeat the reads after encrypted restore. [Build hold qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/23)
 
 ## Stage a schema upgrade
 
@@ -57,4 +65,4 @@ For a systemd-managed guest, stop its Workbench unit before staging. An explicit
 
 ## Repeat verification
 
-Run `python scripts/foundation/manage.py verify` after a clean build. The qualification uses the normal private HTTPS API, PostgreSQL and Workbench. The restore check compares the purchase and both deliveries, their placements, offer backing, reference audit and original command receipts. A schema-2 backup still requires its archived release. Schema-3 backups also fingerprint the five receiving tables. Schema-4 backups add position identities, transfer events and transferred offer backing. Each archive requires its matching release. [Setup and recovery](m2-foundation.md)
+Run `python scripts/foundation/manage.py verify` after a clean build. The qualification uses the normal private HTTPS API, PostgreSQL and Workbench. The restore check compares the purchase and both deliveries, their placements, offer backing, reference audit and original command receipts. A schema-2 backup still requires its archived release. Schema-3 backups also fingerprint the five receiving tables. Schema-4 backups add position identities, transfer events and transferred offer backing. Schema 5 adds count observations and shortage cases. Schema 6 adds named build holds and their release history. Each archive requires its matching release. [Setup and recovery](m2-foundation.md)

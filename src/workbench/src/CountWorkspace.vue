@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, ContractFailure, explain } from './api'
 import type { Catalog, CountPosition, CountSnapshot, Location, TransferControls } from './api'
-import { countPositionLink, countReceiptLink } from './countLinks'
+import { countPositionLink, countReceiptLink, holdPositionLink } from './countLinks'
 import { itemLabel } from './receiving'
 import { time } from './presentation'
 
@@ -108,6 +108,7 @@ async function submit() {
         <section v-for="c in snapshot.shortages" :key="c.id" class="case-note" aria-label="Open shortage">
           <strong>Open shortage</strong><p>{{ c.openingMissingQuantity }} missing at opening · {{ c.latestObservedMissingQuantity }} missing on latest count</p>
           <p>Transfers and new offer backing are blocked for this position. Existing holds keep their priority until the owner selects a hold and quantity to release.</p>
+          <a :href="holdPositionLink(location.id, c.positionId)">Review build holds for this shortage</a>
           <a :href="countReceiptLink(location.id, c.openingObservationId)">Opening count receipt</a>
         </section>
         <template v-if="receipt">

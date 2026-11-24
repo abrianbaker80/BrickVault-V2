@@ -619,7 +619,7 @@
             }
           },
           "426": {
-            "description": "Upgrade Workbench to read offers spanning more than 64 positions.",
+            "description": "This client cannot represent the current balances or backing shape. Update Workbench.",
             "content": {
               "application/json": {
                 "schema": {
@@ -820,9 +820,31 @@
                 }
               }
             }
+          },
+          "426": {
+            "description": "This client cannot represent the current balances or backing shape. Update Workbench.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
-        "description": "Read a complete receiving snapshot, including all positions backing each offer after transfers."
+        "description": "Read a complete receiving snapshot, including all positions backing each offer after transfers. Use holds=true to read active build holds in the balances.",
+        "parameters": [
+          {
+            "name": "holds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Opt in to accurate build-hold reservations and free quantity. Clients without opt-in receive 426 when reservations are present."
+          }
+        ]
       }
     },
     "/api/v1/inventory/positions": {
@@ -1131,6 +1153,289 @@
           },
           "404": {
             "description": "Location is not registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/receiving/holds": {
+      "post": {
+        "operationId": "recordStockHold",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "description": "The authenticated workspaceId captured when the operator prepared the command. Use that same value for every retry. A missing or mismatched workspace returns 409 workspace_mismatch.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockHoldCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockHoldReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Reserve eligible unbacked stock at the selected position for an internal build."
+      }
+    },
+    "/api/v1/receiving/holds/release": {
+      "post": {
+        "operationId": "releaseStockHold",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "description": "The authenticated workspaceId captured when the operator prepared the command. Use that same value for every retry. A missing or mismatched workspace returns 409 workspace_mismatch.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockHoldReleaseCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockHoldReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Release an exact quantity from a named build hold. For an open shortage supply the case and latest observation identifiers. This command records no stock adjustment."
+      }
+    },
+    "/api/v1/receiving/bins/{locationId}/positions/{positionId}/holds": {
+      "get": {
+        "operationId": "getStockHolds",
+        "parameters": [
+          {
+            "name": "locationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "positionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Use nextAfter to read older events."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "commandId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Read one exact command in this scope without a cursor. Returns 404 if absent."
+          }
+        ],
+        "description": "Read a selected position's reservations, shortage frontier and paged hold history as of one consistent snapshot.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockHoldPositionSnapshot"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/receiving/bins/{locationId}/positions/{positionId}/holds/{holdId}/releases": {
+      "get": {
+        "operationId": "getStockHoldReleases",
+        "parameters": [
+          {
+            "name": "locationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "positionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "holdId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Use nextAfter to read older events."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "commandId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Read one exact command in this scope without a cursor. Returns 404 if absent."
+          }
+        ],
+        "description": "Read a selected hold's paged release evidence.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockHoldReleasePage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
             "content": {
               "application/json": {
                 "schema": {
@@ -1667,7 +1972,9 @@
               "putaway",
               "offer",
               "transfer",
-              "count"
+              "count",
+              "hold",
+              "hold-release"
             ]
           },
           "correlationId": {
@@ -2992,7 +3299,7 @@
             }
           },
           "balances": {
-            "$ref": "#/components/schemas/StockBalances"
+            "$ref": "#/components/schemas/CurrentStockBalances"
           }
         },
         "required": [
@@ -3692,6 +3999,593 @@
           "reason",
           "occurredAt"
         ]
+      },
+      "StockHoldCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "commandId",
+          "purchaseId",
+          "expectedRevision",
+          "positionId",
+          "locationId",
+          "confirmedLocationCode",
+          "quantity",
+          "purpose",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "StockHoldReleaseCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "holdId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "shortageId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "expectedObservationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "commandId",
+          "purchaseId",
+          "expectedRevision",
+          "holdId",
+          "quantity",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "shortageId"
+              ],
+              "properties": {
+                "shortageId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "expectedObservationId"
+              ],
+              "properties": {
+                "expectedObservationId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "expectedObservationId"
+              ],
+              "properties": {
+                "expectedObservationId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "shortageId"
+              ],
+              "properties": {
+                "shortageId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "StockHoldReceipt": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "hold",
+              "hold-release"
+            ]
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "commandId",
+          "entityId",
+          "revision",
+          "kind",
+          "correlationId"
+        ],
+        "additionalProperties": false
+      },
+      "StockHoldRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "releasedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "remainingQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expectedPurchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          }
+        },
+        "required": [
+          "id",
+          "commandId",
+          "correlationId",
+          "purpose",
+          "reason",
+          "quantity",
+          "releasedQuantity",
+          "remainingQuantity",
+          "createdAt",
+          "expectedPurchaseRevision",
+          "confirmedLocationCode"
+        ],
+        "additionalProperties": false
+      },
+      "StockHoldPositionSnapshot": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "position-holds"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "ledgerQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "offerBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "reservedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "freeQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "Ledger quantity excluding build holds. This includes any existing offer backing."
+          },
+          "availableToHoldQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "Eligible units excluding holds and offer backing and subject to the shortage fence."
+          },
+          "shortageId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "latestObservationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "holds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StockHoldRow"
+            },
+            "maxItems": 100
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "purchaseReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deliveryReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Revision recorded on the placement."
+          },
+          "currentCatalog": {
+            "$ref": "#/components/schemas/CatalogRow"
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "location",
+          "positionId",
+          "purchaseId",
+          "purchaseRevision",
+          "ledgerQuantity",
+          "offerBackedQuantity",
+          "reservedQuantity",
+          "freeQuantity",
+          "availableToHoldQuantity",
+          "shortageId",
+          "latestObservationId",
+          "holds",
+          "nextAfter",
+          "purchaseReference",
+          "deliveryReference",
+          "catalogRevision",
+          "currentCatalog"
+        ],
+        "additionalProperties": false
+      },
+      "StockHoldReleaseRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "shortageId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "expectedObservationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "releasedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expectedPurchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "commandId",
+          "correlationId",
+          "quantity",
+          "reason",
+          "shortageId",
+          "expectedObservationId",
+          "releasedAt",
+          "expectedPurchaseRevision",
+          "purchaseId"
+        ],
+        "additionalProperties": false
+      },
+      "StockHoldReleasePage": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "hold-releases"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "holdId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "releases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StockHoldReleaseRow"
+            },
+            "maxItems": 100
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "holdId",
+          "releases",
+          "nextAfter"
+        ],
+        "additionalProperties": false
+      },
+      "CurrentStockBalances": {
+        "type": "object",
+        "properties": {
+          "physicalOnHand": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "unavailable": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "reserved": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "free": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "backedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "withheldQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "publishedQuantity": {
+            "type": "integer",
+            "const": 0
+          },
+          "knownCostFreeQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "unknownCostFreeQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "knownItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000100000000
+          },
+          "knownPurchaseComponentsMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000100000000
+          }
+        },
+        "required": [
+          "physicalOnHand",
+          "unavailable",
+          "reserved",
+          "free",
+          "backedQuantity",
+          "withheldQuantity",
+          "publishedQuantity",
+          "knownCostFreeQuantity",
+          "unknownCostFreeQuantity",
+          "knownItemCostMinor",
+          "knownPurchaseComponentsMinor"
+        ],
+        "additionalProperties": false
       }
     },
     "securitySchemes": {

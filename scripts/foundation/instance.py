@@ -335,6 +335,9 @@ class Instance:
                         expected_purchase_revision,counted_quantity,reason)
                         ON brickvault.stock_count_observations TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 6 THEN
+                    GRANT INSERT ON brickvault.stock_build_holds, brickvault.stock_build_hold_releases TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,

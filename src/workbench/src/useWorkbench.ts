@@ -148,7 +148,28 @@ export function useWorkbench(page: Ref<string>) {
       try {
         let committed: { correlationId: string } | undefined
         let countLink: string | undefined
-        if (command.kind === 'count') {
+        if (command.kind === 'hold' || command.kind === 'hold-release') {
+          try {
+            if (command.kind === 'hold') {
+              const data = await api.positionHolds(command.body.locationId, command.body.positionId, '', command.body.commandId)
+              const hold = data.holds[0]
+              if (!data.complete || data.purchaseId !== command.body.purchaseId || hold.purpose !== command.body.purpose ||
+                  hold.reason !== command.body.reason || hold.quantity !== command.body.quantity ||
+                  hold.expectedPurchaseRevision !== command.body.expectedRevision || hold.confirmedLocationCode !== command.body.confirmedLocationCode) throw new Error('Hold receipt mismatch')
+              committed = hold
+            } else {
+              const data = await api.holdReleases(command.locationId, command.positionId, command.body.holdId, '', command.body.commandId)
+              const release = data.releases[0]
+              if (!data.complete || release.reason !== command.body.reason || release.quantity !== command.body.quantity ||
+                  release.purchaseId !== command.body.purchaseId || release.expectedPurchaseRevision !== command.body.expectedRevision ||
+                  release.shortageId !== (command.body.shortageId ?? null) ||
+                  release.expectedObservationId !== (command.body.expectedObservationId ?? null)) throw new Error('Release receipt mismatch')
+              committed = release
+            }
+          } catch (failure) {
+            if (!(failure instanceof ApiFailure && failure.status === 404 && failure.detail?.code === 'unknown_hold_command')) throw failure
+          }
+        } else if (command.kind === 'count') {
           try {
             const result = await api.binCounts(command.body.locationId, { commandId: command.body.commandId, positionId: command.body.positionId })
             if (!result.complete) throw new Error('Incomplete count history')
@@ -216,7 +237,9 @@ export function useWorkbench(page: Ref<string>) {
             'revision_conflict', 'command_mismatch', 'catalog_ineligible', 'catalog_reconfirmation_required', 'bin_confirmation_mismatch',
             'quantity_unavailable', 'delivery_mismatch', 'backing_mismatch', 'invalid_transfer', 'transfer_source_mismatch',
             'transfer_bin_confirmation_mismatch', 'transfer_quantity_unavailable', 'transfer_backing_unavailable', 'transfer_all_backing_requires_full', 'unknown_location',
-            'invalid_count', 'count_position_mismatch', 'count_bin_confirmation_mismatch', 'stock_shortage_open'].includes(reason.detail.code)) {
+            'invalid_count', 'count_position_mismatch', 'count_bin_confirmation_mismatch', 'stock_shortage_open', 'invalid_hold', 'hold_position_mismatch',
+            'hold_bin_confirmation_mismatch', 'hold_catalog_ineligible', 'hold_quantity_unavailable', 'hold_shortage_frontier_conflict',
+            'reserved_stock_unavailable'].includes(reason.detail.code)) {
         forget(command)
         loadPending()
         if (reason.status === 409) await refresh()
