@@ -153,8 +153,10 @@ public sealed class StockLossTests
         var raced = await Task.WhenAll(TryPost(command), TryPost(rival));
         var accepted = Assert.Single(raced, x => x.Result is not null);
         var receipt = Assert.IsType<Receipt>(accepted.Result);
-        var replays = await Task.WhenAll(Save(accepted.Request), Save(accepted.Request));
+        var reordered = accepted.Request with { OfferReductions = accepted.Request.OfferReductions.Reverse().ToArray() };
+        var replays = await Task.WhenAll(Save(accepted.Request), Save(reordered));
         Assert.All(replays, x => Assert.Equal(receipt, x));
+        Assert.Equal("command_mismatch", await Reject(() => Save(accepted.Request with { OfferReductions = [new(offerA.EntityId, 2)] })));
         Assert.Equal("command_mismatch", await Reject(() => Save(accepted.Request with { Reason = "Different decision" })));
         Assert.Equal("stock-loss", receipt.Kind);
         Assert.Equal("stock-loss", (await references.Diagnostic(receipt.CorrelationId, token)).Kind);

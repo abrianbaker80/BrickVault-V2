@@ -43,7 +43,9 @@ internal sealed record StockLossCommand
         using var hash = SHA256.Create();
         using var stream = new CryptoStream(Stream.Null, hash, CryptoStreamMode.Write);
         stream.Write("stock-loss\n"u8);
-        JsonSerializer.Serialize(stream, this, Wire.Json);
+        // The operator chooses one quantity per offer. Display order is not part of that decision.
+        var ordered = this with { OfferReductions = OfferReductions.OrderBy(row => row.OfferId).ToArray() };
+        JsonSerializer.Serialize(stream, ordered, Wire.Json);
         stream.FlushFinalBlock();
         return hash.Hash!;
     }
