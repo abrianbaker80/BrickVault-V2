@@ -141,7 +141,36 @@ export function useWorkbench(page: Ref<string>) {
     !authBusy.value && !submitting.value))
   const canCreate = computed(() => canSend.value && !pending.value.length)
 
-  async function send(command: Command) {
+  async function resolveSizeRejection(command: Command, reason: ApiFailure, firstAttempt: boolean) {
+    // A previous attempt may already have committed before its response was lost.
+    if (!firstAttempt) {
+      try {
+        const snapshot = command.kind === 'transfer'
+          ? await api.binTransfers(command.body.sourceLocationId) : await api.workspace(true)
+        if (!snapshot.complete || (await api.session()).workspaceId !== command.workspaceId)
+          throw new Error('Incomplete command history')
+        const history = 'movements' in snapshot ? snapshot.movements : snapshot.audit
+        const committed = history.find(row => row.commandId === command.body.commandId)
+        if (committed) {
+          forget(command)
+          loadPending()
+          notice.value = { message: 'Confirmed the original ' + commandLabel(command) + '.',
+            correlationId: committed.correlationId, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
+          await refresh()
+          return
+        }
+      } catch {
+        error.value = 'The server rejected the retry size. Reconnect to verify the original command before continuing.'
+        readState.value = 'disconnected'
+        return
+      }
+    }
+    forget(command)
+    loadPending()
+    error.value = explain(reason)
+  }
+
+  async function send(command: Command, firstAttempt = false) {
     if (!canSend.value || !session.value || command.workspaceId !== session.value.workspaceId) return
     ++generation
     submitting.value = true
@@ -157,7 +186,9 @@ export function useWorkbench(page: Ref<string>) {
       return receipt
     } catch (reason) {
       if (expired(reason)) return
-      if (reason instanceof ApiFailure && reason.detail?.code === 'workspace_mismatch') {
+      if (reason instanceof ApiFailure && reason.status === 413 && reason.detail?.code === 'request_too_large') {
+        await resolveSizeRejection(command, reason, firstAttempt)
+      } else if (reason instanceof ApiFailure && reason.detail?.code === 'workspace_mismatch') {
         await refresh()
         error.value = 'The workspace changed. The original command is held for its issuing workspace.'
       } else if (reason instanceof ApiFailure && reason.detail &&
@@ -194,10 +225,14 @@ export function useWorkbench(page: Ref<string>) {
       loadPending()
     } catch (reason) {
       if (reason instanceof InvalidCommand) { error.value = reason.message; return }
+      if (reason instanceof DOMException && reason.name === 'QuotaExceededError') {
+        error.value = 'The request has not been sent. This browser has insufficient recovery storage for this command.'
+        return
+      }
       journalError.value = 'This browser could not save the command for recovery. The request has not been sent.'
       return
     }
-    return send(command)
+    return send(command, true)
   }
 
   return { session, workspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
