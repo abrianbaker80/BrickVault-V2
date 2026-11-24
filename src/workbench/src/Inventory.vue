@@ -22,6 +22,8 @@ const error = ref('')
 const loading = ref(false)
 const routeId = () => location.hash.startsWith('#inventory/') ? location.hash.slice('#inventory/'.length).toLowerCase() : ''
 const selected = ref(routeId())
+const historyView = ref<'all' | 'transfers'>('all')
+const previousPosition = ref<string>(history.state?.timelineTo === selected.value ? history.state.timelineFrom : '')
 const filters = computed(() => Boolean(criteria.value.q || criteria.value.itemType || criteria.value.locationId))
 const totalsKnown = computed(() => result.value?.complete === true)
 const lastRead = computed(() => !props.connected || loading.value || Boolean(error.value))
@@ -57,7 +59,14 @@ watch(() => [criteria.value, after.value, props.workspace.asOf, props.connected]
 
 function inspect(id: string) {
   selected.value = id
-  history.replaceState(history.state, '', '#inventory/' + id)
+  previousPosition.value = ''
+  history.replaceState({ ...history.state, timelineFrom: '', timelineTo: '' }, '', '#inventory/' + id)
+}
+function inspectRelated(id: string) {
+  const from = selected.value
+  history.pushState({ ...history.state, timelineFrom: from, timelineTo: id }, '', '#inventory/' + id)
+  previousPosition.value = from
+  selected.value = id
 }
 async function close() {
   const id = selected.value
@@ -68,7 +77,10 @@ async function close() {
   if (button) button.focus()
   else search.value?.focus()
 }
-function routeChanged() { selected.value = routeId() }
+function routeChanged() {
+  selected.value = routeId()
+  previousPosition.value = history.state?.timelineTo === selected.value ? history.state.timelineFrom : ''
+}
 function keyboard(event: KeyboardEvent) {
   if (event.key === '/' && !event.ctrlKey && !event.altKey && !event.metaKey &&
       !(event.target as HTMLElement).closest('input,textarea,select,dialog,[contenteditable=true]') &&
@@ -149,11 +161,14 @@ onBeforeUnmount(() => {
     <component v-if="selected" :is="compact ? 'dialog' : 'aside'" ref="inspector" class="panel inspector"
       aria-labelledby="position-title" @cancel.prevent="close" @keydown.esc.prevent="close">
       <header class="panel-head"><h2 id="position-title">Position inspector</h2><button class="close" aria-label="Close position inspector" @click="close">×</button></header>
-      <PositionInspector :key="selected" :id="selected" :as-of="workspace.asOf" :connected="connected" @failure="emit('failure', $event)" @inspect="inspect" />
+      <p class="previous-position" v-if="previousPosition"><a :href="'#inventory/' + previousPosition">Return to previous position timeline</a></p>
+      <PositionInspector :history-view="historyView" @view="historyView = $event" @related="inspectRelated" :key="selected" :id="selected" :as-of="workspace.asOf" :connected="connected" @failure="emit('failure', $event)" @inspect="inspect" />
     </component>
   </div>
 </template>
 <style scoped>
+.previous-position a { color: #355340 }
+.previous-position { margin: 8px 16px; font-size: 13px }
 .inventory-metrics { grid-template-columns: repeat(2,minmax(0,1fr)) }
 .inventory-register { container-type: inline-size }
 .inventory-filters, .inventory-paging { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; padding: 0 16px 14px }

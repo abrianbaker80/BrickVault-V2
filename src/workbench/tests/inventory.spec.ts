@@ -94,6 +94,7 @@ test('Inventory searches across types and bins, pages by position, and retains s
 
   await register(page).locator('[data-position="'+unknown.placementId+'"]').click()
   await expect(detail(page)).toContainText(f.unknown.purchase)
+  await detail(page).getByRole('button', { name: 'Transfers only' }).click()
   await expect(detail(page).getByRole('region', { name: 'Position movement history' })).toContainText('No movements recorded for this position.')
   await f.write('receiving/transfers', 5, { purchaseId: paid.purchaseId, sourcePlacementId: paid.placementId,
     sourceLocationId: f.a.id, confirmedSourceLocationCode: f.a.code, destinationLocationId: f.b.id,
@@ -116,6 +117,7 @@ test('Inventory searches across types and bins, pages by position, and retains s
   await expect(history).not.toContainText('Unrelated stock movement')
   await page.reload()
   await expect(detail(page)).toContainText('No units remain in this position.')
+  await detail(page).getByRole('button', { name: 'Transfers only' }).click()
   await history.getByRole('button', { name: 'Inspect destination position' }).click()
   await expect(page).toHaveURL(new RegExp(destination+'$'))
   await expect(detail(page)).toContainText('Unknown (EUR)')
@@ -190,6 +192,7 @@ test('Inventory isolates failures, partial and stale reads from confirmed empty 
   await expect(detail(page)).toContainText('No stock position was found for this ID.')
   await page.route('**/inventory/positions/*/movements?*', route => route.abort('connectionreset'), {times:1})
   await page.goto('/#inventory/'+paid.placementId)
+  await detail(page).getByRole('button', { name: 'Transfers only' }).click()
   await expect(detail(page)).toContainText('Movement history is unavailable.')
   await expect(detail(page)).not.toContainText('No movements recorded for this position.')
   const stamp = detail(page).getByText(/^Position read /)
@@ -220,6 +223,7 @@ test('movement pages keep the confirmed cursor and timestamp when a bounded hist
   const path = '/api/v1/inventory/positions/' + source + '/movements'
   const first = page.waitForResponse(r => new URL(r.url()).pathname === path)
   await page.goto('/#inventory/' + source)
+  await detail(page).getByRole('button', { name: 'Transfers only' }).click()
   const initial: PositionMovementPage = await (await first).json()
   expect(initial.scope).toBe('position-movements')
   expect(initial.rows.map(m => m.id)).toEqual(ids.slice(2).reverse())

@@ -4,11 +4,12 @@ import { api, ContractFailure, explain } from './api'
 import type { StockPage, StockPosition } from './api'
 import { countPositionLink } from './countLinks'
 import PositionHistory from './PositionHistory.vue'
+import PositionTimeline from './PositionTimeline.vue'
 import { money } from './receiving'
 import { label, time } from './presentation'
 
-const props = defineProps<{ id: string; asOf: string; connected: boolean }>()
-const emit = defineEmits<{ failure: [reason: unknown]; inspect: [id: string] }>()
+const props = defineProps<{ id: string; asOf: string; connected: boolean; historyView: 'all' | 'transfers' }>()
+const emit = defineEmits<{ failure: [reason: unknown]; inspect: [id: string]; related: [id: string]; view: [value: 'all' | 'transfers'] }>()
 const record = shallowRef<StockPosition | null>(null)
 const recordAsOf = ref('')
 const read = shallowRef<StockPage | null>(null)
@@ -17,7 +18,7 @@ const reading = ref(false)
 const validId = computed(() => /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(props.id))
 const layer = computed(() => record.value?.layer)
 const historyState = computed(() => !props.connected || rowError.value ? 'unavailable' :
-  reading.value ? 'loading' : read.value?.rows.length ? 'ready' : 'unavailable')
+  reading.value ? 'loading' : read.value?.complete && read.value.rows.length ? 'ready' : 'unavailable')
 watch(() => [props.id, props.asOf, props.connected] as const, async ([id, , connected], _, onCleanup) => {
   let active = true
   onCleanup(() => { active = false })
@@ -78,7 +79,13 @@ watch(() => [props.id, props.asOf, props.connected] as const, async ([id, , conn
         <dt>Original placement ID</dt><dd>{{ record.originPlacementId }}
           <button v-if="record.originPlacementId !== layer.placementId" @click="emit('inspect', record.originPlacementId)">Inspect original</button></dd>
       </dl></details>
-      <PositionHistory :id="layer.placementId" :as-of="recordAsOf" :state="historyState"
+      <div class="history-filter" role="group" aria-label="Position history filter">
+        <button :aria-pressed="historyView === 'all'" @click="emit('view', 'all')">All activity</button>
+        <button :aria-pressed="historyView === 'transfers'" @click="emit('view', 'transfers')">Transfers only</button>
+      </div>
+      <PositionTimeline v-if="historyView === 'all'" :position="record" :as-of="recordAsOf" :state="historyState"
+        @failure="emit('failure', $event)" @related="emit('related', $event)" />
+      <PositionHistory v-else :id="layer.placementId" :as-of="recordAsOf" :state="historyState"
         @failure="emit('failure', $event)" @inspect="emit('inspect', $event)" />
     </template>
   </div>
@@ -97,5 +104,7 @@ watch(() => [props.id, props.asOf, props.connected] as const, async ([id, , conn
 .ids { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line) }
 .ids summary { cursor: pointer; font-weight: 600 }
 .ids .details { padding-inline: 0; margin-top: 8px }
+.history-filter { display: flex; flex-wrap: wrap; gap: 4px; padding: 12px 16px 3px }
+.history-filter [aria-pressed="true"] { background: var(--soft); box-shadow: inset 0 -2px #6f5320; font-weight: 650 }
 .details button { display: block; margin-top: 6px }
 </style>
