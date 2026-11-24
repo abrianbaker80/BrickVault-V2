@@ -45,4 +45,20 @@ def verify_register(client, evidence):
     assert search(q=reference, itemType=rows[0]["layer"]["currentCatalog"]["itemType"])["rows"] == rows
     empty = search(q="%_")
     assert empty["complete"] and (empty["matchingUnits"], empty["rows"]) == (0, [])
+    # The middle position was created by the first transfer and sent one unit onward.
+    _, _, _, _, first_transfer, _, onward = evidence
+    middle = first_transfer["entityId"]
+    path = endpoint + "/" + middle + "/movements"
+    page = client.call(path + "?limit=1")
+    assert page["complete"] and page["scope"] == "position-movements" and page["positionId"] == middle
+    assert [row["id"] for row in page["rows"]] == [onward["entityId"]]
+    assert page["nextAfter"] == onward["entityId"]
+    older = client.call(path + "?limit=1&after=" + page["nextAfter"])
+    assert [row["id"] for row in older["rows"]] == [middle] and older["nextAfter"] is None
+    assert all("backing" not in row for row in page["rows"] + older["rows"])
+    origin = older["rows"][0]["sourcePlacementId"]
+    origin_path = endpoint + "/" + origin + "/movements"
+    assert [row["id"] for row in client.call(origin_path)["rows"]] == [middle]
+    client.call(origin_path + "?after=" + onward["entityId"], expected=400)
+    client.call(endpoint + "/" + str(uuid.uuid4()) + "/movements", expected=404)
     print("Stock register reconciled keyset pages, filtered totals, stable position identities and receipt costs.", flush=True)

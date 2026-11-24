@@ -109,6 +109,8 @@ try
     api.MapGet("/receiving/current", (CancellationToken ct) => receiving.Snapshot(ct));
     api.MapGet("/inventory/positions", (string? q, string? itemType, Guid? locationId, Guid? positionId, Guid? after, int? limit, CancellationToken ct) =>
         inventory.Search(q, itemType, locationId, positionId, after, limit ?? 25, ct));
+    api.MapGet("/inventory/positions/{positionId:guid}/movements", (Guid positionId, Guid? after, int? limit, CancellationToken ct) =>
+        inventory.History(positionId, after, limit ?? 25, ct));
     api.MapGet("/receiving/bins/{locationId:guid}", (Guid locationId, CancellationToken ct) => bins.Snapshot(locationId, ct));
     api.MapGet("/receiving/bins/{locationId:guid}/movements",
         (Guid locationId, CancellationToken ct) => bins.Movements(locationId, ct));
