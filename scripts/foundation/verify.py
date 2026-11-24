@@ -198,6 +198,16 @@ def migration_test(s):
         "An interrupted hold upgrade changed the previous count database.",
     )
     s.sql("DROP TABLE brickvault.stock_build_hold_releases;", db, "bv_migrator")
+    s.migrate(db, to=6)
+    s.sql("CREATE TABLE brickvault.stock_loss_offer_reductions(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "6"
+        and s.sql("SELECT to_regclass('brickvault.stock_loss_postings') IS NULL", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted stock loss upgrade changed the previous build-hold database.",
+    )
+    s.sql("DROP TABLE brickvault.stock_loss_offer_reductions;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -211,11 +221,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "6",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "7",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v6, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v7, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -249,14 +259,17 @@ def qualify_staged_upgrade(lab, port, source_version):
             if source_version >= 5:
                 from verify_counts import seed_previous_count
 
-                seed_previous_count(original, fixture, records[0], records[1])
+                if source_version >= 6:
+                    from verify_losses import seed_prior_build_hold
+                    seed_prior_build_hold(original, fixture, records[0], records[1])
+                seed_previous_count(original, fixture, records[0], records[1], revision=6 if source_version >= 6 else 5)
         expected_failure(lambda: stage_upgrade(original, output))
         require(not output.exists(), "Running source created a staged directory.")
     finally:
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "6"), (original, str(source_version))):
+    for inst, schema in ((candidate, "7"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -587,7 +600,7 @@ def verify(port):
     qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in (2, 3, 4, 5):
+        for source_version in (2, 3, 4, 5, 6):
             qualify_staged_upgrade(lab, port, source_version)
         runtime_dir = lab / "runtime"
         runtime_dir.mkdir()
@@ -858,12 +871,14 @@ def verify(port):
             from verify_register import verify_register
             from verify_counts import qualify_counts, verify_restored_counts
             from verify_holds import qualify_holds, verify_restored_holds
+            from verify_losses import qualify_loss, verify_restored_loss
 
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
             verify_register(first, transfer)
             counts = qualify_counts(first, rec["entityId"])
             holds = qualify_holds(first, rec["entityId"])
+            loss = qualify_loss(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -1018,6 +1033,7 @@ def verify(port):
                 verify_register(recovered, transfer)
                 verify_restored_counts(recovered, counts)
                 verify_restored_holds(recovered, holds)
+                verify_restored_loss(recovered, loss)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]
