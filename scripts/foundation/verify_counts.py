@@ -11,7 +11,6 @@ def seed_previous_count(instance, location_id, purchase_id, position_id):
     instance.sql(
         f"""
         BEGIN;
-        UPDATE brickvault.purchases SET revision=6 WHERE id='{purchase_id}' AND revision=5;
         INSERT INTO brickvault.stock_count_observations(id,command_id,purchase_id,position_id,location_id,
             location_code,expected_purchase_revision,counted_quantity,reason)
             VALUES ('{observation}','{command}','{purchase_id}','{position_id}','{location_id}',
