@@ -150,7 +150,7 @@ public sealed class StockAdjustmentReviewTests
             surplusReview.LatestObservation.UnidentifiedSurplusQuantity, surplusReview.CandidateLossQuantity,
             surplusReview.PostLossLedgerQuantity, surplusReview.MinimumOfferBackingReduction));
         Assert.Equal(count.EntityId, surplusReview.CaseId);
-        var row = Assert.Single((await receiving.CurrentSnapshot(true, token)).Purchases, p => p.Id == purchase.EntityId);
+        var row = Assert.Single((await receiving.LossSnapshot(token)).Purchases, p => p.Id == purchase.EntityId);
         Assert.Equal((surplus.Revision, 12, 2, 8), (row.Revision, row.Balances.PhysicalOnHand, row.Balances.Reserved,
             row.Balances.BackedQuantity));
 

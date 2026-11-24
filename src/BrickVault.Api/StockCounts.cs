@@ -73,6 +73,7 @@ internal sealed class StockCounts(NpgsqlDataSource db)
             throw new Fault(404, "unknown_location", "No registered location has that identifier.");
 
         Guid? next = null;
+        int? witnessRevision = null;
         List<StockCountObservation> observations;
         if (exact)
         {
@@ -84,6 +85,7 @@ internal sealed class StockCounts(NpgsqlDataSource db)
             var found = observations.SingleOrDefault() ??
                 throw new Fault(404, "unknown_count_observation", "No matching count receipt exists in the selected scope.");
             positionId = found.PositionId;
+            witnessRevision = found.ExpectedPurchaseRevision;
         }
         else
         {
@@ -144,10 +146,11 @@ internal sealed class StockCounts(NpgsqlDataSource db)
             ) latest ON true
             WHERE c.resolved_by_command_id IS NULL AND o.location_id=$1
               AND ($2::uuid IS NULL OR c.position_id=$2)
+              AND ($3::integer IS NULL OR o.expected_purchase_revision <= $3)
             ORDER BY o.observed_at DESC,c.id
             """, r => new StockShortageCase(r.GetGuid(0),r.GetGuid(1),r.GetGuid(2),"open",r.GetGuid(0),
             r.GetDateTime(3),r.GetInt32(4),r.GetGuid(5),r.GetDateTime(6),r.GetInt32(7)),
-            token, locationId, Nullable(NpgsqlDbType.Uuid, positionId));
+            token, locationId, Nullable(NpgsqlDbType.Uuid, positionId), Nullable(NpgsqlDbType.Integer, witnessRevision));
 
         return new BinCountSnapshot("bin-counts", asOf, true, location, positionId, next, positions, observations, shortages);
     }

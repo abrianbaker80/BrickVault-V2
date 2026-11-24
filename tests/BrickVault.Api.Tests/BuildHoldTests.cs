@@ -73,8 +73,8 @@ public sealed class BuildHoldTests
         Task<StockHoldPositionSnapshot> Read(Guid? after = null, int limit = 25, Guid? exact = null) =>
             holds.Snapshot(bin.EntityId, origin.EntityId, after, limit, token, exact);
         async Task<string> Reject(Func<Task> write) => (await Assert.ThrowsAsync<Fault>(write)).Code;
-        async Task<PurchaseRow> ReadPurchase() =>
-            Assert.Single((await receiving.CurrentSnapshot(true, token)).Purchases, p => p.Id == order.EntityId);
+        async Task<LossPurchaseRow> ReadPurchase() =>
+            Assert.Single((await receiving.LossSnapshot(token)).Purchases, p => p.Id == order.EntityId);
         var original = await ReadPurchase();
         Assert.Equal(0, original.Balances.Reserved);
         var first = new StockHoldCommand
@@ -247,7 +247,7 @@ public sealed class BuildHoldTests
 
         var closeA = await Save(release with { CommandId = Guid.NewGuid(), ExpectedRevision = released.Revision, Quantity = 2 });
         var closeB = await Save(release with { CommandId = Guid.NewGuid(), ExpectedRevision = closeA.Revision, HoldId = b.EntityId, Quantity = 2 });
-        Assert.Equal(0, (await receiving.CurrentSnapshot(false, token)).Purchases.Single(p => p.Id == order.EntityId).Balances.Reserved);
+        Assert.Equal(0, (await ReadPurchase()).Balances.Reserved);
         Assert.Equal(0, (await Read()).ReservedQuantity);
 
         var independent = await Save(first with

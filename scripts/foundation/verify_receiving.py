@@ -13,7 +13,7 @@ def post(client, path, revision, **fields):
 
 
 def purchase_row(client, purchase_id):
-    view = client.call("receiving/current?holds=true")
+    view = client.call("receiving/current?holds=true&losses=true")
     assert view["complete"] and view["scope"] == "receiving"
     return next(row for row in view["purchases"] if row["id"] == purchase_id)
 

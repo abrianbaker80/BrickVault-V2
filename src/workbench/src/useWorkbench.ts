@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import { api, ApiFailure, commandLabel, explain, forget, InvalidCommand, readJournal, remember } from './api'
-import { countReceiptLink } from './countLinks'
+import { countReceiptLink, lossReceiptLink } from './countLinks'
+import { recoverStockLoss } from './stockLoss'
 import type { CatalogInput, Command, Held, LocationInput, ReceivingWorkspace, Session, Workspace } from './api'
 
 type ReadState = 'loading' | 'ready' | 'disconnected' | 'partial'
@@ -11,7 +12,7 @@ export function useWorkbench(page: Ref<string>) {
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
   const error = ref('')
-  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string } | null>(null)
+  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string } | null>(null)
   const pending = shallowRef<Command[]>([])
   const held = shallowRef<Held[]>([])
   const journalError = ref('')
@@ -148,7 +149,14 @@ export function useWorkbench(page: Ref<string>) {
       try {
         let committed: { correlationId: string } | undefined
         let countLink: string | undefined
-        if (command.kind === 'hold' || command.kind === 'hold-release') {
+        let lossLink: string | undefined
+        if (command.kind === 'stock-loss') {
+          const recovered = await recoverStockLoss(command.body)
+          if (recovered) {
+            committed = recovered
+            lossLink = lossReceiptLink(command.body.locationId,command.body.positionId,recovered.postingId)
+          }
+        } else if (command.kind === 'hold' || command.kind === 'hold-release') {
           try {
             if (command.kind === 'hold') {
               const data = await api.positionHolds(command.body.locationId, command.body.positionId, '', command.body.commandId)
@@ -194,7 +202,7 @@ export function useWorkbench(page: Ref<string>) {
           forget(command)
           loadPending()
           notice.value = { message: 'Confirmed the original ' + commandLabel(command) + '.',
-            correlationId: committed.correlationId, countLink, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
+            correlationId: committed.correlationId, countLink, lossLink, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
           await refresh()
           return
         }
@@ -221,7 +229,8 @@ export function useWorkbench(page: Ref<string>) {
       forget(command)
       loadPending()
       notice.value = { message: 'Saved ' + commandLabel(command) + ' · revision ' + receipt.revision + '.',
-        correlationId: receipt.correlationId, countLink: command.kind === 'count' ? countReceiptLink(command.body.locationId, receipt.entityId) : undefined,
+        correlationId: receipt.correlationId, lossLink: command.kind === 'stock-loss' ? lossReceiptLink(command.body.locationId,command.body.positionId,receipt.entityId) : undefined,
+        countLink: command.kind === 'count' ? countReceiptLink(command.body.locationId, receipt.entityId) : undefined,
         sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
       await refresh()
       return receipt
@@ -239,7 +248,9 @@ export function useWorkbench(page: Ref<string>) {
             'transfer_bin_confirmation_mismatch', 'transfer_quantity_unavailable', 'transfer_backing_unavailable', 'transfer_all_backing_requires_full', 'unknown_location',
             'invalid_count', 'count_position_mismatch', 'count_bin_confirmation_mismatch', 'stock_shortage_open', 'invalid_hold', 'hold_position_mismatch',
             'hold_bin_confirmation_mismatch', 'hold_catalog_ineligible', 'hold_quantity_unavailable', 'hold_shortage_frontier_conflict',
-            'reserved_stock_unavailable'].includes(reason.detail.code)) {
+            'reserved_stock_unavailable','invalid_stock_loss','stock_loss_position_mismatch','stock_loss_bin_confirmation_mismatch',
+            'stock_loss_case_conflict','stock_loss_observation_conflict','stock_loss_no_loss','stock_loss_protected_shortfall',
+            'stock_loss_offer_reduction_mismatch'].includes(reason.detail.code)) {
         forget(command)
         loadPending()
         if (reason.status === 409) await refresh()

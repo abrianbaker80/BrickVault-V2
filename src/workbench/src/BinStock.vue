@@ -13,7 +13,9 @@ const emit = defineEmits<{ failure: [reason: unknown]; inspect: [id: string]; re
 const stock = shallowRef<BinTransferSnapshot | null>(null)
 const loading = ref(false)
 const error = ref('')
-const ready = computed(() => props.connected && !error.value && !loading.value && stock.value?.complete === true)
+const shortageRead = ref<'loading' | 'current' | 'partial' | 'failed'>('loading')
+const retryShortages = ref(0)
+const ready = computed(() => props.connected && !error.value && !loading.value && stock.value?.complete === true && shortageRead.value === 'current')
 const inspectingCount = computed(() => props.countLink?.binId === props.location.id && Boolean(props.countLink.positionId || props.countLink.receiptId))
 const selected = shallowRef<TransferPosition>()
 const selectedReserved = ref(0)
@@ -40,21 +42,23 @@ onBeforeUnmount(() => { mounted = false })
 async function openTransfer(position: TransferPosition, event: MouseEvent) {
   if (!ready.value || !props.transfers.enabled || checking.value) return
   trigger = event.currentTarget as HTMLButtonElement
+  const reviewedStock = stock.value
   checking.value = true
   transferError.value = ''
   try {
     const result = await api.positionHolds(props.location.id, position.layer.placementId)
-    if (!mounted || !ready.value || !props.transfers.enabled) return
+    if (!mounted || !ready.value || stock.value !== reviewedStock || !props.transfers.enabled || fenced.value.has(position.layer.placementId)) return
+    if (result.complete && result.shortageId && result.purchaseRevision >= position.purchaseRevision) {
+      fenced.value.add(position.layer.placementId)
+      return
+    }
     if (!result.complete || result.purchaseRevision !== position.purchaseRevision || result.ledgerQuantity !== position.layer.quantity ||
         result.offerBackedQuantity !== position.layer.backedQuantity) {
       transferError.value = 'Refresh this bin to verify the current position before transferring stock.'
       return
     }
-    if (result.shortageId) fenced.value.add(position.layer.placementId)
-    else {
-      selectedReserved.value = result.reservedQuantity
-      selected.value = position
-    }
+    selectedReserved.value = result.reservedQuantity
+    selected.value = position
   } catch (failure) {
     if (mounted) { transferError.value = explain(failure); emit('failure', failure) }
   } finally { checking.value = false }
@@ -67,7 +71,33 @@ async function closeTransfer() {
 }
 const arrivals = computed(() => new Map(stock.value?.movements.map(move => [move.destinationPlacementId, move])))
 
-watch(() => [props.location.id, props.location.revision, props.asOf, props.connected, inspectingCount.value || Boolean(props.countLink?.holdPositionId)] as const,
+const binScope = () => [props.location.id, props.location.revision, props.asOf, props.connected,
+  inspectingCount.value || Boolean(props.countLink?.holdPositionId || props.countLink?.lossPositionId)] as const
+
+watch([binScope, retryShortages], async ([[id, revision, , connected, inspecting]], _, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
+  shortageRead.value = 'loading'
+  if (!connected || inspecting) return
+  try {
+    // Open cases cover the whole bin independently of the observation history page.
+    const result = await api.binCounts(id, { limit: '1' })
+    if (!current) return
+    if (result.location.revision < revision) throw new ContractFailure()
+    if (!result.complete) {
+      shortageRead.value = 'partial'
+      return
+    }
+    fenced.value = new Set(result.shortages.map(shortage => shortage.positionId))
+    shortageRead.value = 'current'
+  } catch (failure) {
+    if (!current) return
+    shortageRead.value = 'failed'
+    emit('failure', failure)
+  }
+}, { immediate: true })
+
+watch(binScope,
   async ([id, revision, , connected, countOnly], _, onCleanup) => {
     let current = true
     onCleanup(() => { current = false })
@@ -97,6 +127,10 @@ watch(() => [props.location.id, props.location.revision, props.asOf, props.conne
       {{ error || 'The workspace is disconnected.' }} {{ stock ? 'Showing the last bin read.' : 'Bin stock is unavailable.' }}
     </p>
     <p v-else-if="loading" role="status">{{ stock ? 'Refreshing bin stock…' : 'Reading bin stock…' }}</p>
+    <p v-if="connected && (shortageRead === 'partial' || shortageRead === 'failed')" class="warning" role="status">
+      {{ shortageRead === 'partial' ? 'Partial shortage read.' : 'Open shortages could not be verified.' }} Transfers require a complete shortage read.
+      <button type="button" @click="retryShortages++">Retry shortage read</button>
+    </p>
     <p v-if="transferError" class="warning" role="alert">{{ transferError }}</p>
     <template v-if="stock">
       <p class="bin-read">Read {{ time(stock.asOf) }}</p>
@@ -159,7 +193,7 @@ watch(() => [props.location.id, props.location.revision, props.asOf, props.conne
       :as-of="asOf" :connected="connected" :controls="transfers" :catalog="catalog"
       @failure="emit('failure', $event)" @fenced="fenced.add($event)" @close="closeCount" @recover="recoverCount" />
     <TransferForm v-if="selected" :source="location" :reserved="selectedReserved" :locations="locations" :original="selected"
-      :current="stock?.positions.find(p => p.layer.placementId === selected?.layer.placementId)" :ready="ready" :controls="transfers"
+      :current="stock?.positions.find(p => p.layer.placementId === selected?.layer.placementId)" :ready="ready && !fenced.has(selected.layer.placementId)" :controls="transfers"
       @close="closeTransfer" @recover="emit('recover')" />
   </section>
 </template>

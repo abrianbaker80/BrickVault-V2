@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Added stock-loss posting with operator-selected reductions per unpublished offer. A single receipt records the witnessed loss, the change in backing at that position and the receipt cost assigned to the loss. [Stock count and loss decisions](https://github.com/abrianbaker80/BrickVault-V2/issues/22)
+
 - Added a stock adjustment review to open shortages. Operators can compare the latest count, recorded receipt cost, protected build units and each unpublished offer before posting a loss. [Stock counts and adjustments](https://github.com/abrianbaker80/BrickVault-V2/issues/22)
 
 - Added named project holds on individual receipt positions. A witnessed shortage keeps each hold in place until an operator selects a project, quantity and reason for release. [Build holds](https://github.com/abrianbaker80/BrickVault-V2/issues/23)

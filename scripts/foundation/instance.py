@@ -339,6 +339,12 @@ class Instance:
                 IF (SELECT max(version) FROM brickvault.schema_version) >= 6 THEN
                     GRANT INSERT ON brickvault.stock_build_holds, brickvault.stock_build_hold_releases TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 7 THEN
+                    GRANT INSERT (id,command_id,purchase_id,position_id,location_id,location_code,
+                        case_id,observation_id,expected_purchase_revision,reason)
+                        ON brickvault.stock_loss_postings TO bv_api;
+                    GRANT INSERT (loss_id,offer_id,quantity) ON brickvault.stock_loss_offer_reductions TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,

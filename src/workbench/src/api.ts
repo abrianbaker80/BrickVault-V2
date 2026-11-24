@@ -20,8 +20,10 @@ export type CountObservation = Schema['StockCountObservation']
 export type TransferPosition = BinTransferSnapshot['positions'][number]
 export type TransferCommand = Schema['TransferCommand']
 export type TransferControls = { enabled: boolean; pending: boolean; feedback: string; workspaceId: string; dispatch: Dispatch }
-export type ReceivingWorkspace = Schema['CurrentReceivingWorkspace']
-export type Purchase = Schema['CurrentPurchaseRow']
+export type ReceivingWorkspace = Schema['LossReceivingWorkspace']
+export type Purchase = ReceivingWorkspace['purchases'][number]
+export type StockLoss = Schema['StockLossSnapshot']
+export type StockLossCommand = Schema['StockLossCommand']
 export type ReceivingCommand = { workspaceId: string } & (
   | { kind: 'purchase'; body: Schema['PurchaseCommand'] }
   | { kind: 'delivery'; body: Schema['DeliveryCommand'] }
@@ -29,13 +31,14 @@ export type ReceivingCommand = { workspaceId: string } & (
   | { kind: 'offer'; body: Schema['OfferCommand'] }
   | { kind: 'transfer'; body: TransferCommand }
   | { kind: 'count'; body: Schema['StockCountCommand'] }
+  | { kind: 'stock-loss'; body: StockLossCommand }
   | { kind: 'hold'; body: Schema['StockHoldCommand'] }
   | { kind: 'hold-release'; locationId: string; positionId: string; body: Schema['StockHoldReleaseCommand'] })
 export type Command = ReceivingCommand | { workspaceId: string } & (
   | { kind: 'catalog'; body: Schema['CatalogCommand'] }
   | { kind: 'location'; body: Schema['LocationCommand'] })
 export type Held = { workspaceId: string | null; commandId: string }
-export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | undefined>
+export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | undefined>
 
 export function commandLabel(command: Command) {
   switch (command.kind) {
@@ -46,6 +49,7 @@ export function commandLabel(command: Command) {
     case 'offer': return 'Unpublished offer'
     case 'hold': return 'Build hold for ' + command.body.purpose
     case 'hold-release': return 'Release of ' + command.body.quantity + (command.body.quantity === 1 ? ' held unit' : ' held units')
+    case 'stock-loss': return 'Stock loss in ' + command.body.confirmedLocationCode
     case 'count': return 'Stock count of ' + command.body.countedQuantity + ' in ' + command.body.confirmedLocationCode
     case 'transfer': return 'Transfer of ' + command.body.quantity + ' from ' + command.body.confirmedSourceLocationCode + ' to ' + command.body.confirmedDestinationLocationCode
   }
@@ -58,6 +62,7 @@ const commands = {
   delivery: { path: 'receiving/deliveries', valid: valid.DeliveryCommand },
   putaway: { path: 'receiving/putaway', valid: valid.PutawayCommand },
   offer: { path: 'receiving/offers', valid: valid.OfferCommand },
+  'stock-loss': { path: 'receiving/stock-losses', valid: valid.StockLossCommand },
   count: { path: 'receiving/counts', valid: valid.StockCountCommand },
   hold: { path: 'receiving/holds', valid: valid.StockHoldCommand },
   'hold-release': { path: 'receiving/holds/release', valid: valid.StockHoldReleaseCommand },
@@ -129,6 +134,16 @@ export const api = {
         result.latestObservation.locationId !== binId) throw new ContractFailure()
     return result
   },
+  async postedLoss(bin: string, position: string, exact: { postingId: string } | { observationId: string } | { commandId: string } | { caseId: string }, after = '', limit = 25) {
+    const params = new URLSearchParams({ ...exact, limit: String(limit) })
+    if (after) params.set('after', after)
+    const result = await read('receiving/bins/' + encodeURIComponent(bin) + '/positions/' + encodeURIComponent(position) + '/posted-loss?' + params, valid.StockLossSnapshot)
+    if (result.location.id !== bin || result.positionId !== position || result.reviewedObservation.positionId !== position ||
+        result.reviewedObservation.purchaseId !== result.purchaseId || result.reviewedObservation.locationId !== bin ||
+        ('postingId' in exact && result.postingId !== exact.postingId) || ('commandId' in exact && result.commandId !== exact.commandId) ||
+        ('caseId' in exact && result.caseId !== exact.caseId)) throw new ContractFailure()
+    return result
+  },
   async positionHolds(binId: string, positionId: string, after = '', commandId = '') {
     const params = new URLSearchParams({ limit: '25' })
     if (after) params.set('after', after)
@@ -161,7 +176,7 @@ export const api = {
     return result
   },
   binTransfers: (id: string) => read('receiving/bins/' + encodeURIComponent(id) + '/movements', valid.BinTransferSnapshot),
-  receiving: () => read('receiving/current?holds=true', valid.CurrentReceivingWorkspace),
+  receiving: () => read('receiving/current?holds=true&losses=true', valid.LossReceivingWorkspace),
   diagnostic: (id: string) => read('diagnostics/' + encodeURIComponent(id), valid.Diagnostic),
   async save(command: Command, csrf: string) {
     const options = {
@@ -172,6 +187,7 @@ export const api = {
     const receipt = command.kind === 'catalog' || command.kind === 'location'
       ? await read(path, valid.Receipt, options)
       : command.kind === 'hold' || command.kind === 'hold-release' ? await read(path, valid.StockHoldReceipt, options)
+      : command.kind === 'stock-loss' ? await read(path, valid.StockLossReceipt, options)
       : command.kind === 'count' ? await read(path, valid.StockCountReceipt, options)
       : command.kind === 'transfer' ? await read(path, valid.TransferReceipt, options) : await read(path, valid.ReceivingReceipt, options)
     if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind) throw new ContractFailure()

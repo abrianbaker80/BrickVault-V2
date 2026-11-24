@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, explain } from './api'
-import { countReceiptLink } from './countLinks'
+import { countReceiptLink, lossCaseLink } from './countLinks'
 import { time } from './presentation'
 import { money } from './receiving'
 
@@ -89,6 +89,8 @@ function retryRead() {
         <p v-if="page.protectedProjectShortfall" class="warning">Build reservations exceed the proposed stock by {{ page.protectedProjectShortfall }}. Review the named holds.</p>
         <p v-if="page.minimumOfferBackingReduction" class="warning">At least {{ page.minimumOfferBackingReduction }} units of offer backing need review.</p>
         <p v-if="!page.candidateLossQuantity">The latest count supports no stock loss.</p>
+        <a v-if="page.candidateLossQuantity && !page.protectedProjectShortfall && connected && !loading && !error && !partial"
+          :href="lossCaseLink(bin, position, caseId)">Choose reductions and post stock loss</a>
         <h3 ref="offersHeading" tabindex="-1">Unpublished offers ({{ page.offerCount }})</h3>
         <ul v-if="page.offers.length" class="receipt-lines">
           <li v-for="offer in page.offers" :key="offer.id"><strong>{{ offer.backedQuantity }} backed by this position</strong>

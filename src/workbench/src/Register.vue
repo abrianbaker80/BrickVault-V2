@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import BinStock from './BinStock.vue'
 import BuildHolds from './BuildHolds.vue'
+import StockLossWorkspace from './StockLossWorkspace.vue'
 import type { CountLink } from './countLinks'
 import { label } from './presentation'
 import type { Catalog, Location, TransferControls, Workspace } from './api'
@@ -36,9 +37,9 @@ function inspect(row: Catalog | Location, event: MouseEvent) {
 watch(() => props.confirmedSourceId, id => {
   if (id && !inspectedId.value && props.page === 'locations') inspectedId.value = id
 })
-watch([inspectedId, compact, () => props.countLink?.holdPositionId], async () => {
+watch([inspectedId, compact, () => props.countLink?.holdPositionId || props.countLink?.lossPositionId], async () => {
   await nextTick()
-  if (props.countLink?.holdPositionId) return
+  if (props.countLink?.holdPositionId || props.countLink?.lossPositionId) return
   if (detail.value instanceof HTMLDialogElement) {
     if (!detail.value.open) detail.value.showModal()
   } else detail.value?.querySelector<HTMLButtonElement>('button')?.focus()
@@ -132,6 +133,10 @@ onBeforeUnmount(() => {
       :connected="connected" :locations="workspace.locations" :catalog="workspace.catalog" :transfers="transfers" :count-link="countLink"
       @inspect="inspectBin" @recover="close" @failure="emit('failure', $event)" />
   </component>
+  <StockLossWorkspace v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.lossPositionId"
+    :key="countLink.binId + '/' + countLink.lossPositionId + '/' + (countLink.lossReceiptId ? 'posting/' + countLink.lossReceiptId : 'case/' + countLink.lossCaseId)" :location="inspected" :position="countLink.lossPositionId"
+    :catalog="workspace.catalog" :case-id="countLink.lossCaseId" :posting="countLink.lossReceiptId" :as-of="workspace.asOf" :connected="connected" :controls="transfers"
+    @failure="emit('failure', $event)" @recover="close" @close="inspectBin(inspected.id)" />
   <BuildHolds v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.holdPositionId"
     :key="countLink.binId + '/' + countLink.holdPositionId" :location="inspected" :position-id="countLink.holdPositionId"
     :as-of="workspace.asOf" :connected="connected" :controls="transfers"

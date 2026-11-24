@@ -32,6 +32,7 @@ try
     var counts = new StockCounts(db);
     var holds = new BuildHolds(db);
     var adjustmentReviews = new StockAdjustmentReviews(db);
+    var stockLosses = new StockLosses(db);
     var bins = new BinStock(db);
     var inventory = new StockRegister(db);
     var transfers = new Transfers(db);
@@ -109,8 +110,10 @@ try
     api.MapPost("/catalog", (HttpContext c, CancellationToken ct) => Save<CatalogCommand>(c, references.Save, ct));
     api.MapPost("/locations", (HttpContext c, CancellationToken ct) => Save<LocationCommand>(c, references.Save, ct));
     api.MapGet("/receiving", (CancellationToken ct) => receiving.LegacySnapshot(ct));
-    api.MapGet("/receiving/current", (HttpContext c, CancellationToken ct) =>
-        receiving.CurrentSnapshot(c.Request.Query["holds"] == "true", ct));
+    api.MapGet("/receiving/current", async (HttpContext c, CancellationToken ct) =>
+        c.Request.Query["losses"] == "true"
+            ? (object)await receiving.LossSnapshot(ct)
+            : await receiving.CurrentSnapshot(c.Request.Query["holds"] == "true", ct));
     api.MapGet("/receiving/bins/{locationId:guid}/positions/{positionId:guid}/holds",
         (Guid locationId, Guid positionId, Guid? after, int? limit, Guid? commandId, CancellationToken ct) =>
             holds.Snapshot(locationId, positionId, after, limit ?? 25, ct, commandId));
@@ -126,6 +129,12 @@ try
         (Guid locationId, Guid? positionId, Guid? after, int? limit, Guid? observationId, Guid? commandId,
             CancellationToken ct) => counts.Snapshot(locationId, ct, positionId, after, limit ?? 25, observationId, commandId));
     api.MapPost("/receiving/counts", (HttpContext c, CancellationToken ct) => Save<StockCountCommand>(c, counts.Save, ct));
+    api.MapPost("/receiving/stock-losses", (HttpContext c, CancellationToken ct) =>
+        Save<StockLossCommand>(c, stockLosses.Save, ct, TransferCommand.MaxRequestBodyBytes));
+    api.MapGet("/receiving/bins/{locationId:guid}/positions/{positionId:guid}/posted-loss",
+        (Guid locationId, Guid positionId, Guid? caseId, Guid? observationId, Guid? postingId, Guid? commandId,
+            string? after, int? limit, CancellationToken ct) =>
+            stockLosses.Read(locationId, positionId, caseId, observationId, postingId, commandId, after, limit ?? 25, ct));
     api.MapGet("/inventory/positions", (string? q, string? itemType, Guid? locationId, Guid? positionId, Guid? after, int? limit, CancellationToken ct) =>
         inventory.Search(q, itemType, locationId, positionId, after, limit ?? 25, ct));
     api.MapGet("/inventory/positions/{positionId:guid}/movements", (Guid positionId, Guid? after, int? limit, CancellationToken ct) =>

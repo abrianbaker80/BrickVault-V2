@@ -5,7 +5,7 @@ import uuid
 from verify_receiving import post, purchase_row
 
 
-def seed_previous_count(instance, location_id, purchase_id, position_id):
+def seed_previous_count(instance, location_id, purchase_id, position_id, revision=5):
     """Stage from a real v5 open case against a position with prior transferred backing."""
     command, observation = (str(uuid.uuid4()) for _ in range(2))
     instance.sql(
@@ -14,9 +14,9 @@ def seed_previous_count(instance, location_id, purchase_id, position_id):
         INSERT INTO brickvault.stock_count_observations(id,command_id,purchase_id,position_id,location_id,
             location_code,expected_purchase_revision,counted_quantity,reason)
             VALUES ('{observation}','{command}','{purchase_id}','{position_id}','{location_id}',
-                    'OLD-01',5,1,'Witnessed migration fixture');
+                    'OLD-01',{revision},1,'Witnessed migration fixture');
         INSERT INTO brickvault.commands(command_id,kind,digest,entity_id,revision,correlation_id)
-            VALUES ('{command}','count',decode(repeat('00',32),'hex'),'{observation}',6,gen_random_uuid());
+            VALUES ('{command}','count',decode(repeat('00',32),'hex'),'{observation}',{revision+1},gen_random_uuid());
         INSERT INTO brickvault.audit(command_id,actor) VALUES ('{command}','operator');
         COMMIT;
         """, role="bv_migrator",
