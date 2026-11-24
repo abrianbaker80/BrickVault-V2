@@ -123,14 +123,25 @@ internal sealed class Receiving(NpgsqlDataSource db)
 
     public async Task<ReceivingWorkspace> CurrentSnapshot(bool acceptHolds, CancellationToken token)
     {
-        var snapshot = await Snapshot(token);
+        var snapshot = await LossSnapshot(token);
         if (!acceptHolds && snapshot.Purchases.Any(p => p.Balances.Reserved > 0))
             throw new Fault(426, "receiving_client_upgrade_required",
                 "Active build holds require a newer Workbench. Update Workbench to read the reserved stock and receiving balances.");
-        return snapshot;
+        if (snapshot.Purchases.SelectMany(p => p.Deliveries).Any(d => d.LostQuantity > 0))
+            throw new Fault(426, "receiving_client_upgrade_required",
+                "Posted stock losses require a newer Workbench. Update Workbench to distinguish original receipt quantities, posted losses and current stock.");
+        return BeforeLossContract(snapshot);
     }
 
-    public async Task<ReceivingWorkspace> Snapshot(CancellationToken token)
+    public Task<ReceivingWorkspace> Snapshot(CancellationToken token) => CurrentSnapshot(true, token);
+
+    private static ReceivingWorkspace BeforeLossContract(LossReceivingWorkspace snapshot) =>
+        new(snapshot.Scope, snapshot.AsOf, snapshot.Complete, snapshot.Purchases.Select(p =>
+            new PurchaseRow(p.Id, p.Revision, p.Reference, p.Source, p.Currency, p.OrderedQuantity, p.PendingChargeMinor,
+                p.Deliveries.Select(d => new DeliveryRow(d.Id, d.Reference, d.Quantity, d.CatalogId, d.CatalogRevision,
+                    d.ItemCostMinor, d.IntakeQuantity, d.Placements)).ToList(), p.Offers, p.Balances)).ToList());
+
+    public async Task<LossReceivingWorkspace> LossSnapshot(CancellationToken token)
     {
         await using var connection = await db.OpenConnectionAsync(token);
         await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
@@ -163,16 +174,26 @@ internal sealed class Receiving(NpgsqlDataSource db)
                 r.GetBoolean(8) ? quantity - backed - reserved : 0));
         }, token)).ToLookup(r => r.DeliveryId);
         var deliveries = (await Rows(connection, tx, """
-            SELECT purchase_id,id,reference,quantity,catalog_id,catalog_revision,item_cost_minor
-            FROM brickvault.deliveries ORDER BY reference,id
+            SELECT d.purchase_id,d.id,d.reference,d.quantity,d.catalog_id,d.catalog_revision,d.item_cost_minor,
+                losses.quantity,losses.basis, d.item_cost_minor-losses.basis
+            FROM brickvault.deliveries d
+            CROSS JOIN LATERAL (
+                SELECT COALESCE(sum(l.lost_quantity),0)::integer AS quantity,
+                    CASE WHEN d.item_cost_minor IS NOT NULL
+                        THEN COALESCE(sum(l.allocated_item_cost_minor),0)::integer END AS basis
+                FROM brickvault.stock_loss_postings l WHERE l.delivery_id=d.id
+            ) losses
+            ORDER BY d.reference,d.id
             """, r =>
         {
             var quantity = r.GetInt32(3);
             var positions = placements[r.GetGuid(1)];
             var values = positions.Select(p => p.Value).ToList();
+            var lost = r.GetInt32(7);
             return (PurchaseId: r.GetGuid(0), Reserved: positions.Sum(p => p.Reserved),
-                Value: new DeliveryRow(r.GetGuid(1), r.GetString(2), quantity, Optional<Guid>(r,4), Optional<int>(r,5),
-                    Optional<int>(r,6), quantity - values.Sum(p => p.Quantity), values));
+                Value: new LossDeliveryRow(r.GetGuid(1), r.GetString(2), quantity, Optional<Guid>(r,4), Optional<int>(r,5),
+                    Optional<int>(r,6), quantity - lost - values.Sum(p => p.Quantity), values, lost,
+                    Optional<int>(r,8), Optional<int>(r,9)));
         }, token)).ToLookup(r => r.PurchaseId);
         var backing = (await Rows(connection, tx, """
             SELECT offer_id,placement_id,quantity FROM brickvault.current_offer_backing ORDER BY offer_id,placement_id
@@ -187,27 +208,28 @@ internal sealed class Receiving(NpgsqlDataSource db)
         {
             var lines = backing[r.GetGuid(1)].ToList();
             return (PurchaseId: r.GetGuid(0), Value: new OfferRow(r.GetGuid(1), r.GetGuid(2), r.GetInt32(3),
-                r.GetString(4), r.GetInt32(5), lines, lines.Sum(a => a.Quantity), PublishedQuantity: 0, BackingCurrent: r.GetBoolean(6)));
+                r.GetString(4), r.GetInt32(5), lines, lines.Sum(a => a.Quantity), PublishedQuantity: 0,
+                BackingCurrent: lines.Count > 0 && r.GetBoolean(6)));
         }, token)).ToLookup(r => r.PurchaseId, r => r.Value);
-        return new ReceivingWorkspace("receiving", asOf, true, purchases.Select(p =>
+        return new LossReceivingWorkspace("receiving", asOf, true, purchases.Select(p =>
         {
             var layers = deliveries[p.Id];
             var received = layers.Select(d => d.Value).ToList();
-            return new PurchaseRow(p.Id, p.Revision, p.Reference, p.Source, p.Currency, p.Ordered, p.Charge,
+            return new LossPurchaseRow(p.Id, p.Revision, p.Reference, p.Source, p.Currency, p.Ordered, p.Charge,
                 received, offers[p.Id].ToList(), Balance(received, layers.Sum(d => d.Reserved),
                     layers.Where(d => d.Value.ItemCostMinor.HasValue).Sum(d => d.Reserved), p.Charge));
         }).ToList());
     }
 
-    private static StockBalances Balance(IReadOnlyList<DeliveryRow> deliveries, int reserved, int knownReserved,
+    private static StockBalances Balance(IReadOnlyList<LossDeliveryRow> deliveries, int reserved, int knownReserved,
         int? pendingChargeMinor)
     {
-        var onHand = deliveries.Sum(d => d.Quantity);
+        var onHand = deliveries.Sum(d => d.Quantity - d.LostQuantity);
         var unavailable = deliveries.Sum(d => d.IntakeQuantity);
         var free = onHand - unavailable - reserved;
         var backed = deliveries.SelectMany(d => d.Placements).Sum(p => p.BackedQuantity);
         var documented = deliveries.Where(d => d.ItemCostMinor.HasValue).ToList();
-        var knownFree = documented.Sum(d => d.Quantity - d.IntakeQuantity) - knownReserved;
+        var knownFree = documented.Sum(d => d.Quantity - d.LostQuantity - d.IntakeQuantity) - knownReserved;
         long? known = documented.Count == 0 ? null : documented.Sum(d => (long)d.ItemCostMinor!.Value);
         long? components = known.HasValue || pendingChargeMinor.HasValue
             ? known.GetValueOrDefault() + pendingChargeMinor.GetValueOrDefault() : null;

@@ -806,7 +806,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CurrentReceivingWorkspace"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CurrentReceivingWorkspace"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LossReceivingWorkspace"
+                    }
+                  ]
                 }
               }
             }
@@ -832,7 +839,7 @@
             }
           }
         },
-        "description": "Read a complete receiving snapshot, including all positions backing each offer after transfers. Use holds=true to read active build holds in the balances.",
+        "description": "Read a complete receiving snapshot, including all positions backing each offer after transfers. Use holds=true to read active build holds in the balances. Use losses=true for a snapshot with original receipt, posted loss and remaining basis quantities.",
         "parameters": [
           {
             "name": "holds",
@@ -843,6 +850,16 @@
               "default": false
             },
             "description": "Opt in to accurate build-hold reservations and free quantity. Clients without opt-in receive 426 when reservations are present."
+          },
+          {
+            "name": "losses",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Opt in to the loss-aware snapshot. Older snapshot shapes return 426 when a loss is present."
           }
         ]
       }
@@ -1535,6 +1552,189 @@
           }
         }
       }
+    },
+    "/api/v1/receiving/stock-losses": {
+      "post": {
+        "operationId": "postStockLoss",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "description": "The authenticated workspaceId captured when the operator prepared the command. Use that same value for every retry. A missing or mismatched workspace returns 409 workspace_mismatch.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockLossCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockLossReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "This loss command exceeds the application byte limit. No stock change was applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Post the loss evidenced by the latest reviewed witness and only the named offer backing reductions. This closes the affected shortage in the same transaction."
+      }
+    },
+    "/api/v1/receiving/bins/{locationId}/positions/{positionId}/posted-loss": {
+      "get": {
+        "operationId": "getPostedStockLoss",
+        "description": "Read one exact posted loss, including a closed case and its historical reviewed witness. Supply exactly one selector and use nextAfter for more reduction rows.",
+        "parameters": [
+          {
+            "name": "locationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "positionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "caseId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "observationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "postingId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "commandId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 65,
+              "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact posted loss",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockLossSnapshot"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No matching posted loss in this scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2063,7 +2263,8 @@
               "transfer",
               "count",
               "hold",
-              "hold-release"
+              "hold-release",
+              "stock-loss"
             ]
           },
           "correlationId": {
@@ -4892,6 +5093,581 @@
           "minimumOfferBackingReduction",
           "offers",
           "nextAfter"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossOfferReduction": {
+        "type": "object",
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "offerId",
+          "quantity"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "caseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedObservationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "offerReductions": {
+            "type": "array",
+            "maxItems": 1000000,
+            "items": {
+              "$ref": "#/components/schemas/StockLossOfferReduction"
+            },
+            "description": "Distinct, positive backing reductions at this position. The total must equal the reviewed minimum."
+          }
+        },
+        "required": [
+          "commandId",
+          "purchaseId",
+          "expectedRevision",
+          "positionId",
+          "locationId",
+          "confirmedLocationCode",
+          "caseId",
+          "expectedObservationId",
+          "reason",
+          "offerReductions"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossReduction": {
+        "type": "object",
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "priorBackedQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "remainingBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "unitPriceMinor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000000
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          }
+        },
+        "required": [
+          "offerId",
+          "quantity",
+          "priorBackedQuantity",
+          "remainingBackedQuantity",
+          "unitPriceMinor",
+          "currency"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossSnapshot": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "stock-loss-posting"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "Posting and aggregate facts are complete. Continue through nextAfter for all reduction rows."
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "caseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "postingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "reviewedObservation": {
+            "$ref": "#/components/schemas/StockCountObservation"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/AdjustmentReceiptEvidence"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "postedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ledgerQuantityBefore": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "ledgerQuantityAfter": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "lostQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "protectedProjectQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "offerBackedQuantityBefore": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "offerBackedQuantityAfter": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "priorDeliveryLossQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "allocatedItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000,
+            "description": "Item basis allocated to just this loss; null denotes unknown basis."
+          },
+          "remainingDeliveryItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000,
+            "description": "Remaining item basis for the whole delivery immediately after this posting."
+          },
+          "reductions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/StockLossReduction"
+            }
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 65,
+            "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{32}$"
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "location",
+          "positionId",
+          "caseId",
+          "purchaseId",
+          "postingId",
+          "commandId",
+          "correlationId",
+          "revision",
+          "reviewedObservation",
+          "receipt",
+          "confirmedLocationCode",
+          "reason",
+          "postedAt",
+          "ledgerQuantityBefore",
+          "ledgerQuantityAfter",
+          "lostQuantity",
+          "protectedProjectQuantity",
+          "offerBackedQuantityBefore",
+          "offerBackedQuantityAfter",
+          "priorDeliveryLossQuantity",
+          "allocatedItemCostMinor",
+          "remainingDeliveryItemCostMinor",
+          "reductions",
+          "nextAfter"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossReceipt": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "stock-loss"
+            ]
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "commandId",
+          "entityId",
+          "revision",
+          "kind",
+          "correlationId"
+        ],
+        "additionalProperties": false
+      },
+      "LossOfferRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "unitPriceMinor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000000
+          },
+          "backing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BackingRow"
+            },
+            "minItems": 0
+          },
+          "backedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "publishedQuantity": {
+            "type": "integer",
+            "const": 0
+          },
+          "backingCurrent": {
+            "type": "boolean",
+            "description": "False when catalog eligibility or its recorded revision has changed. The internal offer remains unpublished."
+          }
+        },
+        "required": [
+          "id",
+          "catalogId",
+          "catalogRevision",
+          "currency",
+          "unitPriceMinor",
+          "backing",
+          "backedQuantity",
+          "publishedQuantity",
+          "backingCurrent"
+        ],
+        "additionalProperties": false
+      },
+      "LossDeliveryRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "catalogId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "itemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "intakeQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "placements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlacementRow"
+            }
+          },
+          "lostQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "allocatedLostItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000
+          },
+          "remainingItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000
+          }
+        },
+        "required": [
+          "id",
+          "reference",
+          "quantity",
+          "catalogId",
+          "catalogRevision",
+          "itemCostMinor",
+          "intakeQuantity",
+          "placements",
+          "lostQuantity",
+          "allocatedLostItemCostMinor",
+          "remainingItemCostMinor"
+        ],
+        "additionalProperties": false
+      },
+      "LossPurchaseRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "reference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "orderedQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "pendingChargeMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "deliveries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LossDeliveryRow"
+            }
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LossOfferRow"
+            }
+          },
+          "balances": {
+            "$ref": "#/components/schemas/CurrentStockBalances"
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "reference",
+          "source",
+          "currency",
+          "orderedQuantity",
+          "pendingChargeMinor",
+          "deliveries",
+          "offers",
+          "balances"
+        ],
+        "additionalProperties": false
+      },
+      "LossReceivingWorkspace": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "receiving"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean",
+            "const": true
+          },
+          "purchases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LossPurchaseRow"
+            }
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "purchases"
         ],
         "additionalProperties": false
       }
