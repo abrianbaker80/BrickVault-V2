@@ -1,5 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import { api, ApiFailure, commandLabel, explain, forget, InvalidCommand, readJournal, remember } from './api'
+import { countReceiptLink } from './countLinks'
 import type { CatalogInput, Command, Held, LocationInput, ReceivingWorkspace, Session, Workspace } from './api'
 
 type ReadState = 'loading' | 'ready' | 'disconnected' | 'partial'
@@ -10,7 +11,7 @@ export function useWorkbench(page: Ref<string>) {
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
   const error = ref('')
-  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string } | null>(null)
+  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string } | null>(null)
   const pending = shallowRef<Command[]>([])
   const held = shallowRef<Held[]>([])
   const journalError = ref('')
@@ -145,21 +146,39 @@ export function useWorkbench(page: Ref<string>) {
     // A previous attempt may already have committed before its response was lost.
     if (!firstAttempt) {
       try {
-        const snapshot = command.kind === 'transfer'
-          ? await api.binTransfers(command.body.sourceLocationId) : await api.workspace(true)
-        if (!snapshot.complete || (await api.session()).workspaceId !== command.workspaceId)
-          throw new Error('Incomplete command history')
-        const history = 'movements' in snapshot ? snapshot.movements : snapshot.audit
-        const committed = history.find(row => row.commandId === command.body.commandId)
+        let committed: { correlationId: string } | undefined
+        let countLink: string | undefined
+        if (command.kind === 'count') {
+          try {
+            const result = await api.binCounts(command.body.locationId, { commandId: command.body.commandId, positionId: command.body.positionId })
+            if (!result.complete) throw new Error('Incomplete count history')
+            const observation = result.observations[0]
+            if (observation.purchaseId !== command.body.purchaseId || observation.countedQuantity !== command.body.countedQuantity ||
+                observation.expectedPurchaseRevision !== command.body.expectedRevision || observation.locationCode !== command.body.confirmedLocationCode ||
+                observation.reason !== command.body.reason) throw new Error('Count receipt mismatch')
+            committed = observation
+            countLink = countReceiptLink(command.body.locationId, observation.id)
+          } catch (failure) {
+            if (!(failure instanceof ApiFailure && failure.status === 404 && failure.detail?.code === 'unknown_count_observation')) throw failure
+          }
+        } else {
+          const snapshot = command.kind === 'transfer'
+            ? await api.binTransfers(command.body.sourceLocationId) : await api.workspace(true)
+          if (!snapshot.complete) throw new Error('Incomplete command history')
+          const history = 'movements' in snapshot ? snapshot.movements : snapshot.audit
+          committed = history.find(row => row.commandId === command.body.commandId)
+        }
+        if ((await api.session()).workspaceId !== command.workspaceId) throw new Error('Workspace changed')
         if (committed) {
           forget(command)
           loadPending()
           notice.value = { message: 'Confirmed the original ' + commandLabel(command) + '.',
-            correlationId: committed.correlationId, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
+            correlationId: committed.correlationId, countLink, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
           await refresh()
           return
         }
-      } catch {
+      } catch (failure) {
+        if (expired(failure)) return
         error.value = 'The server rejected the retry size. Reconnect to verify the original command before continuing.'
         readState.value = 'disconnected'
         return
@@ -181,7 +200,8 @@ export function useWorkbench(page: Ref<string>) {
       forget(command)
       loadPending()
       notice.value = { message: 'Saved ' + commandLabel(command) + ' · revision ' + receipt.revision + '.',
-        correlationId: receipt.correlationId, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
+        correlationId: receipt.correlationId, countLink: command.kind === 'count' ? countReceiptLink(command.body.locationId, receipt.entityId) : undefined,
+        sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
       await refresh()
       return receipt
     } catch (reason) {
@@ -195,7 +215,8 @@ export function useWorkbench(page: Ref<string>) {
           ['invalid_reference', 'duplicate_reference', 'invalid_receiving', 'duplicate_receiving_reference',
             'revision_conflict', 'command_mismatch', 'catalog_ineligible', 'catalog_reconfirmation_required', 'bin_confirmation_mismatch',
             'quantity_unavailable', 'delivery_mismatch', 'backing_mismatch', 'invalid_transfer', 'transfer_source_mismatch',
-            'transfer_bin_confirmation_mismatch', 'transfer_quantity_unavailable', 'transfer_backing_unavailable', 'transfer_all_backing_requires_full', 'unknown_location'].includes(reason.detail.code)) {
+            'transfer_bin_confirmation_mismatch', 'transfer_quantity_unavailable', 'transfer_backing_unavailable', 'transfer_all_backing_requires_full', 'unknown_location',
+            'invalid_count', 'count_position_mismatch', 'count_bin_confirmation_mismatch', 'stock_shortage_open'].includes(reason.detail.code)) {
         forget(command)
         loadPending()
         if (reason.status === 409) await refresh()

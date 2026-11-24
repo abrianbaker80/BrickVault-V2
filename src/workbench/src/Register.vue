@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import BinStock from './BinStock.vue'
+import type { CountLink } from './countLinks'
 import { label } from './presentation'
 import type { Catalog, Location, TransferControls, Workspace } from './api'
-const props = defineProps<{ page: 'catalog' | 'locations'; workspace: Workspace; connected: boolean; transfers: TransferControls; confirmedSourceId?: string }>()
+const props = defineProps<{ page: 'catalog' | 'locations'; workspace: Workspace; connected: boolean; transfers: TransferControls; confirmedSourceId?: string; countLink?: CountLink }>()
 const emit = defineEmits<{ failure: [reason: unknown] }>()
 const query = ref('')
 const search = ref<HTMLInputElement>()
@@ -21,8 +22,14 @@ const locations = computed(() => props.workspace.locations.filter(r => matches([
 const count = computed(() => props.page === 'catalog' ? catalog.value.length : locations.value.length)
 let origin: HTMLButtonElement | undefined
 let resize: ResizeObserver | undefined
+watch(() => props.countLink?.binId, (id, previous) => {
+  if (props.page !== 'locations') return
+  if (id) inspectedId.value = id
+  else if (previous) inspectedId.value = null
+}, { immediate: true })
 function inspect(row: Catalog | Location, event: MouseEvent) {
   origin = event.currentTarget as HTMLButtonElement
+  if (props.countLink && props.page === 'locations') window.location.hash = 'locations/' + row.id
   inspectedId.value = row.id
 }
 watch(() => props.confirmedSourceId, id => {
@@ -33,10 +40,15 @@ watch([inspectedId, compact], async () => {
   if (detail.value instanceof HTMLDialogElement) {
     if (!detail.value.open) detail.value.showModal()
   } else detail.value?.querySelector<HTMLButtonElement>('button')?.focus()
-})
+}, { immediate: true })
+function inspectBin(id: string) {
+  if (props.countLink) window.location.hash = 'locations/' + id
+  inspectedId.value = id
+}
 function close() {
   if (detail.value instanceof HTMLDialogElement) detail.value.close()
   inspectedId.value = null
+  if (props.countLink && props.page === 'locations') window.location.hash = 'locations'
   if (origin?.isConnected) origin.focus()
   else search.value?.focus()
 }
@@ -97,6 +109,7 @@ onBeforeUnmount(() => {
       <p v-else-if="workspace.complete">{{ page === 'catalog' ? 'Add the first item to the catalog register.' : 'Add a location to start the register.' }}</p>
     </div>
   </section>
+  <p v-if="countLink && !inspected && page === 'locations'" class="warning" role="status">{{ workspace.complete && connected ? 'The linked bin was not found.' : 'The linked bin is unavailable.' }}</p>
   <component v-if="inspected" :is="compact ? 'dialog' : 'aside'" ref="detail" class="panel inspector"
     aria-labelledby="item-title" @cancel.prevent="close" @keydown.esc.prevent="close">
     <header class="panel-head"><h2 id="item-title">{{ inspected.name }}</h2><button class="close" aria-label="Close details" @click="close">×</button></header>
@@ -114,8 +127,8 @@ onBeforeUnmount(() => {
       <dt>Record ID</dt><dd>{{ inspected.id }}</dd><dt>Revision</dt><dd>{{ inspected.revision }}</dd>
     </dl>
     <BinStock v-if="'code' in inspected" :key="inspected.id" :location="inspected" :as-of="workspace.asOf"
-      :connected="connected" :locations="workspace.locations" :transfers="transfers"
-      @inspect="inspectedId = $event" @recover="close" @failure="emit('failure', $event)" />
+      :connected="connected" :locations="workspace.locations" :catalog="workspace.catalog" :transfers="transfers" :count-link="countLink"
+      @inspect="inspectBin" @recover="close" @failure="emit('failure', $event)" />
   </component>
   </div>
 </template>
