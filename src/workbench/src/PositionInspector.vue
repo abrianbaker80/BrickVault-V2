@@ -2,6 +2,7 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { api, ContractFailure, explain } from './api'
 import type { StockPage, StockPosition } from './api'
+import { countPositionLink } from './countLinks'
 import PositionHistory from './PositionHistory.vue'
 import { money } from './receiving'
 import { label, time } from './presentation'
@@ -57,12 +58,13 @@ watch(() => [props.id, props.asOf, props.connected] as const, async ([id, , conn
       <div class="identity"><h3>{{ layer.currentCatalog.name }}</h3><p>{{ label(layer.currentCatalog.itemType) }} · {{ layer.currentCatalog.itemNumber }}{{ layer.currentCatalog.variant ? ' · ' + layer.currentCatalog.variant : '' }}</p>
         <small>{{ layer.currentCatalog.colorState === 'known' ? 'Color ' + layer.currentCatalog.colorId : label(layer.currentCatalog.colorState) + ' color' }} · {{ label(layer.currentCatalog.condition) }} · {{ label(layer.currentCatalog.completeness) }}</small></div>
       <p v-if="layer.catalogRevision !== layer.currentCatalog.revision" class="warning" role="status">Recorded at catalog revision {{ layer.catalogRevision }}. Item details show current revision {{ layer.currentCatalog.revision }}.</p>
-      <p v-if="layer.quantity === 0" class="held-note">This position has been fully transferred.</p>
+      <p v-if="layer.quantity === 0" class="held-note">No units remain in this position.</p>
       <h3>Stock position</h3><dl class="details">
         <dt>Bin</dt><dd>{{ record.location.code }} · {{ record.location.name }}</dd>
         <dt>Physical on hand</dt><dd>{{ layer.quantity }}</dd><dt>Backed by offers</dt><dd>{{ layer.backedQuantity }}</dd>
         <dt>Unbacked</dt><dd>{{ layer.unbackedQuantity }}</dd><dt>Available to back</dt><dd>{{ layer.freeToBackQuantity }}</dd>
       </dl>
+      <p><a :href="countPositionLink(record.location.id, layer.placementId)">Inspect counts and stock-loss receipts</a></p>
       <h3>Receipt provenance</h3><dl class="details">
         <dt>Purchase</dt><dd>{{ layer.purchaseReference }}</dd><dt>Delivery</dt><dd>{{ layer.deliveryReference }}</dd>
         <dt>Whole delivery</dt><dd>{{ layer.receiptQuantity }} units</dd><dt>Whole-delivery item cost</dt>
