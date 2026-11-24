@@ -1,6 +1,6 @@
 # BrickVault V2
 
-BrickVault V2 is an inventory and fulfillment system in development for a LEGO resale operation. The M2 foundation runs a private Workbench where one operator can register catalog items and locations, inspect their audit history and trace background work. The planned inventory system will manage stock, reservations and publication to BrickLink.
+BrickVault V2 is an inventory and fulfillment system in development for a LEGO resale operation. In the private Workbench, one operator can register catalog items and locations, receive split deliveries, confirm putaway and prepare an unpublished offer backed by selected units. [Receiving and verification](docs/verification/m3-receiving.md)
 
 **Run the M2 foundation on Windows x64 or Ubuntu 24.04 x64.** The runbook covers a clean build, first sign-in, an isolated PostgreSQL restore and the qualification command. Use operator-authored fictional reference data. The dedicated server hosts the M2 backend and database. Windows opens the same Workbench over private HTTPS. Live data migration requires a separate decision. [Setup, operation and recovery](docs/verification/m2-foundation.md) · [M2 issue #6](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
 

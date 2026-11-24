@@ -41,6 +41,7 @@ def main():
             "restore",
             "rotate",
             "refresh-grants",
+            "stage-upgrade",
             "supervise",
             "verify",
             "activate",
@@ -59,9 +60,15 @@ def main():
         help="Canonical HTTPS origin for the guest's private LAN gateway.",
     )
     p.add_argument("--file", type=Path)
+    p.add_argument("--output", type=Path, help="New private container for stage-upgrade.")
+    p.add_argument("--release", type=Path, help="Built Workbench directory for stage-upgrade.")
     p.add_argument("--identity", type=Path)
     p.add_argument("--target")
     args = p.parse_args()
+    if args.action == "stage-upgrade" and not args.output:
+        p.error("stage-upgrade requires --output")
+    if args.action != "stage-upgrade" and (args.output or args.release):
+        p.error("--output and --release apply to stage-upgrade")
     if args.recipient is not None and args.action != "init":
         p.error("--recipient applies to init")
     if args.lan_origin is not None and args.action not in ("init", "configure-lan"):
@@ -119,6 +126,12 @@ def main():
                 finally:
                     s.pg_stop()
             print("Database grants and row policies refreshed. Start the instance.")
+        elif args.action == "stage-upgrade":
+            from instance import RELEASE
+            from upgrade import stage_upgrade
+
+            stage_upgrade(s, args.output, args.release or RELEASE)
+            print("Verified upgrade staged in the output directory's instance folder.")
         elif args.action == "supervise":
             supervise(s)
         elif args.action == "backup":

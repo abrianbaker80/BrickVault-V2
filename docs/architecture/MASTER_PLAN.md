@@ -93,7 +93,7 @@ Carry the accepted interactions into production qualification. Check long names 
 
 ## Milestones and acceptance
 
-Phase 0 recorded the architecture review. The owner accepted M0 and M1. M2 is in progress. M3 and later milestones are planned. The Architect sequences work within the approved plan according to its dependencies. Routine transitions require a documented evidence checkpoint. Major decisions follow D08. The feature matrix allocates individual requirements. Checkpoints include independent inspection, actual test evidence and the GitHub record described in the decision register.
+Phase 0 recorded the architecture review. The owner accepted M0 and M1. M2 is in progress with its second-workstation sign-in on hold. The first M3 receiving workflow is in progress on the isolated foundation. Later milestones are planned. The Architect sequences work within the approved plan according to its dependencies. Routine transitions require a documented evidence checkpoint. Major decisions follow D08. The feature matrix allocates individual requirements. Checkpoints include independent inspection, actual test evidence and the GitHub record described in the decision register.
 
 | Milestone / dependencies | Complete workflow and focused evidence | Failure, owner gate and stop |
 |---|---|---|
@@ -121,6 +121,10 @@ Phase 0 recorded the architecture review. The owner accepted M0 and M1. M2 is in
 | Local device behavior and carrier choices | USB/camera/scale and label stock can differ from installed drivers. Confirm the owner's essential devices, label formats and carrier workflow before final scope, then test physically. |
 | Physical custody at transition and ancillary V1 workflows | Recount/review designated high-risk lots and any active pick/packed parcel. Approve a retention or replacement plan for every used capability before retirement. |
 | Repository protection and project-scoped orchestration | Verify enforceable rules and a successful required check on the public repository. Witness the full Insiders sidebar delegation, correction, review and approval-pause exercise. |
+
+## M3 receiving checkpoint
+
+The first workflow connects a purchase and its split deliveries to confirmed bin placements, documented and unknown costs, and an unpublished offer backed by specific units. The remaining M3 work includes transfers, counted adjustments, holds, transformations and the inventory register. [Receiving qualification](../verification/m3-receiving.md) · [M3 issue #13](https://github.com/abrianbaker80/BrickVault-V2/issues/13)
 
 ## M2 execution checkpoint
 

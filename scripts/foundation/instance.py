@@ -320,6 +320,14 @@ class Instance:
             CREATE POLICY sessions_worker_delete ON brickvault.sessions FOR DELETE TO bv_worker
                 USING (expires_at <= statement_timestamp());
             ALTER TABLE brickvault.sessions ENABLE ROW LEVEL SECURITY;
+            DO $grants$
+            BEGIN
+                IF (SELECT max(version) FROM brickvault.schema_version) = 3 THEN
+                    GRANT INSERT ON brickvault.purchases, brickvault.deliveries,
+                        brickvault.placements, brickvault.offers, brickvault.offer_backing TO bv_api;
+                    GRANT UPDATE (revision) ON brickvault.purchases TO bv_api;
+                END IF;
+            END $grants$;
             COMMIT;
         """,
             database,

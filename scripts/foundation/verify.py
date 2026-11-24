@@ -155,6 +155,16 @@ def migration_test(s):
         "Rolled-back upgrade changed an existing record.",
     )
     s.sql("DROP TABLE brickvault.job_effects;", db, "bv_migrator")
+    s.migrate(db, to=2)
+    s.grants(db)
+    s.sql("CREATE TABLE brickvault.purchases(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version;", db) == "2"
+        and s.sql(inspect, db, "bv_api") == expected,
+        "Interrupted receiving upgrade changed the supported M2 database.",
+    )
+    s.sql("DROP TABLE brickvault.purchases;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -168,11 +178,53 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "2",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "3",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migration v1 to v2, interrupted migration rollback, checksum rejection: passed.",
+        "Migrations to v2 and v3, interrupted upgrade rollback, checksum rejection: passed.",
+        flush=True,
+    )
+
+
+def qualify_staged_upgrade(lab, port):
+    """Exercise the operator's stopped-instance copy and prove the source still rolls back."""
+    from upgrade import stage_upgrade
+
+    migrate = Instance.migrate
+    with patch.object(Instance, "migrate", lambda inst: migrate(inst, to=2)):
+        original = init(lab / "schema2", lab / "schema2-keys", port)
+    fixture = new_id()
+    query = f"SELECT code FROM brickvault.locations WHERE id='{fixture}'"
+    output = lab / "upgrade"
+    original.pg_start()
+    try:
+        original.sql(
+            f"INSERT INTO brickvault.locations(id,revision,code,name) VALUES ('{fixture}',1,'OLD-01','Original bin')",
+            role="bv_migrator",
+        )
+        expected_failure(lambda: stage_upgrade(original, output))
+        require(not output.exists(), "Running source created a staged directory.")
+    finally:
+        original.pg_stop()
+    stage_upgrade(original, output)
+    candidate = Instance(output / "instance")
+    for inst, schema in ((candidate, "3"), (original, "2")):
+        inst.pg_start()
+        try:
+            require(
+                inst.sql("SELECT max(version) FROM brickvault.schema_version")
+                == schema,
+                "The staged or rollback database has an unexpected schema.",
+            )
+            require(
+                inst.sql(query, role="bv_api") == "OLD-01",
+                "Upgrade lost a baseline location.",
+            )
+        finally:
+            inst.pg_stop()
+    print(
+        "Stopped M2 instance upgraded independently; original database re-opened with its original record.",
         flush=True,
     )
 
@@ -384,7 +436,9 @@ def qualify_listener_probe():
 
 
 def session_lookups(s):
-    return set(s.sql("SELECT encode(lookup,'hex') FROM brickvault.sessions;").splitlines())
+    return set(
+        s.sql("SELECT encode(lookup,'hex') FROM brickvault.sessions;").splitlines()
+    )
 
 
 def worker_delete_count(s):
@@ -471,7 +525,9 @@ def legacy_grants_test(s, archive):
     start(s)
     require(
         session_lookups(s) == sessions
-        and s.sql("SELECT row_security_active('brickvault.sessions');", role="bv_worker")
+        and s.sql(
+            "SELECT row_security_active('brickvault.sessions');", role="bv_worker"
+        )
         == "t",
         "Repeat maintenance did not preserve source sessions and enable worker row security.",
     )
@@ -484,6 +540,7 @@ def verify(port):
     qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
+        qualify_staged_upgrade(lab, port)
         runtime_dir = lab / "runtime"
         runtime_dir.mkdir()
         if WIN:
@@ -746,6 +803,9 @@ def verify(port):
             )
             first = Browser(s)
             first.login((s.path / "owner-login.txt").read_text().splitlines()[1])
+            from verify_receiving import qualify_receiving, verify_recovered_receiving
+
+            receiving = qualify_receiving(s, first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -833,7 +893,9 @@ def verify(port):
                 legacy_target = "bv_m2_restore_prior_grants"
                 restore(rescue, legacy_archive, key, legacy_target)
                 require(
-                    rescue.sql("SELECT count(*) FROM brickvault.sessions;", legacy_target)
+                    rescue.sql(
+                        "SELECT count(*) FROM brickvault.sessions;", legacy_target
+                    )
                     == "0"
                     and rescue.sql(
                         "SELECT row_security_active('brickvault.sessions');",
@@ -872,7 +934,8 @@ def verify(port):
                 require(
                     rescue.database == legacy_target
                     and rescue.sql(
-                        "SELECT row_security_active('brickvault.sessions');", role="bv_worker"
+                        "SELECT row_security_active('brickvault.sessions');",
+                        role="bv_worker",
                     )
                     == "t",
                     "Activation did not harden the previously verified target.",
@@ -887,10 +950,12 @@ def verify(port):
                     "Faithful restore lost workspace identity.",
                 )
                 require(
-                    len(session_lookups(rescue)) == 1 and worker_delete_count(rescue) == "0",
+                    len(session_lookups(rescue)) == 1
+                    and worker_delete_count(rescue) == "0",
                     "Worker could delete the active session in the previously verified target.",
                 )
                 after = recovered.call("workspace")
+                verify_recovered_receiving(recovered, receiving)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]

@@ -24,6 +24,8 @@ FACTS = (
     "job_effects",
 )
 
+RECEIVING_FACTS = ("purchases", "deliveries", "placements", "offers", "offer_backing")
+
 
 def digest(path):
     with path.open("rb") as f:
@@ -75,11 +77,22 @@ def snapshot(s):
 
 def signatures(s, database, token=None):
     # jsonb gives stable field order. Length-prefix each UTF-8 row to keep record boundaries unambiguous.
+    session = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n"
+    if token:
+        session += f"SET TRANSACTION SNAPSHOT '{token}';\n"
+    versions = s.sql(
+        session + "SELECT version FROM brickvault.schema_version ORDER BY version; COMMIT;",
+        database,
+        role="bv_migrator",
+    )
+    if versions == "1\n2":
+        tables = FACTS
+    elif versions == "1\n2\n3":
+        tables = FACTS + RECEIVING_FACTS
+    else:
+        raise ValueError("Unsupported database schema history for backup verification.")
     groups = {}
-    for table in FACTS:
-        session = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n"
-        if token:
-            session += f"SET TRANSACTION SNAPSHOT '{token}';\n"
+    for table in tables:
         stmt = (
             session
             + f"SET TIME ZONE 'UTC'; SELECT to_jsonb(t)::text FROM brickvault.{table} t ORDER BY to_jsonb(t)::text COLLATE \"C\";\nCOMMIT;"
@@ -132,7 +145,7 @@ def backup(s, destination):
                 "format": 1,
                 "profile": "foundation",
                 "api": "v1",
-                "schema": 2,
+                "schema": facts["schema_version"]["rows"],
                 "workspaceId": str(
                     uuid.UUID(s.config.get("workspaceId", s.config["id"]))
                 ),
@@ -199,12 +212,11 @@ def restore(s, source, identity, target):
             archive.extractall(folder, filter="data")
         m = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
         dump = folder / "foundation.dump"
-        if (m.get("format"), m.get("profile"), m.get("api"), m.get("schema")) != (
+        if (m.get("format"), m.get("profile"), m.get("api")) != (
             1,
             "foundation",
             "v1",
-            2,
-        ):
+        ) or m.get("schema") not in (2, 3):
             raise ValueError("Unsupported backup format or release contract.")
         if digest(dump) != m.get("dumpSha256") or release_files(s) != m.get("release"):
             raise ValueError(
@@ -226,7 +238,8 @@ def restore(s, source, identity, target):
             env=s.sql_env("bv_migrator"),
         )
         s.grants(target)
-        if signatures(s, target) != m["facts"]:
+        facts = signatures(s, target)
+        if facts != m["facts"] or facts["schema_version"]["rows"] != m["schema"]:
             raise RuntimeError(
                 "Restored data failed verification. The isolated target is not promoted."
             )
