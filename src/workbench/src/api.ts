@@ -115,10 +115,12 @@ export const api = {
   },
   async binCounts(binId: string, query: { positionId?: string; observationId?: string; commandId?: string; after?: string; limit?: string }) {
     const result = await read('receiving/bins/' + encodeURIComponent(binId) + '/counts?' + new URLSearchParams(query), valid.BinCountSnapshot)
-    if (result.location.id !== binId || (query.positionId && result.positionId !== query.positionId) ||
-        result.observations.some(o => o.locationId !== binId || o.positionId !== result.positionId ||
+    const scoped = Boolean(query.positionId || query.commandId || query.observationId)
+    const wrongPosition = (id: string) => scoped && id !== result.positionId
+    if (result.location.id !== binId || scoped !== Boolean(result.positionId) || (query.positionId && wrongPosition(query.positionId)) ||
+        result.observations.some(o => o.locationId !== binId || wrongPosition(o.positionId) ||
           (query.observationId && o.id !== query.observationId) || (query.commandId && o.commandId !== query.commandId)) ||
-        result.positions.some(p => p.positionId !== result.positionId) || result.shortages.some(s => s.positionId !== result.positionId) ||
+        result.positions.some(p => wrongPosition(p.positionId)) || result.shortages.some(s => wrongPosition(s.positionId)) ||
         ((query.observationId || query.commandId) && result.complete && result.observations.length !== 1)) throw new ContractFailure()
     return result
   },

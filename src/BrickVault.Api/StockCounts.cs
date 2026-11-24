@@ -16,23 +16,16 @@ internal sealed class StockCounts(NpgsqlDataSource db)
         await Migration.CheckWithin(connection, tx, token);
         if (await CommandJournal.Replay(connection, tx, command.CommandId, digest, token) is { } replay) return replay;
 
-        await using var advance = Query(connection, tx, """
-            UPDATE brickvault.purchases SET revision=revision+1
-            WHERE id=$1 AND revision=$2 RETURNING revision
-            """, command.PurchaseId, command.ExpectedRevision);
-        if (await advance.ExecuteScalarAsync(token) is not int revision)
-            throw StalePurchase();
-
         try
         {
             var id = Guid.NewGuid();
-            await using (var row = Query(connection, tx, """
+            await using var row = Query(connection, tx, """
                 INSERT INTO brickvault.stock_count_observations(id,command_id,purchase_id,position_id,location_id,
                     location_code,expected_purchase_revision,counted_quantity,reason)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING expected_purchase_revision+1
                 """, id, command.CommandId, command.PurchaseId, command.PositionId, command.LocationId,
-                command.ConfirmedLocationCode, command.ExpectedRevision, command.CountedQuantity, command.Reason))
-                await row.ExecuteNonQueryAsync(token);
+                command.ConfirmedLocationCode, command.ExpectedRevision, command.CountedQuantity, command.Reason);
+            var revision = (int)(await row.ExecuteScalarAsync(token))!;
             var receipt = new Receipt(command.CommandId, id, revision, "count", correlationId);
             await CommandJournal.Append(connection, tx, receipt, digest, "record-receiving", token);
             await tx.CommitAsync(token);

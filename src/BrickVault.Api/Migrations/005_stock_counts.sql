@@ -40,9 +40,9 @@ CREATE UNIQUE INDEX stock_shortage_cases_open_position
 
 CREATE FUNCTION brickvault.capture_stock_count() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    -- The API has advanced this revision in the same transaction. The write also fences direct inserts.
-    UPDATE brickvault.purchases SET revision=revision
-    WHERE id=NEW.purchase_id AND revision-1=NEW.expected_purchase_revision;
+    -- The insert owns the revision increment for every writer, including a recount racing a receipt.
+    UPDATE brickvault.purchases SET revision=revision+1
+    WHERE id=NEW.purchase_id AND revision=NEW.expected_purchase_revision;
     IF NOT FOUND THEN
         RAISE check_violation USING CONSTRAINT='count_revision';
     END IF;

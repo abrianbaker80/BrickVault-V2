@@ -74,6 +74,17 @@ public sealed class StockCountTests
             CatalogId = item.EntityId, UnitPriceMinor = 200, Backing = [new(origin.EntityId, 3), new(other.EntityId, 1)]
         };
         var offer = await receiving.Save(terms, Guid.NewGuid(), token);
+        // A count cannot take the revision that the preceding offer already consumed.
+        await using (var direct = await db.OpenConnectionAsync(token))
+        await using (var stale = Database.Query(direct, null, """
+            INSERT INTO brickvault.stock_count_observations(id,command_id,purchase_id,position_id,location_id,
+                location_code,expected_purchase_revision,counted_quantity,reason)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,2,'Witnessed count')
+            """, Guid.NewGuid(), Guid.NewGuid(), order.EntityId, origin.EntityId, a.Id, a.Code, terms.ExpectedRevision))
+        {
+            var rejection = await Assert.ThrowsAsync<PostgresException>(() => stale.ExecuteNonQueryAsync(token));
+            Assert.Equal("count_revision", rejection.ConstraintName);
+        }
         Task<Receipt> Count(StockCountCommand command) => counts.Save(command, Guid.NewGuid(), token);
         async Task<PurchaseRow> Purchase() =>
             Assert.Single((await receiving.Snapshot(token)).Purchases,p => p.Id == order.EntityId);
