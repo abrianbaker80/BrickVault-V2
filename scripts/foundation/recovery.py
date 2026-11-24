@@ -29,11 +29,13 @@ RECEIVING_FACTS = ("purchases", "deliveries", "placements", "offers", "offer_bac
 
 TRANSFER_FACTS = ("placement_positions", "placement_transfers", "placement_transfer_backing")
 COUNT_FACTS = ("stock_count_observations", "stock_shortage_cases")
+HOLD_FACTS = ("stock_build_holds", "stock_build_hold_releases")
 SCHEMA_FACTS = {
     2: FACTS,
     3: FACTS + RECEIVING_FACTS,
     4: FACTS + RECEIVING_FACTS + TRANSFER_FACTS,
     5: FACTS + RECEIVING_FACTS + TRANSFER_FACTS + COUNT_FACTS,
+    6: FACTS + RECEIVING_FACTS + TRANSFER_FACTS + COUNT_FACTS + HOLD_FACTS,
 }
 
 

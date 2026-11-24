@@ -188,6 +188,16 @@ def migration_test(s):
         "An interrupted count upgrade changed the transfer database.",
     )
     s.sql("DROP TABLE brickvault.stock_shortage_cases;", db, "bv_migrator")
+    s.migrate(db, to=5)
+    s.sql("CREATE TABLE brickvault.stock_build_hold_releases(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "5"
+        and s.sql("SELECT to_regclass('brickvault.stock_build_holds') IS NULL", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted hold upgrade changed the previous count database.",
+    )
+    s.sql("DROP TABLE brickvault.stock_build_hold_releases;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -201,11 +211,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "5",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "6",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v5, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v6, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -232,17 +242,21 @@ def qualify_staged_upgrade(lab, port, source_version):
             from verify_transfer import seed_opening_position
 
             records = seed_opening_position(original, fixture)
-            if source_version == 4:
+            if source_version >= 4:
                 from verify_transfer import seed_previous_transfer
 
                 seed_previous_transfer(original, fixture, *records)
+            if source_version >= 5:
+                from verify_counts import seed_previous_count
+
+                seed_previous_count(original, fixture, records[0], records[1])
         expected_failure(lambda: stage_upgrade(original, output))
         require(not output.exists(), "Running source created a staged directory.")
     finally:
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "5"), (original, str(source_version))):
+    for inst, schema in ((candidate, "6"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -573,7 +587,7 @@ def verify(port):
     qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in (2, 3, 4):
+        for source_version in (2, 3, 4, 5):
             qualify_staged_upgrade(lab, port, source_version)
         runtime_dir = lab / "runtime"
         runtime_dir.mkdir()
