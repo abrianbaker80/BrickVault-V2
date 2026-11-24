@@ -262,6 +262,7 @@ def activate(s, target):
                 raise ValueError(
                     "Restore changed after verification. Select a fresh verified recovery target."
                 )
+            s.grants(target)
             s.config["workspaceId"] = proof["workspaceId"]
             s.config["database"] = target
             s.save()

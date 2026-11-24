@@ -30,7 +30,7 @@ try {
 Invoke-Foundation verify --port 25440
 ```
 
-`verify` uses nine consecutive ports. It assigns three each to the source, off-host recovery drill and second-instance restore. Choose an available range below the host's ephemeral TCP port range. Verification exercises authenticated HTTPS, retries, worker recovery, permissions, migrations, xUnit, Firefox Workbench flows, credential rotation and a restore while the source is stopped. Both the HTTPS client and the browser verify the instance certificate. Each test browser profile receives the public CA for that instance. A successful run includes a restore time and per-table counts. Attach the redacted results, OS and revision to the checkpoint. [Qualification entry point](../../scripts/foundation/verify.py) · [Playwright browser installation](https://playwright.dev/docs/browsers)
+`verify` uses nine consecutive ports. It assigns three each to the source, off-host recovery drill and second-instance restore. Choose an available range below the host's ephemeral TCP port range. Verification exercises authenticated HTTPS, retries, worker recovery, permissions, migrations, xUnit, Firefox Workbench flows, credential rotation and restores while the source is stopped. The lab verifies cookie expiry with the worker stopped, expired-only worker deletion, surviving sessions and audit, repeat grant refresh and session exclusion from current and older backups. Both the HTTPS client and the browser verify the instance certificate. Each test browser profile receives the public CA for that instance. A successful run includes a restore time and per-table counts. Attach the redacted results, OS and revision to the checkpoint. [Qualification entry point](../../scripts/foundation/verify.py) · [Playwright browser installation](https://playwright.dev/docs/browsers)
 
 ## Start Workbench
 
@@ -64,7 +64,20 @@ Invoke-Foundation rotate --state $state
 
 `rotate` replaces the operator password, gateway token and session-signing key and restarts a running instance. Sign in again with the new credential. API, worker, migration and cluster administration each have a separate DB role. The API writes references and appends receipts, audit and jobs. The worker claims jobs and records processing results. The migrator owns the schema. Scoped roles, a development profile and loopback connection checks restrict startup. Production requires a separate deployment and secret set.
 
-Sessions expire after eight hours. The worker purges expired session rows. Audit, command and job evidence persists with the instance. Unconfirmed browser commands survive browser restart in the profile. Resolve them before retiring the profile. Restrict runtime files, the browser profile, backups, build archives and diagnostics to the operator. The lab has no customer or shipping records. Their production retention schedule, backup deletion rules and recovery key custody require decisions before collection.
+Sessions expire after eight hours. The API denies expired cookies before cleanup, including while the worker is down. PostgreSQL limits the worker to reading expiry times and deleting expired session rows. The API retains sign-in and sign-out access. Audit, command and job evidence persists with the instance. Unconfirmed browser commands survive browser restart in the profile. Resolve them before retiring the profile. Restrict runtime files, the browser profile, backups, build archives and diagnostics to the operator. The lab has no customer or shipping records. Their production retention schedule, backup deletion rules and recovery key custody require decisions before collection.
+
+### Refresh grants on an existing M2 instance
+
+Use the updated management scripts with the instance’s current release. Verify a fresh recovery point, stop the instance and any scheduled operation that would restart it, then apply the current grants and row policies to the selected database. The command takes the maintenance and supervisor locks, starts only the private PostgreSQL cluster and applies the change in one transaction. It can be repeated and preserves the release, schema version, records and current credentials.
+
+```powershell
+Invoke-Foundation stop --state $state
+Invoke-Foundation refresh-grants --state $state
+Invoke-Foundation start --state $state
+Invoke-Foundation status --state $state
+```
+
+On the private guest, use the systemd stop and start procedure below and run `sudo -H -u brickvault python3 scripts/foundation/manage.py refresh-grants --state /var/lib/brickvault-v2/instance` with the service stopped. After restart, verify readiness, sign-in, sign-out and access to existing records. Initialization, restore and restore activation apply the same policies automatically.
 
 ## Run Workbench on the private server
 
@@ -123,7 +136,7 @@ Invoke-Foundation status --state $destination
 
 Use a new archive filename and a fresh target database on every restore. Both initializations above copy the same published release. For recovery in a fresh checkout on the same OS/architecture, install the matching tools and place the contents of the retained release at `.tools/foundation/release` before initializing the destination. The destination generates its own operator, gateway, session, DB and TLS credentials. Use the **source** identity to decrypt its backup. The destination identity protects future backups from the recovered instance.
 
-Restore checks the archive, dump and release hashes, restores into a new database, reapplies grants, and compares counts and SHA-256 signatures for schema versions, catalog, locations, command receipts, audit, jobs and effects. Live sessions and worker heartbeat data are excluded. Activation checks the target again while the instance is stopped. The restored workspace retains its original identity so the browser can replay its pending commands. A separately initialized workspace has its own identity. Trust the destination's public CA in a fresh browser profile, open the new origin, sign in with its new password and compare the records and audit. Stop both lab instances with `Invoke-Foundation stop --state $destination` and `Invoke-Foundation stop --state $state` when finished. The drill measures recovery of a logical snapshot. Off-host failover, point-in-time recovery and production RPO/RTO require separate evidence.
+Restore checks the archive, dump and release hashes, restores into a new database, reapplies grants, and compares counts and SHA-256 signatures for schema versions, catalog, locations, command receipts, audit, jobs and effects. Live sessions and worker heartbeat data are excluded. Current tooling applies the session policies to older M2 archives as well, while preserving the exact archived release requirement. Activation checks the target again while the instance is stopped. The restored workspace retains its original identity so the browser can replay its pending commands. A separately initialized workspace has its own identity. Trust the destination's public CA in a fresh browser profile, open the new origin, sign in with its new password and compare the records and audit. Stop both lab instances with `Invoke-Foundation stop --state $destination` and `Invoke-Foundation stop --state $state` when finished. The drill measures recovery of a logical snapshot. Off-host failover, point-in-time recovery and production RPO/RTO require separate evidence.
 
 ## Independent backup storage
 

@@ -298,6 +298,7 @@ class Instance:
     def grants(self, database=None):
         self.sql(
             """
+            BEGIN;
             GRANT USAGE ON SCHEMA brickvault TO bv_api, bv_worker;
             GRANT SELECT ON ALL TABLES IN SCHEMA brickvault TO bv_api;
             GRANT INSERT,UPDATE ON brickvault.catalog,brickvault.locations TO bv_api;
@@ -308,6 +309,18 @@ class Instance:
             GRANT INSERT ON brickvault.job_effects TO bv_worker;
             GRANT INSERT,UPDATE ON brickvault.worker_health TO bv_worker;
             GRANT SELECT(expires_at),DELETE ON brickvault.sessions TO bv_worker;
+
+            DROP POLICY IF EXISTS sessions_api ON brickvault.sessions;
+            CREATE POLICY sessions_api ON brickvault.sessions TO bv_api
+                USING (true) WITH CHECK (true);
+            DROP POLICY IF EXISTS sessions_worker_read ON brickvault.sessions;
+            CREATE POLICY sessions_worker_read ON brickvault.sessions FOR SELECT TO bv_worker
+                USING (expires_at <= statement_timestamp());
+            DROP POLICY IF EXISTS sessions_worker_delete ON brickvault.sessions;
+            CREATE POLICY sessions_worker_delete ON brickvault.sessions FOR DELETE TO bv_worker
+                USING (expires_at <= statement_timestamp());
+            ALTER TABLE brickvault.sessions ENABLE ROW LEVEL SECURITY;
+            COMMIT;
         """,
             database,
             role="bv_migrator",

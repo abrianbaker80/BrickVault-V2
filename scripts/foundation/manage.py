@@ -11,6 +11,7 @@ from recovery import activate, backup, restore
 from runtime import (
     build,
     configure_lan,
+    exclusive,
     operation,
     ready,
     rotate,
@@ -39,6 +40,7 @@ def main():
             "backup",
             "restore",
             "rotate",
+            "refresh-grants",
             "supervise",
             "verify",
             "activate",
@@ -109,6 +111,14 @@ def main():
         elif args.action == "rotate":
             rotate(s)
             print("Operator login and session credentials rotated.")
+        elif args.action == "refresh-grants":
+            with operation(s), exclusive(s.path / "supervisor.lock"):
+                s.pg_start()
+                try:
+                    s.grants()
+                finally:
+                    s.pg_stop()
+            print("Database grants and row policies refreshed. Start the instance.")
         elif args.action == "supervise":
             supervise(s)
         elif args.action == "backup":
