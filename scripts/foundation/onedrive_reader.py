@@ -9,9 +9,10 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 from urllib.parse import parse_qs, urlsplit
 
-from cloud_receipt import SIDECAR, verify_directory
+from cloud_receipt import FIELDS, SIDECAR, load_small, verify_directory, verify_sidecar
 from instance import child_env, write_private
 from offhost import (
     RecoveryError,
@@ -30,6 +31,34 @@ FOLDER = "BrickVault V2 Backup"
 
 class ReadbackPending(RecoveryError):
     """The expected provider object is missing or the transfer is temporarily unavailable."""
+
+
+class ReadbackDeadline(RecoveryError):
+    """The current invocation has exhausted its provider retry window."""
+
+
+def remaining_timeout(limit, deadline):
+    if deadline is None:
+        return limit
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ReadbackDeadline("OneDrive provider retry window expired.")
+    return min(limit, remaining)
+
+
+def reader_command(args, timeout, deadline, **options):
+    try:
+        result = subprocess.run(
+            args,
+            env=child_env(),
+            timeout=remaining_timeout(timeout, deadline),
+            **options,
+        )
+    except subprocess.TimeoutExpired:
+        remaining_timeout(timeout, deadline)
+        raise
+    remaining_timeout(timeout, deadline)
+    return result
 
 
 def private_path(path):
@@ -71,13 +100,13 @@ def command(profile, program, config_file=None):
     ]
 
 
-def check_remote(base):
-    listing = subprocess.run(
+def check_remote(base, deadline=None):
+    listing = reader_command(
         [*base, "listremotes", "--exact", "--name", REMOTE, "--type", "onedrive"],
-        env=child_env(),
+        60,
+        deadline,
         capture_output=True,
         check=True,
-        timeout=60,
     )
     if listing.stdout.decode().strip() != REMOTE + ":":
         raise RecoveryError(
@@ -258,7 +287,9 @@ def connect(path, program=None, reauthorize=False):
         enroll(profile, program or rclone_program(), reauthorize)
 
 
-def download(profile, trust, point, output, program=None):
+def download(
+    profile, trust, point, output, program=None, *, expected_receipt=None, deadline=None
+):
     directory = profile_path(profile)
     if (
         json.loads((directory / "authorization.json").read_text()).get("state")
@@ -267,7 +298,7 @@ def download(profile, trust, point, output, program=None):
         raise RecoveryError("The owner must complete the OneDrive reader connection.")
     encrypted_config(directory / "reader.conf")
     base = command(directory, program or rclone_program())
-    check_remote(base)
+    check_remote(base, deadline)
     point = validate_point(point)
     output = private_path(output)
     if output.exists():
@@ -278,7 +309,7 @@ def download(profile, trust, point, output, program=None):
         stage.mkdir(mode=0o700)
         for suffix in (SIDECAR, ".age"):
             name = point + suffix
-            result = subprocess.run(
+            result = reader_command(
                 [
                     *base,
                     "copyto",
@@ -292,11 +323,11 @@ def download(profile, trust, point, output, program=None):
                     REMOTE + ":" + FOLDER + "/" + name,
                     stage / name,
                 ],
-                env=child_env(),
+                1800,
+                deadline,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                timeout=1800,
             )
             if result.returncode in (3, 4, 5):
                 raise ReadbackPending(
@@ -306,7 +337,18 @@ def download(profile, trust, point, output, program=None):
                 raise RecoveryError(
                     f"OneDrive has not returned the requested recovery point (rclone exit {result.returncode})."
                 )
-        verify_directory(stage, point, trust)
+            if suffix == SIDECAR:
+                signed = verify_sidecar(stage / name, point, load_small(trust))
+                if expected_receipt is not None and any(
+                    signed[field] != expected_receipt.get(field) for field in FIELDS
+                ):
+                    raise RecoveryError(
+                        "OneDrive's signed point differs from the selected controller point."
+                    )
+        if verify_directory(stage, point, trust) != signed:
+            raise RecoveryError(
+                "OneDrive's signed receipt changed during the download."
+            )
         stage.rename(output)
 
 
