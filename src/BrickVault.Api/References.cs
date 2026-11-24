@@ -107,7 +107,7 @@ internal sealed class References(NpgsqlDataSource db)
         var audit = await Rows(connection, tx, """
             SELECT c.command_id,c.entity_id,c.revision,c.kind,c.correlation_id,a.actor,a.occurred_at
             FROM brickvault.audit a JOIN brickvault.commands c USING (command_id)
-            WHERE $1 OR c.kind IN ('catalog','location') ORDER BY a.occurred_at DESC,c.command_id
+            WHERE c.kind <> 'transfer' AND ($1 OR c.kind IN ('catalog','location')) ORDER BY a.occurred_at DESC,c.command_id
             """, r => new AuditRow(r.GetGuid(0),r.GetGuid(1),r.GetInt32(2),r.GetString(3),r.GetGuid(4),
                 r.GetString(5),r.GetDateTime(6)), token, allAudit);
         var health = await Worker.Health(connection, tx, token);

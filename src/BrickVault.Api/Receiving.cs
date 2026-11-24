@@ -126,9 +126,10 @@ internal sealed class Receiving(NpgsqlDataSource db)
             Charge: Optional<int>(r,6)), token);
         var placements = (await Rows(connection, tx, """
             SELECT delivery_id,p.id,p.catalog_id,p.catalog_revision,p.location_id,p.location_code,p.quantity,
-                COALESCE((SELECT sum(b.quantity) FROM brickvault.offer_backing b WHERE b.placement_id=p.id),0)::integer,
+                COALESCE((SELECT sum(b.quantity) FROM brickvault.current_offer_backing b WHERE b.placement_id=p.id),0)::integer,
                 c.integration_eligible AND c.revision=p.catalog_revision
-            FROM brickvault.placements p JOIN brickvault.catalog c ON c.id=p.catalog_id
+            FROM brickvault.current_placement_stock p JOIN brickvault.catalog c ON c.id=p.catalog_id
+            WHERE p.quantity > 0
             ORDER BY p.location_code,p.id
             """, r =>
         {
@@ -148,7 +149,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
                 Optional<Guid>(r,4), Optional<int>(r,5), Optional<int>(r,6), quantity - positions.Sum(p => p.Quantity), positions));
         }, token)).ToLookup(r => r.PurchaseId, r => r.Value);
         var backing = (await Rows(connection, tx, """
-            SELECT offer_id,placement_id,quantity FROM brickvault.offer_backing ORDER BY offer_id,placement_id
+            SELECT offer_id,placement_id,quantity FROM brickvault.current_offer_backing ORDER BY offer_id,placement_id
             """, r => (OfferId: r.GetGuid(0), Value: new BackingRow(r.GetGuid(1), r.GetInt32(2))),
             token)).ToLookup(r => r.OfferId, r => r.Value);
         var offers = (await Rows(connection, tx, """
