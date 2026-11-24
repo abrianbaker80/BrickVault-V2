@@ -16,6 +16,7 @@ const error = ref('')
 const ready = computed(() => props.connected && !error.value && !loading.value && stock.value?.complete === true)
 const inspectingCount = computed(() => props.countLink?.binId === props.location.id && Boolean(props.countLink.positionId || props.countLink.receiptId))
 const selected = shallowRef<TransferPosition>()
+const selectedReserved = ref(0)
 const heading = ref<HTMLElement>()
 const fenced = ref(new Set<string>())
 function closeCount() {
@@ -42,14 +43,18 @@ async function openTransfer(position: TransferPosition, event: MouseEvent) {
   checking.value = true
   transferError.value = ''
   try {
-    const result = await api.binCounts(props.location.id, { positionId: position.layer.placementId, limit: '1' })
+    const result = await api.positionHolds(props.location.id, position.layer.placementId)
     if (!mounted || !ready.value || !props.transfers.enabled) return
-    if (!result.complete || result.positions[0]?.purchaseRevision !== position.purchaseRevision) {
+    if (!result.complete || result.purchaseRevision !== position.purchaseRevision || result.ledgerQuantity !== position.layer.quantity ||
+        result.offerBackedQuantity !== position.layer.backedQuantity) {
       transferError.value = 'Refresh this bin to verify the current position before transferring stock.'
       return
     }
-    if (result.positions[0].shortageOpen) fenced.value.add(position.layer.placementId)
-    else selected.value = position
+    if (result.shortageId) fenced.value.add(position.layer.placementId)
+    else {
+      selectedReserved.value = result.reservedQuantity
+      selected.value = position
+    }
   } catch (failure) {
     if (mounted) { transferError.value = explain(failure); emit('failure', failure) }
   } finally { checking.value = false }
@@ -153,7 +158,7 @@ watch(() => [props.location.id, props.location.revision, props.asOf, props.conne
       :key="countLink.positionId || countLink.receiptId" :location="location" :position-id="countLink.positionId" :receipt-id="countLink.receiptId"
       :as-of="asOf" :connected="connected" :controls="transfers" :catalog="catalog"
       @failure="emit('failure', $event)" @fenced="fenced.add($event)" @close="closeCount" @recover="recoverCount" />
-    <TransferForm v-if="selected" :source="location" :locations="locations" :original="selected"
+    <TransferForm v-if="selected" :source="location" :reserved="selectedReserved" :locations="locations" :original="selected"
       :current="stock?.positions.find(p => p.layer.placementId === selected?.layer.placementId)" :ready="ready" :controls="transfers"
       @close="closeTransfer" @recover="emit('recover')" />
   </section>

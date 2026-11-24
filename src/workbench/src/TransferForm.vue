@@ -4,7 +4,7 @@ import type { Location, TransferControls, TransferPosition } from './api'
 import { itemLabel, money } from './receiving'
 
 const props = defineProps<{ source: Location; locations: Location[]; original: TransferPosition;
-  current?: TransferPosition; ready: boolean; controls: TransferControls }>()
+  current?: TransferPosition; reserved: number; ready: boolean; controls: TransferControls }>()
 const emit = defineEmits<{ close: []; recover: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const destinationId = ref('')
@@ -20,13 +20,15 @@ const sending = ref(false)
 const attempted = ref(false)
 const line = props.original.layer
 const sourceAtOpen = props.source.code
+const movable = computed(() => line.quantity - props.reserved)
+const movableUnbacked = computed(() => line.unbackedQuantity - props.reserved)
 const stale = computed(() => !props.current || props.current.purchaseRevision !== props.original.purchaseRevision ||
   props.source.code !== sourceAtOpen || props.current.layer.currentCatalog.revision !== line.currentCatalog.revision)
 const backing = computed(() => props.original.backing.map(offer => ({
   offerId: offer.offerId, quantity: Number(quantities.value[offer.offerId] || 0)
 })).filter(row => row.quantity > 0))
 const movedBacking = computed(() => moveAll.value ? line.backedQuantity : backing.value.reduce((total, row) => total + row.quantity, 0))
-const available = computed(() => props.ready && props.controls.enabled && !stale.value && !sending.value)
+const available = computed(() => movable.value > 0 && props.ready && props.controls.enabled && !stale.value && !sending.value)
 watch(() => destination.value?.code, () => { destinationCode.value = ''; issue.value = '' })
 watch([sourceCode, destinationCode, count, reason, moveAll, movedBacking], () => { issue.value = ''; attempted.value = false })
 onMounted(() => dialog.value?.showModal())
@@ -44,7 +46,7 @@ async function submit() {
     return
   }
   const unbacked = count.value - movedBacking.value
-  if (unbacked < 0 || unbacked > line.unbackedQuantity) {
+  if (unbacked < 0 || unbacked > movableUnbacked.value) {
     issue.value = 'Choose backing so the moved count is covered by the selected offer units and available unbacked units.'
     return
   }
@@ -70,7 +72,8 @@ async function submit() {
     <form class="form-body" @submit.prevent="submit">
       <div><strong>{{ line.purchaseReference }} · {{ line.deliveryReference }}</strong>
         <p class="field-hint">{{ itemLabel([line.currentCatalog], line.catalogId) }}</p>
-        <p>{{ line.quantity }} in {{ sourceAtOpen }} · {{ line.unbackedQuantity }} unbacked</p></div>
+        <p>{{ line.quantity }} in {{ sourceAtOpen }} · {{ line.unbackedQuantity }} unbacked</p>
+        <p v-if="reserved" class="field-hint">{{ reserved }} reserved for builds · {{ movable }} can move, including {{ movableUnbacked }} without offer backing.</p></div>
       <p v-if="line.catalogRevision !== line.currentCatalog.revision || !line.currentCatalog.integrationEligible" class="warning">
         The layer keeps its recorded catalog revision {{ line.catalogRevision }}. The current catalog revision is {{ line.currentCatalog.revision }}.
         The selected offer quantities stay backed when they move.
@@ -84,11 +87,11 @@ async function submit() {
         </select></label>
         <label>Confirm source bin code<input v-model="sourceCode" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
         <label>Confirm destination bin code<input v-model="destinationCode" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
-        <label>Count moved<input v-model="count" type="number" inputmode="numeric" min="1" :max="line.quantity" required /></label>
+        <label>Count moved<input v-model="count" type="number" inputmode="numeric" min="1" :max="movable" required /></label>
         <label class="span">Reason<input v-model="reason" required maxlength="200" /></label>
       </fieldset>
       <label v-if="original.backing.length" class="whole-position">
-        <input v-model="moveAll" type="checkbox" :disabled="!available" />
+        <input v-model="moveAll" type="checkbox" :disabled="!available || reserved > 0" />
         <span>Move the whole position with all offer backing
           <small>{{ line.quantity }} units in this position · {{ line.backedQuantity }} backed across {{ original.backing.length }} {{ original.backing.length === 1 ? 'offer' : 'offers' }}</small>
         </span>

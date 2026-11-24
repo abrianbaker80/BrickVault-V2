@@ -45,7 +45,7 @@ export function commandLabel(command: Command) {
     case 'putaway': return 'Putaway to ' + command.body.confirmedLocationCode
     case 'offer': return 'Unpublished offer'
     case 'hold': return 'Build hold for ' + command.body.purpose
-    case 'hold-release': return 'Release of ' + command.body.quantity + ' held units'
+    case 'hold-release': return 'Release of ' + command.body.quantity + (command.body.quantity === 1 ? ' held unit' : ' held units')
     case 'count': return 'Stock count of ' + command.body.countedQuantity + ' in ' + command.body.confirmedLocationCode
     case 'transfer': return 'Transfer of ' + command.body.quantity + ' from ' + command.body.confirmedSourceLocationCode + ' to ' + command.body.confirmedDestinationLocationCode
   }
