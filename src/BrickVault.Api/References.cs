@@ -1,5 +1,4 @@
 using System.Data;
-using System.Security.Cryptography;
 using Npgsql;
 using NpgsqlTypes;
 using static BrickVault.Api.Database;
@@ -17,22 +16,8 @@ internal sealed class References(NpgsqlDataSource db)
         await using var tx = await connection.BeginTransactionAsync(token);
         await Migration.CheckWithin(connection, tx, token);
 
-        // Commands with the same UUID serialize across API instances, including first submission.
-        await using var guard = Query(connection, tx,
-            "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 44318))", request.CommandId);
-        await guard.ExecuteNonQueryAsync(token);
-        await using (var find = Query(connection, tx, """
-            SELECT digest,entity_id,revision,kind,correlation_id FROM brickvault.commands WHERE command_id = $1
-            """, request.CommandId))
-        await using (var row = await find.ExecuteReaderAsync(token))
-        {
-            if (await row.ReadAsync(token))
-            {
-                if (!CryptographicOperations.FixedTimeEquals(digest, row.GetFieldValue<byte[]>(0)))
-                    throw new Fault(409, "command_mismatch", "This command ID already identifies a different request.");
-                return new Receipt(request.CommandId, row.GetGuid(1), row.GetInt32(2), row.GetString(3), row.GetGuid(4));
-            }
-        }
+        if (await CommandJournal.Replay(connection, tx, request.CommandId, digest, token) is { } replay)
+            return replay;
 
         var id = request.Id ?? Guid.NewGuid();
         int revision;
@@ -50,20 +35,10 @@ internal sealed class References(NpgsqlDataSource db)
         {
             throw new Fault(409, "duplicate_reference", "A reference already uses that identity or location code.");
         }
-        await using (var command = Query(connection, tx, """
-            INSERT INTO brickvault.commands(command_id,kind,digest,entity_id,revision,correlation_id)
-            VALUES ($1,$2,$3,$4,$5,$6)
-            """, request.CommandId, kind, digest, id, revision, correlationId))
-            await command.ExecuteNonQueryAsync(token);
-        await using (var audit = Query(connection, tx,
-            "INSERT INTO brickvault.audit(command_id,actor) VALUES ($1,'operator')", request.CommandId))
-            await audit.ExecuteNonQueryAsync(token);
-        await using (var job = Query(connection, tx, """
-            INSERT INTO brickvault.jobs(command_id,kind,payload_version) VALUES ($1,'record-reference',1)
-            """, request.CommandId))
-            await job.ExecuteNonQueryAsync(token);
+        var receipt = new Receipt(request.CommandId, id, revision, kind, correlationId);
+        await CommandJournal.Append(connection, tx, receipt, digest, "record-reference", token);
         await tx.CommitAsync(token);
-        return new Receipt(request.CommandId, id, revision, kind, correlationId);
+        return receipt;
     }
 
     private static NpgsqlCommand WriteCatalog(NpgsqlConnection connection, NpgsqlTransaction tx, Guid id,
@@ -121,16 +96,17 @@ internal sealed class References(NpgsqlDataSource db)
         return await Snapshot(connection, tx, true, token);
     }
 
-    public async Task<Workspace> Workspace(CancellationToken token)
+    public async Task<Workspace> Workspace(CancellationToken token, bool allAudit = false)
     {
         await using var connection = await db.OpenConnectionAsync(token);
         await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
         var snapshot = await Snapshot(connection, tx, false, token);
         var audit = await Rows(connection, tx, """
             SELECT c.command_id,c.entity_id,c.revision,c.kind,c.correlation_id,a.actor,a.occurred_at
-            FROM brickvault.audit a JOIN brickvault.commands c USING (command_id) ORDER BY a.occurred_at DESC,c.command_id
+            FROM brickvault.audit a JOIN brickvault.commands c USING (command_id)
+            WHERE $1 OR c.kind IN ('catalog','location') ORDER BY a.occurred_at DESC,c.command_id
             """, r => new AuditRow(r.GetGuid(0),r.GetGuid(1),r.GetInt32(2),r.GetString(3),r.GetGuid(4),
-                r.GetString(5),r.GetDateTime(6)), token);
+                r.GetString(5),r.GetDateTime(6)), token, allAudit);
         var health = await Worker.Health(connection, tx, token);
         return new Workspace(snapshot.Scope, snapshot.AsOf, snapshot.Complete, snapshot.Catalog, snapshot.Locations, audit, health);
     }

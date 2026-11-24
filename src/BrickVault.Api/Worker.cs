@@ -55,7 +55,7 @@ internal static class Worker
         }
     }
 
-    // Claims, the durable reference-processing receipt and acknowledgement commit together.
+    // Claims, the durable processing receipt and acknowledgement commit together.
     // A killed worker releases the row lock and rolls back its complete attempt.
     private static async Task<bool> ProcessOne(NpgsqlConnection connection, NpgsqlTransaction tx, CancellationToken token)
     {
@@ -69,7 +69,7 @@ internal static class Worker
         {
             if (!await row.ReadAsync(token)) return false;
             commandId = row.GetGuid(0);
-            supported = row.GetString(1) == "record-reference" && row.GetInt32(2) == 1;
+            supported = row.GetString(1) is "record-reference" or "record-receiving" && row.GetInt32(2) == 1;
         }
         if (supported)
         {

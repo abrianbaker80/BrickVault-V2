@@ -25,9 +25,9 @@ internal static class Database
         row.IsDBNull(ordinal) ? null : row.GetFieldValue<T>(ordinal);
 
     internal static async Task<List<T>> Rows<T>(NpgsqlConnection connection, NpgsqlTransaction? tx, string sql,
-        Func<NpgsqlDataReader, T> read, CancellationToken token)
+        Func<NpgsqlDataReader, T> read, CancellationToken token, params object[] args)
     {
-        await using var cmd = Query(connection, tx, sql);
+        await using var cmd = Query(connection, tx, sql, args);
         await using var reader = await cmd.ExecuteReaderAsync(token);
         List<T> result = [];
         while (await reader.ReadAsync(token)) result.Add(read(reader));

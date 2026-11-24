@@ -1,0 +1,106 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace BrickVault.Api;
+
+internal abstract record ReceivingCommand
+{
+    public required Guid CommandId { get; init; }
+    public required int ExpectedRevision { get; init; }
+    public abstract string Kind { get; }
+    public void Validate()
+    {
+        if (CommandId == Guid.Empty || !Valid())
+            throw new Fault(400, "invalid_receiving", "Check the required receiving fields, identifiers, quantities and amounts.");
+    }
+
+    protected abstract bool Valid();
+    protected static bool Text(string? text, int max) => text is { Length: > 0 } &&
+        text.Length <= max && text.AsSpan().Trim().Length == text.Length && !text.Any(char.IsControl);
+    protected static bool ValidQuantity(int number) => number is >= 1 and <= 1_000_000;
+    protected static bool Money(int? number) => number is null or (>= 0 and <= 100_000_000);
+    public byte[] Digest() => SHA256.HashData(Encoding.UTF8.GetBytes(
+        Kind + "\n" + JsonSerializer.Serialize(this, GetType(), Wire.Json)));
+}
+
+internal sealed record PurchaseCommand : ReceivingCommand
+{
+    [JsonIgnore]
+    public override string Kind => "purchase";
+    public required string Reference { get; init; }
+    public required string Source { get; init; }
+    public required string Currency { get; init; }
+    public required int OrderedQuantity { get; init; }
+    public required int? PendingChargeMinor { get; init; }
+
+    protected override bool Valid() => ExpectedRevision == 0 && Text(Reference, 64) && Text(Source, 160) &&
+        Currency is { Length: 3 } && Currency.All(c => c is >= 'A' and <= 'Z') &&
+        ValidQuantity(OrderedQuantity) && Money(PendingChargeMinor);
+}
+
+internal abstract record PurchaseChange : ReceivingCommand
+{
+    public required Guid PurchaseId { get; init; }
+
+    protected bool ValidParent => PurchaseId != Guid.Empty && ExpectedRevision > 0;
+}
+
+internal sealed record DeliveryCommand : PurchaseChange
+{
+    [JsonIgnore]
+    public override string Kind => "delivery";
+    public required string Reference { get; init; }
+    public required int Quantity { get; init; }
+    public required Guid? CatalogId { get; init; }
+    public required int? ItemCostMinor { get; init; }
+
+    protected override bool Valid() => ValidParent && Text(Reference, 64) &&
+        ValidQuantity(Quantity) && CatalogId != Guid.Empty && Money(ItemCostMinor);
+}
+
+internal sealed record PutawayCommand : PurchaseChange
+{
+    [JsonIgnore]
+    public override string Kind => "putaway";
+    public required Guid DeliveryId { get; init; }
+    public required Guid CatalogId { get; init; }
+    public required Guid LocationId { get; init; }
+    public required string ConfirmedLocationCode { get; init; }
+    public required int Quantity { get; init; }
+
+    protected override bool Valid() => ValidParent && DeliveryId != Guid.Empty &&
+        CatalogId != Guid.Empty && LocationId != Guid.Empty && Text(ConfirmedLocationCode, 48) &&
+        ValidQuantity(Quantity);
+}
+
+internal sealed record OfferCommand : PurchaseChange
+{
+    [JsonIgnore]
+    public override string Kind => "offer";
+    public required Guid CatalogId { get; init; }
+    public required int UnitPriceMinor { get; init; }
+    public required BackingRow[] Backing { get; init; }
+
+    protected override bool Valid() => ValidParent && CatalogId != Guid.Empty && UnitPriceMinor > 0 &&
+        Money(UnitPriceMinor) && Backing is { Length: >= 1 and <= 64 } &&
+        Backing.All(a => a is not null && a.PlacementId != Guid.Empty && ValidQuantity(a.Quantity)) &&
+        Backing.Select(a => a.PlacementId).Distinct().Count() == Backing.Length;
+}
+
+internal sealed record BackingRow([property: JsonRequired] Guid PlacementId,
+    [property: JsonRequired] int Quantity);
+internal sealed record PlacementRow(Guid Id, Guid CatalogId, int CatalogRevision, Guid LocationId,
+    string LocationCode, int Quantity, int BackedQuantity, int FreeToBackQuantity);
+internal sealed record DeliveryRow(Guid Id, string Reference, int Quantity, Guid? CatalogId,
+    int? CatalogRevision, int? ItemCostMinor, int IntakeQuantity, IReadOnlyList<PlacementRow> Placements);
+internal sealed record OfferRow(Guid Id, Guid CatalogId, int CatalogRevision, string Currency,
+    int UnitPriceMinor, IReadOnlyList<BackingRow> Backing, int BackedQuantity, int PublishedQuantity, bool BackingCurrent);
+internal sealed record StockBalances(int PhysicalOnHand, int Unavailable, int Reserved, int Free,
+    int BackedQuantity, int WithheldQuantity, int PublishedQuantity, int KnownCostFreeQuantity,
+    int UnknownCostFreeQuantity, long? KnownItemCostMinor, long? KnownPurchaseComponentsMinor);
+internal sealed record PurchaseRow(Guid Id, int Revision, string Reference, string Source, string Currency,
+    int OrderedQuantity, int? PendingChargeMinor, IReadOnlyList<DeliveryRow> Deliveries,
+    IReadOnlyList<OfferRow> Offers, StockBalances Balances);
+internal sealed record ReceivingWorkspace(string Scope, DateTime AsOf, bool Complete, IReadOnlyList<PurchaseRow> Purchases);
