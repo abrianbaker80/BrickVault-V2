@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, explain, type Catalog, type Location, type TransferControls } from './api'
 import { countReceiptLink, holdPositionLink, lossReceiptLink } from './countLinks'
 import { itemLabel, money } from './receiving'
@@ -35,6 +35,8 @@ const ready = computed(() => props.connected && props.controls.enabled && !sendi
 const permitted = computed(() => ready.value && !!page.value?.candidateLossQuantity && !page.value.protectedProjectShortfall)
 const canPost = computed(() => permitted.value && page.value && selected.value.every(validQuantity) &&
   chosen.value === page.value.minimumOfferBackingReduction && code.value === page.value.location.code && reason.value.trim() !== '')
+let mounted = true
+onBeforeUnmount(() => { mounted = false })
 onMounted(() => dialog.value?.showModal())
 
 watch(() => [props.caseId, props.asOf, props.connected, requested.value, retry.value] as const, async ([caseId,,online,cursors],_,cleanup) => {
@@ -88,6 +90,7 @@ async function post() {
       locationId:props.location.id,confirmedLocationCode:code.value,caseId:current.caseId,expectedObservationId:current.latestObservation.id,
       reason:reason.value.trim(),offerReductions:selected.value.map(s=>({offerId:s.offer.id,quantity:Number(s.quantity)}))
     }})
+    if (!mounted) return
     if (result) window.location.hash = lossReceiptLink(props.location.id,props.position,result.entityId)
     else if (props.controls.pending) emit('recover')
   } finally {sending.value=false}

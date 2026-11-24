@@ -238,3 +238,64 @@ test('a protected hold blocks posting and a newly arrived witness rejects a prev
   expect(current.balances).toMatchObject({physicalOnHand:8,reserved:1,backedQuantity:3})
   expect(current.deliveries[0].lostQuantity).toBe(0)
 })
+
+test('same-document scope changes clear the previous decision and posted receipt before the new read returns', async ({page}) => {
+  const f=await fixture(page)
+  const scoped=await page.request.get('/api/v1/receiving/bins/'+f.a.id+'/counts')
+  const other=((await scoped.json()) as CountSnapshot).positions.find(p=>p.purchaseId===f.unknown.purchaseId)!
+  const base={purchaseId:f.paid.purchaseId,positionId:f.position,locationId:f.a.id,confirmedLocationCode:f.a.code}
+  const witness=await f.write('receiving/counts',5,{...base,countedQuantity:1,reason:'Original bin witness'})
+  const caseRoute=lossCaseLink(f.a.id,f.position,witness)
+  const navigate=(hash:string)=>page.evaluate(next=>{window.location.hash=next},hash)
+  const input=form(page).getByLabel('Reduce units for offer '+f.firstOffer,{exact:true})
+  const decision='Only for the original position'
+  await page.goto('/'+caseRoute)
+  let posting=''
+  for(const [bin,position] of [[f.a.id,other.positionId],[f.b.id,f.position]]) {
+    await input.fill('2')
+    await describe(page,f.a.code,decision)
+    await expect(commit(page)).toBeEnabled()
+    const path='/api/v1/receiving/bins/'+bin+'/positions/'+position+'/shortages/'+witness+'/adjustment-review'
+    let resume!:()=>void
+    const gate=new Promise<void>(resolve=>{resume=resolve})
+    await page.route(u=>u.pathname===path,async route=>{await gate;await route.continue()},{times:1})
+    const reading=page.waitForRequest(r=>new URL(r.url()).pathname===path)
+    await navigate(lossCaseLink(bin,position,witness))
+    await reading
+    try {
+      await expect(form(page)).toContainText('Reading stock and offer backing')
+      await expect(input).toHaveCount(0)
+      await expect(form(page).getByLabel('Reason for posting')).toHaveCount(0)
+      await expect(commit(page)).toHaveCount(0)
+    } finally {resume()}
+    await expect(form(page)).toContainText('Loss review unavailable.')
+    await navigate(caseRoute)
+    await expect(input).toHaveValue('')
+    await expect(form(page).getByLabel('Reason for posting')).toHaveValue('')
+    await expect(commit(page)).toBeDisabled()
+  }
+  await input.fill('2')
+  await describe(page,f.a.code,decision)
+  const ack=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/receiving/stock-losses'))
+  await commit(page).click()
+  posting=(await (await ack).json()).entityId
+  const correct=lossReceiptLink(f.a.id,f.position,posting)
+  await expect(receipt(page)).toContainText(decision)
+  for(const [bin,position] of [[f.a.id,other.positionId],[f.b.id,f.position]]) {
+    const path='/api/v1/receiving/bins/'+bin+'/positions/'+position+'/posted-loss'
+    let resume!:()=>void
+    const gate=new Promise<void>(resolve=>{resume=resolve})
+    await page.route(u=>u.pathname===path,async route=>{await gate;await route.continue()},{times:1})
+    const reading=page.waitForRequest(r=>new URL(r.url()).pathname===path)
+    await navigate(lossReceiptLink(bin,position,posting))
+    await reading
+    try {
+      await expect(receipt(page)).toContainText('Reading stock-loss receipt')
+      await expect(receipt(page)).not.toContainText(decision)
+      await expect(receipt(page).getByRole('listitem')).toHaveCount(0)
+    } finally {resume()}
+    await expect(receipt(page)).toContainText('Posting receipt unavailable.')
+    await navigate(correct)
+    await expect(receipt(page)).toContainText(decision)
+  }
+})
