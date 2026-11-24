@@ -33,6 +33,8 @@ class NightlyChecks(unittest.TestCase):
             "receiptSigningKey": "fixture-key",
             "receiptTrust": "fixture-trust",
         }
+        self.settings["receiptTrust"] = str(self.directory / "trust.json")
+        Path(self.settings["receiptTrust"]).write_text("{}")
         self.content = b"synthetic encrypted capture fixture"
         self.point = nightly.utcnow().strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex
         self.receipt = {
@@ -106,6 +108,11 @@ class NightlyChecks(unittest.TestCase):
                     self.receive(Path(tmp), **changes)
                 self.assertFalse((Path(tmp) / "pending.json").exists())
 
+    @staticmethod
+    def authenticate_fixture(staged, receipt, trust):
+        staged.write_bytes(b"signed fixture")
+        return receipt
+
     def test_workstation_repairs_damaged_history_and_keeps_newer_point(self):
         target, state = self.directory / "mirror", self.directory / "state"
         target.mkdir()
@@ -116,7 +123,11 @@ class NightlyChecks(unittest.TestCase):
         old_receipt = dict(self.receipt, point=older)
         (target / (older + ".json")).write_text(json.dumps(old_receipt))
         (target / (older + ".age")).write_bytes(b"damaged")
-        config = {"state": state, "mirror": target, "sshConfig": "fixture"}
+        config = self.settings | {
+            "state": state,
+            "mirror": target,
+            "sshConfig": "fixture",
+        }
 
         def ssh(command, **kwargs):
             if command[-1] == "list":
@@ -134,6 +145,11 @@ class NightlyChecks(unittest.TestCase):
                 backup_mirror, "managed_dir", side_effect=lambda path, purpose: path
             ),
             patch.object(backup_mirror.subprocess, "run", side_effect=ssh),
+            patch.object(
+                backup_mirror,
+                "authenticate_receipt",
+                side_effect=self.authenticate_fixture,
+            ),
             redirect_stdout(io.StringIO()),
         ):
             backup_mirror.catch_up(config)
@@ -176,8 +192,22 @@ class NightlyChecks(unittest.TestCase):
         receipt = self.receipt | {"point": old, "publicationContext": "test-context"}
         source = old_dir / (old + ".age")
         source.write_bytes(self.content)
+        (old_dir / (old + ".receipt.json")).write_text("old signed fixture")
         (old_dir / (old + ".json")).write_text(json.dumps(receipt))
         backup_mirror.export_point(source, receipt, export)
+        previous_sidecar = root / old / (old + ".receipt.json")
+        previous_sidecar.unlink()
+        nightly.inspect_exports(old_dir.parent, settings, {}, "rotated-profile")
+        self.assertFalse(previous_sidecar.exists())
+        identity = nightly.mirror_identity(export)
+        other_group = settings | {
+            "priorMirrorExports": {"test-context": [identity[0], "other"]}
+        }
+        nightly.inspect_exports(old_dir.parent, other_group, {}, "rotated-profile")
+        self.assertFalse(previous_sidecar.exists())
+        prior = settings | {"priorMirrorExports": {"test-context": identity}}
+        nightly.inspect_exports(old_dir.parent, prior, {}, "rotated-profile")
+        self.assertEqual(previous_sidecar.read_text(), "old signed fixture")
         file = root / old / (old + ".age")
         file.write_bytes(b"damaged")
         self.assertEqual(source.read_bytes(), self.content)
@@ -187,12 +217,17 @@ class NightlyChecks(unittest.TestCase):
             directory.mkdir()
             return self.receive(directory)
 
+        def signed_fixture(route, directory, receipt, key, trust):
+            (directory / (receipt["point"] + ".receipt.json")).write_text(
+                "signed fixture"
+            )
+
         with (
             patch.object(nightly, "capture_transport"),
             patch.object(nightly, "binding", return_value="test-context"),
             patch.object(nightly, "capture", side_effect=capture) as captures,
             patch.object(nightly, "publish_verified_copy"),
-            patch.object(nightly, "publish_signed"),
+            patch.object(nightly, "publish_signed", side_effect=signed_fixture),
             redirect_stdout(io.StringIO()),
         ):
             nightly.run(settings, self.directory)
@@ -247,6 +282,11 @@ class NightlyChecks(unittest.TestCase):
                 backup_mirror, "managed_dir", side_effect=lambda path, purpose: path
             ),
             patch.object(backup_mirror.subprocess, "run") as response,
+            patch.object(
+                backup_mirror,
+                "authenticate_receipt",
+                side_effect=self.authenticate_fixture,
+            ),
             redirect_stdout(io.StringIO()),
         ):
             response.return_value.stdout = json.dumps(self.receipt).encode() + b"\n"

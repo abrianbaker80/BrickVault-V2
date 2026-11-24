@@ -17,7 +17,7 @@ The Workbench guest exports a PostgreSQL snapshot and its matching application r
 | `guestAccount`, `guestKey` | Guest service account and absolute path to the controller's dedicated capture key. |
 | `knownHosts`, `hostKeyAlias` | Pinned guest host-key file and its exact alias. |
 | `sourceId`, `workspaceId` | Expected source and workspace UUIDs. |
-| `receiptSigningKey`, `receiptTrust` | Dedicated OpenSSH Ed25519 private signing key and independently pinned public-key/lineage JSON. Keep a copy of the trust file with external key custody. |
+| `receiptSigningKey`, `receiptTrust` | Dedicated OpenSSH Ed25519 private signing key and independently pinned public-key/lineage JSON. At rotation, commission the combined history on the controller and each workstation and retain a copy in recovery custody. [Receipt signing-key rotation](m2-cloud-receipts.md#rotate-the-controller-signing-key) |
 | `transport`, `controllerState` | Absolute paths to the protected transport descriptor and private controller state. |
 | `maxBytes`, `reserveBytes` | Numeric archive size cap and free disk reserve. Capturing requires room for two copies in addition to the reserve. |
 | `freshnessHours` | Maximum permitted capture age, e.g. 30 hours for the nightly schedule. |
@@ -46,7 +46,20 @@ python3 /opt/brickvault-v2-backup/scripts/foundation/nightly.py run --before-cha
 
 Give the Windows workstation dedicated Ed25519 credentials and a pinned SSH configuration for the alias `brickvault-v2-backup-mirror`. The remote account can read final V2 ciphertext and receipts in the export directory. Restrict the authorized key to the private workstation network and the forced command `/usr/bin/python3 /opt/brickvault-v2-backup/scripts/foundation/backup_mirror.py serve --directory /var/lib/brickvault-v2-mirror-export`.
 
-Use an owner-only local JSON file with `state` (a dedicated private directory), `mirror` (an empty or previously initialized V2 directory in the OneDrive sync root) and `sshConfig` (the private OpenSSH configuration path). Run `python scripts/foundation/backup_mirror.py sync --config <private-file>` once. Register the installed client with `pwsh ./scripts/foundation/Install-BackupMirror.ps1 -ConfigPath <private-file> -ClientPath <installed-backup_mirror.py>`. The owner-scoped task runs at 03:05 workstation-local time and at sign-in, catches missed starts and retries temporary failures. Each run verifies local ciphertext against its trusted receipt. It retrieves missing points, saves damaged bytes under the private state's `quarantine` directory, and atomically repairs the mirror from verified bytes. A conflicting receipt requires operator review. Remaining points still sync; `state/status.json` records the latest locally verified point and any failure. Run `python scripts/foundation/backup_mirror.py status --config <private-file>` to see the latest attempt, last verified point and its capture freshness. A failed attempt preserves the last success and returns a failing status, even when that point is still fresh. OneDrive reports its cloud synchronization separately.
+Use an owner-only local JSON file for the scheduled task. Set `state` to a dedicated private directory, `mirror` to the `BrickVault V2 Backup` folder in the OneDrive Personal sync root, and `sshConfig` to the pinned OpenSSH configuration. Set `receiptTrust` to the public trust file held independently and `oneDriveProfile` to an owner-only directory outside OneDrive. Keep the installed foundation scripts together.
+
+Enroll the reader once from the same Windows account that will run the task. The command opens the personal Microsoft account sign-in page. The reader requests `Files.Read` for downloads and `offline_access` for renewals. The enrollment checks both permissions before opening the page. The OneDrive desktop client handles uploads. The reader uses its own encrypted rclone configuration with a Windows Data Protection API password bound to this Windows user. Restore a lost profile by signing in again. [Microsoft Graph file download permissions](https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0) · [rclone OneDrive configuration](https://rclone.org/onedrive/)
+
+```text
+python scripts/foundation/onedrive_reader.py connect --profile READER_DIRECTORY
+python scripts/foundation/backup_mirror.py sync --config PRIVATE_SETTINGS.json
+pwsh ./scripts/foundation/Install-BackupMirror.ps1 -ConfigPath PRIVATE_SETTINGS.json -ClientPath INSTALLED_BACKUP_MIRROR.py
+python scripts/foundation/backup_mirror.py status --config PRIVATE_SETTINGS.json
+```
+
+The owner-scoped task runs at 03:05 workstation-local time and at sign-in. It catches missed starts and retries temporary failures. It verifies the controller's signature and the archive SHA-256 for every mirrored point. It preserves damaged archives in private quarantine before repair and leaves conflicting receipts for operator review. The client then downloads every newly mirrored pair and the latest pair from Microsoft into fresh private storage. `cloudPoint` and `cloudVerifiedAt` identify the last authenticated OneDrive readback. `cloudFresh` checks that the current point passed and meets the configured freshness window. When uploads are pending, the task records a failure and retries. Previous successful readbacks remain in the private state directory.
+
+For exports finalized before the controller recorded a separate mirror binding, a controller administrator can assign their independently checked publication-context digests in `priorMirrorExports` to the original normalized absolute export path and reader group as a two-item array. The migration checks the original root-owned export, reader group, receipt and existing ciphertext before copying the signed sidecar. A changed target requires separate authorization.
 
 ## Prove recovery on another Linux machine
 
