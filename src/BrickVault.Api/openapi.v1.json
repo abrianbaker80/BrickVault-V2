@@ -1735,6 +1735,76 @@
           }
         }
       }
+    },
+    "/api/v1/inventory/positions/{positionId}/timeline": {
+      "get": {
+        "operationId": "getStockPositionTimeline",
+        "description": "Read retained immutable facts for one receipt position, including a depleted position. The page is ordered by committed purchase revision descending, then kind and stable ID and includes physical, witness, reservation and offer backing evidence. Each cursor belongs to the exact selected position and event.",
+        "parameters": [
+          {
+            "name": "positionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 79,
+              "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing)\\.[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of position events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockPositionTimeline"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown stock position.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5668,6 +5738,259 @@
           "asOf",
           "complete",
           "purchases"
+        ],
+        "additionalProperties": false
+      },
+      "StockPositionTimelineEvent": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "putaway",
+              "transfer-in",
+              "transfer-out",
+              "count",
+              "hold",
+              "hold-release",
+              "stock-loss",
+              "offer-backing"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurredAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Original observation or audit timestamp. Null means the event has no recorded timestamp."
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "The event amount or the witnessed count. Read the three signed deltas for ledger effects."
+          },
+          "physicalDelta": {
+            "type": "integer",
+            "minimum": -1000000,
+            "maximum": 1000000
+          },
+          "reservedDelta": {
+            "type": "integer",
+            "minimum": -1000000,
+            "maximum": 1000000
+          },
+          "offerBackedDelta": {
+            "type": "integer",
+            "minimum": -1000000,
+            "maximum": 1000000
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationCodeAtEvent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "Historically recorded bin code, or null if the event did not record one."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "relatedPositionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "relatedLocationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "relatedLocationCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "observationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "caseId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "postingId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "holdId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "holdPurpose": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "offerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "ledgerQuantityAtWitness": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "purchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "commandId",
+          "correlationId",
+          "occurredAt",
+          "quantity",
+          "physicalDelta",
+          "reservedDelta",
+          "offerBackedDelta",
+          "locationId",
+          "locationCodeAtEvent",
+          "reason",
+          "relatedPositionId",
+          "relatedLocationId",
+          "relatedLocationCode",
+          "observationId",
+          "caseId",
+          "postingId",
+          "holdId",
+          "holdPurpose",
+          "offerId",
+          "ledgerQuantityAtWitness",
+          "purchaseRevision"
+        ],
+        "additionalProperties": false
+      },
+      "StockPositionTimeline": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "position-timeline"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "This page reflects the authoritative recorded events. Follow nextAfter for older rows."
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "originPlacementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 79,
+            "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing)\\.[0-9a-f]{32}$"
+          },
+          "events": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/StockPositionTimelineEvent"
+            }
+          },
+          "hasUndatedEvents": {
+            "type": "boolean",
+            "description": "At least one event in the selected position's full retained history lacks a timestamp."
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "positionId",
+          "purchaseId",
+          "originPlacementId",
+          "deliveryId",
+          "location",
+          "nextAfter",
+          "events",
+          "hasUndatedEvents"
         ],
         "additionalProperties": false
       }
