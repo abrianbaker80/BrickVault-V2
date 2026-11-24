@@ -782,6 +782,16 @@
                 }
               }
             }
+          },
+          "413": {
+            "description": "The authenticated transfer request exceeds 128 MiB. No command was applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "description": "Move an explicitly allocated portion of one confirmed placement to another registered bin. The receipt entityId identifies both the movement and its newly introduced destination position."
@@ -2308,7 +2318,8 @@
             "items": {
               "$ref": "#/components/schemas/TransferBacking"
             },
-            "description": "Explicitly selected offer quantities. Supply an empty array when moving all backing or only unbacked units. The API request body limit is 16 KiB."
+            "description": "Explicit offer quantities whose sum cannot exceed the physical quantity moved. Supply an empty array when moving all backing or only unbacked units. The authenticated transfer request body limit is 128 MiB.",
+            "maxItems": 1000000
           },
           "moveAllBacking": {
             "type": "boolean",

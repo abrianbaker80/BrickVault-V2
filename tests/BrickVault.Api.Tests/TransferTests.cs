@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Npgsql;
 using Xunit;
 
@@ -263,18 +266,19 @@ public sealed class TransferTests
         Assert.All(uncapped.Backing, line => Assert.Equal(1, line.Quantity));
         Assert.Equal(original.Balances, effective.Balances);
 
-        // A different position backs 65 distinct offers. There is no arbitrary selection limit.
-        var dense = await Stock("DENSE-POSITION", 70);
+        // A different position backs 256 distinct offers. There is no arbitrary selection limit.
+        var dense = await Stock("DENSE-POSITION", 257);
         revision = dense.Position.Revision;
         List<TransferBacking> selected = [];
-        for (var i = 0; i < 65; i++)
+        for (var i = 0; i < 256; i++)
         {
             var offer = await Offer(dense.Purchase, dense.Position.EntityId, revision, 1);
             selected.Add(new TransferBacking(offer.EntityId, 1));
             revision = offer.Revision;
         }
 
-        var explicitMove = Move(dense.Purchase, dense.Position.EntityId, revision, a, b, 67, [..selected]);
+        var explicitMove = Move(dense.Purchase, dense.Position.EntityId, revision, a, b, 256, [..selected]);
+        Assert.True(JsonSerializer.SerializeToUtf8Bytes(explicitMove, Wire.Json).Length > 16 * 1024);
         var mixed = await Assert.ThrowsAsync<Fault>(() => Save(explicitMove with { MoveAllBacking = true }));
         Assert.Equal((400, "invalid_transfer"), (mixed.Status, mixed.Code));
         var partial = await Assert.ThrowsAsync<Fault>(() => Save(explicitMove with { MoveAllBacking = true, Backing = [] }));
@@ -282,25 +286,65 @@ public sealed class TransferTests
         var originalSource = Assert.Single((await bins.Movements(a.Id, token)).Positions,
             p => p.Layer.PlacementId == dense.Position.EntityId);
         Assert.Equal(revision, originalSource.PurchaseRevision);
-        Assert.Equal((70, 65, 5), (originalSource.Layer.Quantity, originalSource.Layer.BackedQuantity,
+        Assert.Equal((257, 256, 1), (originalSource.Layer.Quantity, originalSource.Layer.BackedQuantity,
             originalSource.Layer.UnbackedQuantity));
         Assert.DoesNotContain((await bins.Movements(a.Id, token)).Movements, m => m.PurchaseId == dense.Purchase);
 
         var arrival = await Save(explicitMove);
         Assert.Equal(arrival, await Save(explicitMove with { MoveAllBacking = false }));
-        var full = Move(dense.Purchase, arrival.EntityId, arrival.Revision, b, c, 67) with { MoveAllBacking = true };
+        var full = Move(dense.Purchase, arrival.EntityId, arrival.Revision, b, c, 256) with { MoveAllBacking = true };
         var fullReceipt = await Save(full);
         Assert.Equal(fullReceipt, await Save(full));
         var final = Assert.Single((await bins.Movements(c.Id, token)).Positions, p => p.Layer.PlacementId == fullReceipt.EntityId);
-        Assert.Equal((67, 65, 2), (final.Layer.Quantity, final.Layer.BackedQuantity, final.Layer.UnbackedQuantity));
+        Assert.Equal((256, 256, 0), (final.Layer.Quantity, final.Layer.BackedQuantity, final.Layer.UnbackedQuantity));
         Assert.Equal(selected.Select(x => x.OfferId).Order(), final.Backing.Select(x => x.OfferId).Order());
         var eventRow = Assert.Single((await bins.Movements(c.Id, token)).Movements, m => m.Id == fullReceipt.EntityId);
-        Assert.Equal(65, eventRow.Backing.Count);
+        Assert.Equal(256, eventRow.Backing.Count);
         var after = Assert.Single((await receiving.Snapshot(token)).Purchases, p => p.Id == dense.Purchase);
-        Assert.Equal(70, after.Balances.PhysicalOnHand);
-        Assert.Equal(65, after.Balances.BackedQuantity);
-        Assert.Equal(5, after.Balances.WithheldQuantity);
+        Assert.Equal(257, after.Balances.PhysicalOnHand);
+        Assert.Equal(256, after.Balances.BackedQuantity);
+        Assert.Equal(1, after.Balances.WithheldQuantity);
         Assert.All(after.Offers, offer => Assert.Equal(fullReceipt.EntityId, Assert.Single(offer.Backing).PlacementId));
+    }
+
+    [Fact]
+    public void TransferBodyLimitCoversNormalSerializationAndRetainsReplayDigest()
+    {
+        var command = new TransferCommand
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = int.MaxValue, PurchaseId = Guid.NewGuid(),
+            SourcePlacementId = Guid.NewGuid(), SourceLocationId = Guid.NewGuid(),
+            ConfirmedSourceLocationCode = new string('A', 48), DestinationLocationId = Guid.NewGuid(),
+            ConfirmedDestinationLocationCode = new string('B', 48), Quantity = 1_000_000,
+            Reason = new string('\u0800', 200), Backing = []
+        };
+        var line = new TransferBacking(Guid.NewGuid(), 1_000_000);
+        var indented = new JsonSerializerOptions(Wire.Json) { WriteIndented = true };
+        var emptyBytes = JsonSerializer.SerializeToUtf8Bytes(command, indented).Length;
+        var oneLineBytes = JsonSerializer.SerializeToUtf8Bytes(command with { Backing = [line] }, indented).Length;
+        var conservativeUpperBound = emptyBytes + (oneLineBytes - emptyBytes + 2L) * command.Quantity;
+        Assert.True(conservativeUpperBound < TransferCommand.MaxRequestBodyBytes);
+
+        var explicitMove = command with { Backing = [line] };
+        foreach (var prepared in new[] { explicitMove, command with { MoveAllBacking = true } })
+        {
+            var previousDigest = SHA256.HashData(Encoding.UTF8.GetBytes(
+                "transfer\n" + JsonSerializer.Serialize(prepared, Wire.Json)));
+            Assert.Equal(previousDigest, prepared.Digest());
+        }
+
+        Assert.Equal("transfer_backing_unavailable", Assert.Throws<Fault>(() => (command with
+        {
+            Backing = [line, new TransferBacking(Guid.NewGuid(), 1)]
+        }).Validate()).Code);
+        Assert.Equal("transfer_backing_unavailable", Assert.Throws<Fault>(() => (command with
+        {
+            Quantity = 1, Backing = [new TransferBacking(Guid.NewGuid(), 1), new TransferBacking(Guid.NewGuid(), 1)]
+        }).Validate()).Code);
+        Assert.Equal("invalid_transfer", Assert.Throws<Fault>(() => (command with
+        {
+            Backing = [new TransferBacking(line.OfferId, 1), new TransferBacking(line.OfferId, 1)]
+        }).Validate()).Code);
     }
 
     private static string IsolatedDatabase()
