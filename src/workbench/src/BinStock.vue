@@ -1,24 +1,58 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { api, ContractFailure, explain } from './api'
-import type { BinTransferSnapshot, Location, TransferControls, TransferPosition } from './api'
+import type { BinTransferSnapshot, Catalog, Location, TransferControls, TransferPosition } from './api'
 import TransferForm from './TransferForm.vue'
+import CountWorkspace from './CountWorkspace.vue'
+import { countPositionLink, type CountLink } from './countLinks'
 import { itemLabel, money } from './receiving'
 import { time } from './presentation'
 
-const props = defineProps<{ location: Location; asOf: string; connected: boolean; locations: Location[]; transfers: TransferControls }>()
+const props = defineProps<{ location: Location; asOf: string; connected: boolean; locations: Location[]; catalog: Catalog[]; transfers: TransferControls; countLink?: CountLink }>()
 const emit = defineEmits<{ failure: [reason: unknown]; inspect: [id: string]; recover: [] }>()
 const stock = shallowRef<BinTransferSnapshot | null>(null)
 const loading = ref(false)
 const error = ref('')
 const ready = computed(() => props.connected && !error.value && !loading.value && stock.value?.complete === true)
+const inspectingCount = computed(() => props.countLink?.binId === props.location.id && Boolean(props.countLink.positionId || props.countLink.receiptId))
 const selected = shallowRef<TransferPosition>()
 const heading = ref<HTMLElement>()
+const fenced = ref(new Set<string>())
+function closeCount() {
+  window.location.hash = 'locations/' + props.location.id
+}
+watch(() => props.countLink, async (link, previous) => {
+  if (link?.binId === props.location.id && !link.positionId && !link.receiptId && (previous?.positionId || previous?.receiptId)) {
+    await nextTick()
+    heading.value?.focus()
+  }
+})
+function recoverCount() {
+  window.location.hash = 'locations'
+  emit('recover')
+}
 let trigger: HTMLButtonElement | undefined
-function openTransfer(position: TransferPosition, event: MouseEvent) {
-  if (!ready.value || !props.transfers.enabled) return
+const checking = ref(false)
+const transferError = ref('')
+let mounted = true
+onBeforeUnmount(() => { mounted = false })
+async function openTransfer(position: TransferPosition, event: MouseEvent) {
+  if (!ready.value || !props.transfers.enabled || checking.value) return
   trigger = event.currentTarget as HTMLButtonElement
-  selected.value = position
+  checking.value = true
+  transferError.value = ''
+  try {
+    const result = await api.binCounts(props.location.id, { positionId: position.layer.placementId, limit: '1' })
+    if (!mounted || !ready.value || !props.transfers.enabled) return
+    if (!result.complete || result.positions[0]?.purchaseRevision !== position.purchaseRevision) {
+      transferError.value = 'Refresh this bin to verify the current position before transferring stock.'
+      return
+    }
+    if (result.positions[0].shortageOpen) fenced.value.add(position.layer.placementId)
+    else selected.value = position
+  } catch (failure) {
+    if (mounted) { transferError.value = explain(failure); emit('failure', failure) }
+  } finally { checking.value = false }
 }
 async function closeTransfer() {
   selected.value = undefined
@@ -28,14 +62,14 @@ async function closeTransfer() {
 }
 const arrivals = computed(() => new Map(stock.value?.movements.map(move => [move.destinationPlacementId, move])))
 
-watch(() => [props.location.id, props.location.revision, props.asOf, props.connected] as const,
-  async ([id, revision, , connected], _, onCleanup) => {
+watch(() => [props.location.id, props.location.revision, props.asOf, props.connected, inspectingCount.value] as const,
+  async ([id, revision, , connected, countOnly], _, onCleanup) => {
     let current = true
     onCleanup(() => { current = false })
     if (stock.value?.location.id !== id) stock.value = null
     error.value = ''
-    loading.value = connected
-    if (!connected) return
+    loading.value = connected && !countOnly
+    if (!loading.value) return
     try {
       const result = await api.binTransfers(id)
       if (!current) return
@@ -58,6 +92,7 @@ watch(() => [props.location.id, props.location.revision, props.asOf, props.conne
       {{ error || 'The workspace is disconnected.' }} {{ stock ? 'Showing the last bin read.' : 'Bin stock is unavailable.' }}
     </p>
     <p v-else-if="loading" role="status">{{ stock ? 'Refreshing bin stock…' : 'Reading bin stock…' }}</p>
+    <p v-if="transferError" class="warning" role="alert">{{ transferError }}</p>
     <template v-if="stock">
       <p class="bin-read">Read {{ time(stock.asOf) }}</p>
       <p v-if="!stock.complete" class="warning" role="status">Partial bin read. Quantities cover the returned layers.</p>
@@ -84,9 +119,11 @@ watch(() => [props.location.id, props.location.revision, props.asOf, props.conne
             <small>Whole delivery of {{ layer.receiptQuantity }} · Item cost {{ money(layer.receiptItemCostMinor, layer.currency) }}<template v-if="layer.receiptItemCostMinor === null"> ({{ layer.currency }})</template></small>
             <details><summary>Placement details</summary><small>Placement {{ layer.placementId }}</small>
               <small>Receipt correlation ID {{ layer.receiptCorrelationId }}</small></details>
-            <button type="button" class="move-stock" :disabled="!ready || !transfers.enabled || locations.length < 2"
+            <button type="button" class="move-stock" :disabled="!ready || !transfers.enabled || locations.length < 2 || checking || fenced.has(layer.placementId)"
               :aria-label="'Transfer stock from ' + layer.purchaseReference + ' · ' + layer.deliveryReference"
               @click="openTransfer(stock.positions[index], $event)">Transfer stock</button>
+            <a class="count-link" :href="countPositionLink(location.id, layer.placementId)" :aria-label="'Count stock for ' + layer.purchaseReference + ' · ' + layer.deliveryReference">Count stock</a>
+            <small v-if="fenced.has(layer.placementId)" class="warning">Open shortage · transfers and new offer backing are blocked.</small>
           </li>
         </ul>
       </template>
@@ -111,6 +148,10 @@ watch(() => [props.location.id, props.location.revision, props.asOf, props.conne
         </ul>
       </section>
     </template>
+    <CountWorkspace v-if="inspectingCount && countLink"
+      :key="countLink.positionId || countLink.receiptId" :location="location" :position-id="countLink.positionId" :receipt-id="countLink.receiptId"
+      :as-of="asOf" :connected="connected" :controls="transfers" :catalog="catalog"
+      @failure="emit('failure', $event)" @fenced="fenced.add($event)" @close="closeCount" @recover="recoverCount" />
     <TransferForm v-if="selected" :source="location" :locations="locations" :original="selected"
       :current="stock?.positions.find(p => p.layer.placementId === selected?.layer.placementId)" :ready="ready" :controls="transfers"
       @close="closeTransfer" @recover="emit('recover')" />
@@ -123,6 +164,7 @@ watch(() => [props.location.id, props.location.revision, props.asOf, props.conne
 .bin-read { color: var(--muted) }
 .bin-stock .receipt-line-head { flex-wrap: wrap }
 .move-stock, details { margin-top: 8px }
+.count-link { display: inline-block; margin: 8px 0 0 10px; color: #355340; text-underline-offset: 2px }
 details { overflow-wrap: anywhere }
 summary { cursor: pointer }
 </style>
