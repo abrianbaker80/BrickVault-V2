@@ -1,23 +1,23 @@
 # BrickVault V2 feature matrix
 
-**M0 and M1 are accepted. M2 and the first M3 receiving workflow are in progress.** D03 leaves production release classifications provisional until the targeted workflow review and owner decision. The Architect manages routine checkpoints. Major decisions follow D08. [Master plan](MASTER_PLAN.md) Ã‚Â· [Decision register](DECISIONS.md) Ã‚Â· [Inventory and BrickLink contract](Inventory-and-BrickLink.md)
+**M0 and M1 are accepted. M2 and the first M3 receiving workflow are in progress.** D03 leaves production release classifications provisional until the targeted workflow review and owner decision. The Architect manages routine checkpoints. Major decisions follow D08. [Master plan](MASTER_PLAN.md) · [Decision register](DECISIONS.md) · [Inventory and BrickLink contract](Inventory-and-BrickLink.md)
 
 **How to use the register.** The section sets the target milestone. Dependencies name prerequisite capabilities. Overlapping implementation is possible while acceptance waits for the relevant evidence. *Mandatory* gates its milestone. *Optional* requires a recorded opt-in and an agreed gate if promoted. *Deferred* is proposed for later reconsideration. *Excluded* denotes a stated owner boundary or a proposed exclusion as identified in the disposition table. Status uses the owner's lifecycle (Planned, In Progress, Built, Reviewed, Accepted, Blocked, Deferred). The latter also records excluded work because the separate scope column carries the exclusion. An optional item marked Planned has a planned decision point and no implementation authorization.
 
-**Acceptance evidence.** Each row states the evidence needed. Record M0 evidence against this public repository and its current checks. Keep private supporting material in restricted storage. The right-hand cells specify the required proof. Before marking Accepted, record the issue, reviewed commit and PR, version/environment, actual measured result, evidence location, recovery/failure result and any required owner decision against the ID. Reuse accepted evidence where scope matches. Keep fixture, database, hardware, provider and production evidence identifiable. Documentary V1 findings and Bricqer demonstrations support design. They cannot advance V2 implementation status. [Legacy assessment](Legacy-assessment.md) Ã‚Â· [Bricqer workflow evidence](Bricqer-guide-review.md)
+**Acceptance evidence.** Each row states the evidence needed. Record M0 evidence against this public repository and its current checks. Keep private supporting material in restricted storage. The right-hand cells specify the required proof. Before marking Accepted, record the issue, reviewed commit and PR, version/environment, actual measured result, evidence location, recovery/failure result and any required owner decision against the ID. Reuse accepted evidence where scope matches. Keep fixture, database, hardware, provider and production evidence identifiable. Documentary V1 findings and Bricqer demonstrations support design. They cannot advance V2 implementation status. [Legacy assessment](Legacy-assessment.md) · [Bricqer workflow evidence](Bricqer-guide-review.md)
 
-## M0 Ã‚Â· Repository, engineering and agent checkpoint
+## M0 · Repository, engineering and agent checkpoint
 
 | ID | Scope | Status | Depends on | Capability | Evidence required |
 | --- | --- | --- | --- | --- | --- |
 | G01 | Mandatory | Accepted | Owner authorization | Verify the local target and public GitHub target, preserve existing work, establish separate V2 history and environments. | Inventory both targets before creation. Demonstrate that V1 working tree, services, secrets and database are outside V2 build/test paths. Verify origin and owner before any authorized creation. No existing target overwritten. |
 | G02 | Mandatory | Accepted | G01 | Protect main, require a PR and its current check, and record an independent review of the diff. | Read back public visibility and enforceable main protection. A bounded PR exercises checks and independent review under the actual plan. Record any unsupported requirement for owner decision. Preserve unrelated changes/history and resolve conflicts explicitly. |
-| G03 | Mandatory | Accepted | G01 | Own README, CHANGELOG, root AGENTS, master plan, matrix and decision log. Track issues and milestones. | Fresh clone instructions run. One issue links requirement Ã¢â€ â€™ branch/PR Ã¢â€ â€™ review/evidence Ã¢â€ â€™ accepted SHA. Fetch confirms local main equals origin/main at the authorized checkpoint. |
+| G03 | Mandatory | Accepted | G01 | Own README, CHANGELOG, root AGENTS, master plan, matrix and decision log. Track issues and milestones. | Fresh clone instructions run. One issue links requirement → branch/PR → review/evidence → accepted SHA. Fetch confirms local main equals origin/main at the authorized checkpoint. |
 | G04 | Mandatory | Accepted | G01,G02 | Verify project-scoped native Builder delegation, separate review, correction and owner pause in installed Codex/Insiders. | One harmless bounded assignment returns a diff. A separate review identifies scope and inspects evidence. Exercise a paused approval gate. Record the test boundary, role bindings, review result and observed limitations. Keep machine and account details in restricted evidence. |
 | G05 | Mandatory | Accepted | G03,G04 | Manage approved backlog, model routing, bounded parallel work and owner checkpoints. | Every assignment has a scope, stop condition and evidence. Default to at most two spawned agents. Check the authorized execution route and resource limits privately before dispatch. Escalate separate billing, scope changes, authority/design and production gates. Continue only already-authorized work. |
 | G06 | Mandatory | Accepted | G01,G02 | Reproducible development environment, CI, dependency/security checks and upgrade rehearsal. | Fresh runner builds from lockfiles. A failed required check prevents advancement. Track supported release lines, scheduled patch/EOL review, dependency update, compatibility and rollback evidence as stack capabilities grow. |
 
-**M0 verification.** The owner accepted G01Ã¢â‚¬â€œG06 at engineering revision [2d88409](https://github.com/abrianbaker80/BrickVault-V2/commit/2d88409b5fb556316888d1282c08968ba5619c70). G04 was witnessed in the Insiders sidebar, including the independent finding, correction, fresh re-review and pause for owner approval. Witnessed revision [b731a22](https://github.com/abrianbaker80/BrickVault-V2/commit/b731a225964b7d102243960f0308c9e248a98fb8). G03 verified matching local `main`, fetched `origin/main` and GitHub `main` after the protected merge. The owner subsequently authorized the isolated M1 comparison. [M0 issue #1](https://github.com/abrianbaker80/BrickVault-V2/issues/1) Ã‚Â· [M0 owner acceptance](https://github.com/abrianbaker80/BrickVault-V2/issues/1#issuecomment-7090263747)
+**M0 verification.** The owner accepted G01–G06 at engineering revision [2d88409](https://github.com/abrianbaker80/BrickVault-V2/commit/2d88409b5fb556316888d1282c08968ba5619c70). G04 was witnessed in the Insiders sidebar, including the independent finding, correction, fresh re-review and pause for owner approval. Witnessed revision [b731a22](https://github.com/abrianbaker80/BrickVault-V2/commit/b731a225964b7d102243960f0308c9e248a98fb8). G03 verified matching local `main`, fetched `origin/main` and GitHub `main` after the protected merge. The owner subsequently authorized the isolated M1 comparison. [M0 issue #1](https://github.com/abrianbaker80/BrickVault-V2/issues/1) · [M0 owner acceptance](https://github.com/abrianbaker80/BrickVault-V2/issues/1#issuecomment-7090263747)
 
 ## Before the production release scope freezes
 
@@ -25,9 +25,9 @@
 | --- | --- | --- | --- | --- | --- |
 | S01 | Mandatory | Planned | G03 | Review the complete purchase/batch/set part-out outcome including one-click intake, barcode and physical ID, direct/specialty printing, Build Queue/project/hold semantics, multi-order picking and other relied-on V1 workflows. | Record actual use and a representative end-to-end task per outcome. Compare mandatory initial release, a demonstrated equivalent, or explicit deferral. The owner signs the disposition register before production requirements freeze. No relied-on workflow disappears at migration. This gate does not block M0. |
 
-## M1 Ã‚Â· Design choices and owner visual approval
+## M1 · Design choices and owner visual approval
 
-U01Ã¢â‚¬â€œU03 passed independent review on the fictional comparison. The owner accepted all three requirements at checkpoint `d5a3264`, selecting Workbench for navigation and visual design and Vue 3 with TypeScript for the frontend. The review guide records the environment, measurements, keyboard and viewport checks, and failure and recovery evidence. [M1 review guide](../../prototypes/m1/REVIEW.md) Ã‚Â· [Reviewed prototype](https://github.com/abrianbaker80/BrickVault-V2/commit/61fac3d617ecc712b8a035491a954fde72fff217) Ã‚Â· [Accepted M1 comparison](https://github.com/abrianbaker80/BrickVault-V2/commit/d5a3264dcf3650bbf91fb98a132bb31b74c9fb92) Ã‚Â· [M1 pull request](https://github.com/abrianbaker80/BrickVault-V2/pull/5) Ã‚Â· [Owner decision on issue #4](https://github.com/abrianbaker80/BrickVault-V2/issues/4#issuecomment-7091249610)
+U01–U03 passed independent review on the fictional comparison. The owner accepted all three requirements at checkpoint `d5a3264`, selecting Workbench for navigation and visual design and Vue 3 with TypeScript for the frontend. The review guide records the environment, measurements, keyboard and viewport checks, and failure and recovery evidence. [M1 review guide](../../prototypes/m1/REVIEW.md) · [Reviewed prototype](https://github.com/abrianbaker80/BrickVault-V2/commit/61fac3d617ecc712b8a035491a954fde72fff217) · [Accepted M1 comparison](https://github.com/abrianbaker80/BrickVault-V2/commit/d5a3264dcf3650bbf91fb98a132bb31b74c9fb92) · [M1 pull request](https://github.com/abrianbaker80/BrickVault-V2/pull/5) · [Owner decision on issue #4](https://github.com/abrianbaker80/BrickVault-V2/issues/4#issuecomment-7091249610)
 
 | ID | Scope | Status | Depends on | Capability | Evidence required |
 | --- | --- | --- | --- | --- | --- |
@@ -35,7 +35,7 @@ U01Ã¢â‚¬â€œU03 passed independent review on the fictional comparison. 
 | U02 | Mandatory | Accepted | U01 | Approve navigation, typography, colors/themes, density, forms, tables, lot inspector, selection and bulk actions. | Keyboard-only walk locates the correct lot, opens details, selects explicit IDs, previews impact and cancels. Verify focus restoration, zoom, small window, contrast, noncolor status and errors. Owner approves before major production UI. |
 | U03 | Mandatory | Accepted | U01 | Define loading, empty, partial, stale, failed, uncertain and recovery states for each critical workspace. | Illustrate distinct zero/failed reads, stale superseded filter, a partial batch, loss after send and safe refresh. Demonstrate the order detail itself shows what blocks the next action. |
 
-## M2 Ã‚Â· Persistent application and operations foundation
+## M2 · Persistent application and operations foundation
 
 | ID | Scope | Status | Depends on | Capability | Evidence required |
 | --- | --- | --- | --- | --- | --- |
@@ -48,7 +48,7 @@ U01Ã¢â‚¬â€œU03 passed independent review on the fictional comparison. 
 
 ### M2 evidence by requirement
 
-The statuses above describe each complete requirement. The isolated foundation uses real PostgreSQL, the API, worker and Vue Workbench with operator-authored fictional data. Record results against the reviewed revision on the issue. [Qualification and recovery](../verification/m2-foundation.md) Ã‚Â· [M2 issue #6](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
+The statuses above describe each complete requirement. The isolated foundation uses real PostgreSQL, the API, worker and Vue Workbench with operator-authored fictional data. Record results against the reviewed revision on the issue. [Qualification and recovery](../verification/m2-foundation.md) · [M2 issue #6](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
 
 | ID | What the implementation and qualification exercise cover | Outstanding evidence or decision |
 | --- | --- | --- |
@@ -59,7 +59,7 @@ The statuses above describe each complete requirement. The isolated foundation u
 | T05 | Activity and diagnostic lookup connect a receipt to a worker effect. The qualification exercises a stopped worker, stale heartbeat, pending work, restart and incompatible jobs. | Independent review covered the local reference worker. Physical and live provider jobs have separate later requirements. |
 | T06 | HTTP v1, schema versions 2 and 3 with matching releases, worker message v1, generated client validation, checked migrations, locked build inputs and release-file digests. | The foundation exercises a v1-to-v2 schema upgrade with an existing record, failed migration rollback and recovery, a v1 client, and rejection of unsupported jobs. A retained HTTP v1 client used its existing session across the database-permissions update and restart. A separate rollback target recovered the original signed point, matching release, facts and command receipts. Repeat the client check against the next application release. |
 
-## M3 Ã‚Â· Purchase, receive, sort, store and prepare inventory
+## M3 · Purchase, receive, sort, store and prepare inventory
 
 | ID | Scope | Status | Depends on | Capability | Evidence required |
 | --- | --- | --- | --- | --- | --- |
@@ -68,14 +68,14 @@ The statuses above describe each complete requirement. The isolated foundation u
 | I03 | Mandatory | In Progress | I01,I02 | Track layers by purchase/batch and physical positions by variant, location and state. Support split/transform. | One source splits across bins, two purchases share a bin, and an input transforms into accepted outputs plus remainder. Source/cost lineage and total cost reconcile without inventing individual historical prices. |
 | I04 | Mandatory | In Progress | I03 | Manage storage hierarchy, codes/aliases, eligible bins, capacity, active/archived status, pick hints and confirmed putaway. | Lookup by alias labels the intended bin. Reject incompatible/archive/full destinations. Move across locations atomically and preserve totals/layers. Migrate existing pick hints and layout. The normal putaway action requires confirmation of actual bin and quantity. |
 | I05 | Mandatory | In Progress | I03,I04 | Post immutable inventory movements, adjustments and counted corrections under stable commands and revisions. | Replay identical input yields one movement. Changed payload, stale revision or failed audit cannot apply silently. Show per-bin ledger and witnessed count with reason before/after. |
-| I06 | Mandatory | In Progress | I05 | Derive physical, unavailable, reserved, sellable, withheld and published-target quantities. Support shortages and internal holds. | At every committed transition assert nonnegative counts, O=U+R+F, sum of active offer targets Ã¢â€°Â¤F. Two sessions compete for the last unit. A short count produces an explicit unbacked obligation. |
+| I06 | Mandatory | In Progress | I05 | Derive physical, unavailable, reserved, sellable, withheld and published-target quantities. Support shortages and internal holds. | At every committed transition assert nonnegative counts, O=U+R+F, sum of active offer targets ≤F. Two sessions compete for the last unit. A short count produces an explicit unbacked obligation. |
 | I07 | Mandatory | In Progress | I02,I06 | Create internal offers and controlled physical pooling. Preserve distinct sale promises, store mappings and provenance. | Two receipts pool across locations for one offer. Different conditions/grades or commercial terms remain distinguishable, and public descriptions stay separate from private remarks. No unit backs two offers. Retire a binding while old order references still resolve. |
 | I08 | Mandatory | In Progress | I06,I07 | Hold eligible stock off sale, apply manual price/currency and terms, preview explicit publication/release quantities. | Stage a partial batch, verify retained vs public/stockroom exposure, withholding and exact displayed target. Manual price is saved with revision and evidence. Preparing a release cannot dispatch a marketplace write. |
 | I09 | Mandatory | In Progress | I04,I05,U03 | Deliver inventory search, filters, stable lot inspector, location breakdown, stock timeline and explicit bulk actions. | Exact-ID and cross-type search return expected placements and holds. Freeze selected IDs vs all matching IDs and revisions. Concurrent change, stale page and per-target failure are visible. |
 
-The first receiving workflow covers split and mixed deliveries, actual-bin confirmation, per-delivery cost coverage and explicitly backed unpublished offers. The qualification compares these records after restart and encrypted restore. The Locations inspector shows receipt layers for a selected bin across purchases, including whole-delivery cost evidence and current backing. The rest of I09 includes inventory-wide search, a lot timeline and bulk selection. [Bin inspection](https://github.com/abrianbaker80/BrickVault-V2/issues/15) [Receiving qualification](../verification/m3-receiving.md) Ã‚Â· [Issue #13](https://github.com/abrianbaker80/BrickVault-V2/issues/13)
+The first receiving workflow covers split and mixed deliveries, actual-bin confirmation, per-delivery cost coverage and explicitly backed unpublished offers. The qualification compares these records after restart and encrypted restore. The Locations inspector shows receipt layers for a selected bin across purchases, including whole-delivery cost evidence and current backing. The rest of I09 includes inventory-wide search, a lot timeline and bulk selection. [Bin inspection](https://github.com/abrianbaker80/BrickVault-V2/issues/15) [Receiving qualification](../verification/m3-receiving.md) · [Issue #13](https://github.com/abrianbaker80/BrickVault-V2/issues/13)
 
-## M4 Ã‚Â· Required BrickLink admission, inbound, shadow and nonproduction outbound
+## M4 · Required BrickLink admission, inbound, shadow and nonproduction outbound
 
 | ID | Scope | Status | Depends on | Capability | Evidence required |
 | --- | --- | --- | --- | --- | --- |
@@ -91,7 +91,7 @@ The first receiving workflow covers split and mixed deliveries, actual-bin confi
 | B10 | Mandatory | Planned | B02,B05,B08 | Reconcile discrepancies and present accountable operator resolution with audit, scoped action and fresh preconditions. | A sale between preflight and update, a manual remote edit, remote-only lot and conflicting rebinding produce explainable outcomes. Show the distinct local command, wire outcome, fresh state and unconfirmed effects. |
 | B11 | Mandatory | Planned | B01,B07,B09,B10 | Qualify adapter off-store and observe a strictly read-only real-store shadow with V1 sole writer. | Disposable DB/test double covers fault cases and partial responses. Use a permitted isolated provider tenant only if available. Assert blocked egress for synthetic tests. Compare shadow to fresh real reads under approved shared budget and report outstanding differences. Production writes remain M9. |
 
-## M5 Ã‚Â· Fulfill and recover an order
+## M5 · Fulfill and recover an order
 
 | ID | Scope | Status | Depends on | Capability | Evidence required |
 | --- | --- | --- | --- | --- | --- |
@@ -103,7 +103,7 @@ The first receiving workflow covers split and mixed deliveries, actual-bin confi
 | F06 | Mandatory | Planned | B05,F02,F05 | Resolve edited, canceled, missing, partial or returned orders, including post-pick and post-handoff recovery. | Pre-pick cancel releases demand. Cancellation moves backed picked/packed units from R to U without increasing F. A verified return to bin releases U; reconcile any independent remote restock. Post-handoff return enters quarantine following physical receipt. Refund is separate. Append reason, evidence, reversal and cost consequences. |
 | F07 | Optional | Planned | F02,F03 | Multi-order waves with a separate tote per order, gated by measured workflow benefit. | Owner opts in after a split-bin/two-order trial demonstrates correct apportionment, resume, isolated short pick and parcel identity. Single-order picking is the proposed release baseline. |
 
-## M6 Ã‚Â· Pricing, cost attribution, profit and export
+## M6 · Pricing, cost attribution, profit and export
 
 | ID | Scope | Status | Depends on | Capability | Evidence required |
 | --- | --- | --- | --- | --- | --- |
@@ -113,7 +113,7 @@ The first receiving workflow covers split and mixed deliveries, actual-bin confi
 | P04 | Mandatory | Planned | P03,B04 | Report realized order/batch/purchase results separately from estimates and inventory sale valuation. | Trace a shipped order to discount, fees, postage, refund and COGS, segregate seller-collected vs pass-through components, and reconcile totals by currency/date basis. Flag missing fees or cost coverage. |
 | P05 | Mandatory | Planned | P04,I09 | Export dated CSV for sale offers, detailed batch/location/cost positions and order financials. | Distinct IDs, granularity, currency, missingness and control totals survive export. Recompute each export's totals. One pooled offer still expands into its contributing layers. |
 
-## M7 Ã‚Â· Qualify required workstation and physical devices
+## M7 · Qualify required workstation and physical devices
 
 | ID | Scope | Status | Depends on | Capability | Evidence required |
 | --- | --- | --- | --- | --- | --- |
@@ -124,7 +124,7 @@ The first receiving workflow covers split and mixed deliveries, actual-bin confi
 | H05 | Optional | Planned | H01,F03 | Read the actual shipping/quantity scale if selected. | Verify tare, repeated known weight and units against a physical reference. Handle disconnect, stale readings and reconnect. Record whether a weight is measured or entered manually. |
 | H06 | Optional | Planned | H01,F04 | Direct device dispatch to a specialty or label printer if selected. | Print an identifiable label on the target media. Verify scale and legibility, reconnect, duplicate job handling and reprint. Sending the job or returning bridge health cannot establish paper output. |
 
-## M8 Ã‚Â· Rehearse data migration, shadow comparison and backout
+## M8 · Rehearse data migration, shadow comparison and backout
 
 | ID | Scope | Status | Depends on | Capability | Evidence required |
 | --- | --- | --- | --- | --- | --- |
@@ -134,11 +134,11 @@ The first receiving workflow covers split and mixed deliveries, actual-bin confi
 | MIG04 | Mandatory | Planned | MIG02,MIG03,B11 | Rehearse catch-up during transition, single-writer fence and rollback with production-like volumes. | Inject orders/manual edits during freeze, compare coverage, restore backups, reverse the writer switch, and reconcile post-switch business facts in an isolated rehearsal. Measure downtime and recovery against owner-agreed objectives. |
 | MIG05 | Mandatory | Planned | MIG04,H01 | Prepare cutover reconciliation report, owner decisions on exceptions and operator runbook. | Reconcile counts, physical vs recorded coverage, holds, monetary totals, listing bindings, queue states and critical workflows. Record each accepted exception with impact, owner, evidence, and decide whether sale publication may proceed. |
 
-## M9 Ã‚Â· Production qualification, cutover and stabilization
+## M9 · Production qualification, cutover and stabilization
 
 | ID | Scope | Status | Depends on | Capability | Evidence required |
 | --- | --- | --- | --- | --- | --- |
-| L01 | Mandatory | Planned | S01,MIG05,B11,F06,P05,H01 | Approve cutover plan, backup restoration, store-specific qualification, exposure and backout thresholds. | Require a complete reviewed evidence register for every mandatory M0Ã¢â‚¬â€œM8 requirement and every optional item promoted into release, including governance G04/G05, compatibility T06, pricing P01/P02 and H02 connector disposition. Owner signs the exact rollout window, publisher fencing, backups/restore, measurable acceptance/rollback thresholds, device list, canary caps and stop conditions. |
+| L01 | Mandatory | Planned | S01,MIG05,B11,F06,P05,H01 | Approve cutover plan, backup restoration, store-specific qualification, exposure and backout thresholds. | Require a complete reviewed evidence register for every mandatory M0–M8 requirement and every optional item promoted into release, including governance G04/G05, compatibility T06, pricing P01/P02 and H02 connector disposition. Owner signs the exact rollout window, publisher fencing, backups/restore, measurable acceptance/rollback thresholds, device list, canary caps and stop conditions. |
 | L02 | Mandatory | Planned | L01 | Quiesce every V1 writer, take the final consistent snapshot, import, ingest gap orders and reconcile read-only. | Prove V1 publisher/client/automation fences. Compare final migration manifests, revisions, reservations and provider observations. New sales during the transition arrive once. Unresolved high-risk differences block publication. |
 | L03 | Mandatory | Planned | L02 | Enable the sole approved V2 publisher and prove stock synchronization and fulfillment in real operation. | Under distinct owner authorization run narrowly scoped approved live operations, verify actual lot IDs, read-back after order and actual stock movement. Record remaining endpoint limits and refuse release for unqualified mandatory scenarios. |
 | L04 | Mandatory | Planned | L03 | Monitor and accept operations, including backout after external changes, before retiring V1. | Monitor for owner-agreed cycles and real order-to-handoff evidence, unresolved exposures, request headroom and backup/restore health. On stop, fence V2 and reconcile new external/local facts before any V1 restart. Record the owner verdict and accepted checkpoint only after all mandatory and promoted requirements, including all M9 rows, have applicable evidence. |
@@ -172,30 +172,30 @@ Each row maps a guide section to its V2 disposition. Detailed page, illustration
 
 | Bricqer guide in published order | Requirement IDs | V2 decision |
 | --- | --- | --- |
-| 1 Purchases & batches | I01Ã¢â‚¬â€œI03, P03Ã¢â‚¬â€œP04 | Adopt sourceÃ¢â€ â€™batchÃ¢â€ â€™receipt. Improve partial receiving, unknown costs and realized margin. |
-| 2 Adding new items | T02, I02Ã¢â‚¬â€œI04, I08, H04, X09, X15 | Adopt fast manual intake and explicit release. Select assisted methods by physical proof. |
-| 3 Managing inventory | U02, I04Ã¢â‚¬â€œI09 | Adopt register, placement inspector, scoped bulk review and exact outcome counts. |
-| 4 Managing orders | B03Ã¢â‚¬â€œB05, F01, F06, X08 | Adopt queues, history and shortages. Review changed commitments. Defer external payment actions. |
+| 1 Purchases & batches | I01–I03, P03–P04 | Adopt source→batch→receipt. Improve partial receiving, unknown costs and realized margin. |
+| 2 Adding new items | T02, I02–I04, I08, H04, X09, X15 | Adopt fast manual intake and explicit release. Select assisted methods by physical proof. |
+| 3 Managing inventory | U02, I04–I09 | Adopt register, placement inspector, scoped bulk review and exact outcome counts. |
+| 4 Managing orders | B03–B05, F01, F06, X08 | Adopt queues, history and shortages. Review changed commitments. Defer external payment actions. |
 | 5 Picking orders | F02, F07, H03 | Adopt location/tote-based single-order picking. Multi-order is conditional on a split-bin trial. |
-| 6 Packing & shipping | F03Ã¢â‚¬â€œF06, H01, X07 | Adopt parcel verification, document/reprint, physical handoff and tracked marketplace updates. |
+| 6 Packing & shipping | F03–F06, H01, X07 | Adopt parcel verification, document/reprint, physical handoff and tracked marketplace updates. |
 | 7 Local order pickup | F01, X01 | Capture real incoming method and surface the order. Defer special counter workflow. |
 | 8 Creating a local order | X02 | Defer an additional sales origin pending evidenced demand. |
 | 9 Storefront | X03, X04 | Exclude retail/POS from proposed release. Preserve useful touch/keyboard station interactions. |
 | 10 Automatic coupons | B04, P04, X06 | Record observed discounts. Defer promotional issuance and campaigns. |
-| 11 Pricing formulas | I08, P01Ã¢â‚¬â€œP02, X12 | Adopt rules, overrides, dated market input and controlled bulk repricing. |
-| 12 Exporting data | P05, MIG01Ã¢â‚¬â€œMIG03, X12 | Adopt reconcilable joint and detailed exports. Separately qualify backups for restoration. |
-| 13 Consolidation | I03Ã¢â‚¬â€œI07, B02, B07, B10 | Adopt physical placement and offer pooling as separate actions. Preserve provenance and unique marketplace IDs. |
+| 11 Pricing formulas | I08, P01–P02, X12 | Adopt rules, overrides, dated market input and controlled bulk repricing. |
+| 12 Exporting data | P05, MIG01–MIG03, X12 | Adopt reconcilable joint and detailed exports. Separately qualify backups for restoration. |
+| 13 Consolidation | I03–I07, B02, B07, B10 | Adopt physical placement and offer pooling as separate actions. Preserve provenance and unique marketplace IDs. |
 
 ## Architecture and delivery traceability
 
 | Owner brief | Where to review the decision or proof |
 | --- | --- |
-| Ã‚Â§1Ã¢â‚¬â€œ2 product and inventory authority | I01Ã¢â‚¬â€œI09, B02Ã¢â‚¬â€œB11, F01Ã¢â‚¬â€œF06, P03Ã¢â‚¬â€œP05 and L01Ã¢â‚¬â€œL04 cover the full purchase-to-profit lifecycle with BrickLink mandatory. |
-| Ã‚Â§3Ã¢â‚¬â€œ4 technology neutrality and workflow research | Decision register weighted alternatives and hosting assessment, U01Ã¢â‚¬â€œU03, reference crosswalk above and linked evidence for each guide. |
-| Ã‚Â§5 legacy assessment | Legacy annex source/behavior/release evidence, MIG01Ã¢â‚¬â€œMIG05 and the explicit legacy capabilities in X08Ã¢â‚¬â€œX12, X15Ã¢â‚¬â€œX16. |
-| Ã‚Â§6Ã¢â‚¬â€œ7 synchronization, data and explainability | Inventory and BrickLink contract, T02Ã¢â‚¬â€œT06, I03Ã¢â‚¬â€œI09, B01Ã¢â‚¬â€œB11 and P01Ã¢â‚¬â€œP05. B11 is off-store write qualification. L03 requires separately authorized proof on the real integration. |
-| Ã‚Â§8Ã¢â‚¬â€œ9 high-priority fulfillment, devices and independent visual design | U01Ã¢â‚¬â€œU03, F01Ã¢â‚¬â€œF07 and H01Ã¢â‚¬â€œH06. Physical device evidence and owner visual approval have separate gates. |
-| Ã‚Â§10 migration and cutover | MIG01Ã¢â‚¬â€œMIG05 and L01Ã¢â‚¬â€œL04. Cover stock, holds, prices, costs, historical references, clients, queues, access, restores, storefront events and backout across authority transfer. |
-| Ã‚Â§11 technology evaluation and upgradeability | Master plan and decision register for weighted tradeoffs and consequential choices. See G06, T01, T04, T06, H01Ã¢â‚¬â€œH02 and MIG04 for repeatable release/upgrade and hardware evidence. |
-| Ã‚Â§12Ã¢â‚¬â€œ18 Builder, independent review, strict done, isolation, GitHub and usage | G01Ã¢â‚¬â€œG06 govern every implementation handoff. Changes to authority, model, sync or material scope return to the owner. Retain the actual SHA and outstanding owners/gates at each checkpoint. |
-| Ã‚Â§19 first deliverable and owner decisions | Read MASTER_PLAN first, then the linked decision register, domain contract and two research annexes. See each milestone's status and linked execution evidence. |
+| §1–2 product and inventory authority | I01–I09, B02–B11, F01–F06, P03–P05 and L01–L04 cover the full purchase-to-profit lifecycle with BrickLink mandatory. |
+| §3–4 technology neutrality and workflow research | Decision register weighted alternatives and hosting assessment, U01–U03, reference crosswalk above and linked evidence for each guide. |
+| §5 legacy assessment | Legacy annex source/behavior/release evidence, MIG01–MIG05 and the explicit legacy capabilities in X08–X12, X15–X16. |
+| §6–7 synchronization, data and explainability | Inventory and BrickLink contract, T02–T06, I03–I09, B01–B11 and P01–P05. B11 is off-store write qualification. L03 requires separately authorized proof on the real integration. |
+| §8–9 high-priority fulfillment, devices and independent visual design | U01–U03, F01–F07 and H01–H06. Physical device evidence and owner visual approval have separate gates. |
+| §10 migration and cutover | MIG01–MIG05 and L01–L04. Cover stock, holds, prices, costs, historical references, clients, queues, access, restores, storefront events and backout across authority transfer. |
+| §11 technology evaluation and upgradeability | Master plan and decision register for weighted tradeoffs and consequential choices. See G06, T01, T04, T06, H01–H02 and MIG04 for repeatable release/upgrade and hardware evidence. |
+| §12–18 Builder, independent review, strict done, isolation, GitHub and usage | G01–G06 govern every implementation handoff. Changes to authority, model, sync or material scope return to the owner. Retain the actual SHA and outstanding owners/gates at each checkpoint. |
+| §19 first deliverable and owner decisions | Read MASTER_PLAN first, then the linked decision register, domain contract and two research annexes. See each milestone's status and linked execution evidence. |
