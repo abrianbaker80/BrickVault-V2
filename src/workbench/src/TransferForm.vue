@@ -13,6 +13,7 @@ const sourceCode = ref('')
 const destinationCode = ref('')
 const count = ref<number | ''>('')
 const reason = ref('')
+const moveAll = ref(false)
 const quantities = ref<Record<string, number | ''>>({})
 const issue = ref('')
 const sending = ref(false)
@@ -24,10 +25,10 @@ const stale = computed(() => !props.current || props.current.purchaseRevision !=
 const backing = computed(() => props.original.backing.map(offer => ({
   offerId: offer.offerId, quantity: Number(quantities.value[offer.offerId] || 0)
 })).filter(row => row.quantity > 0))
-const movedBacking = computed(() => backing.value.reduce((total, row) => total + row.quantity, 0))
+const movedBacking = computed(() => moveAll.value ? line.backedQuantity : backing.value.reduce((total, row) => total + row.quantity, 0))
 const available = computed(() => props.ready && props.controls.enabled && !stale.value && !sending.value)
 watch(() => destination.value?.code, () => { destinationCode.value = ''; issue.value = '' })
-watch([sourceCode, destinationCode, count, reason, movedBacking], () => { issue.value = ''; attempted.value = false })
+watch([sourceCode, destinationCode, count, reason, moveAll, movedBacking], () => { issue.value = ''; attempted.value = false })
 onMounted(() => dialog.value?.showModal())
 
 async function submit() {
@@ -36,6 +37,10 @@ async function submit() {
   attempted.value = true
   if (sourceCode.value !== props.source.code || destinationCode.value !== destination.value.code) {
     issue.value = 'The entered codes must match both physical bin labels.'
+    return
+  }
+  if (moveAll.value && count.value !== line.quantity) {
+    issue.value = 'Recount the whole position. The count moved must equal ' + line.quantity + ' units.'
     return
   }
   const unbacked = count.value - movedBacking.value
@@ -50,7 +55,8 @@ async function submit() {
       commandId: crypto.randomUUID(), expectedRevision: props.original.purchaseRevision, purchaseId: line.purchaseId,
       sourcePlacementId: line.placementId, sourceLocationId: props.source.id, confirmedSourceLocationCode: sourceCode.value,
       destinationLocationId: destination.value.id, confirmedDestinationLocationCode: destinationCode.value,
-      quantity: count.value, reason: reason.value.trim(), backing: backing.value
+      quantity: count.value, reason: reason.value.trim(),
+      ...(moveAll.value ? { moveAllBacking: true, backing: [] } : { backing: backing.value })
     } })
     if (receipt) emit('close')
     else if (props.controls.pending) emit('recover')
@@ -81,7 +87,13 @@ async function submit() {
         <label>Count moved<input v-model="count" type="number" inputmode="numeric" min="1" :max="line.quantity" required /></label>
         <label class="span">Reason<input v-model="reason" required maxlength="200" /></label>
       </fieldset>
-      <fieldset v-if="original.backing.length" class="backing-list" :disabled="!available">
+      <label v-if="original.backing.length" class="whole-position">
+        <input v-model="moveAll" type="checkbox" :disabled="!available" />
+        <span>Move the whole position with all offer backing
+          <small>{{ line.quantity }} units in this position · {{ line.backedQuantity }} backed across {{ original.backing.length }} {{ original.backing.length === 1 ? 'offer' : 'offers' }}</small>
+        </span>
+      </label>
+      <fieldset v-if="original.backing.length && !moveAll" class="backing-list" :disabled="!available">
         <legend>Offer backing to move</legend>
         <p class="field-hint">Enter units for each offer that follows this stock. A blank count leaves that offer’s backing in the source bin.</p>
         <label v-for="offer in original.backing" :key="offer.offerId">
@@ -98,5 +110,8 @@ async function submit() {
   </dialog>
 </template>
 <style scoped>
+.form-body .whole-position { display: flex; align-items: flex-start; gap: 8px }
+.whole-position input[type=checkbox] { width: 17px; min-height: auto; flex: none; margin-top: 3px }
+.whole-position small { display: block; font-weight: normal }
 .field-hint, .backing-list span { overflow-wrap: anywhere }
 </style>
