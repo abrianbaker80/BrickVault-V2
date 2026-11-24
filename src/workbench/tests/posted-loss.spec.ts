@@ -299,3 +299,79 @@ test('same-document scope changes clear the previous decision and posted receipt
     await expect(receipt(page)).toContainText(decision)
   }
 })
+
+test('a posted shortage unblocks its remaining stock on return to the same bin after a complete case read', async ({ page }) => {
+  const f = await fixture(page)
+  const countsPath = '/api/v1/receiving/bins/' + f.a.id + '/counts'
+  const initial = await page.request.get(countsPath)
+  const sibling = ((await initial.json()) as CountSnapshot).positions.find(p => p.purchaseId === f.unknown.purchaseId)!
+  await f.write('receiving/counts', sibling.purchaseRevision, {
+    purchaseId: sibling.purchaseId, positionId: sibling.positionId, locationId: f.a.id,
+    confirmedLocationCode: f.a.code, countedQuantity: 2, reason: 'Second position needs a separate review'
+  })
+  await page.getByRole('button', { name: 'Inspect ' + f.a.name }).click()
+  const layers = page.getByRole('list', { name: 'Receipt layers in this bin' })
+  const layer = (purchase: string) => layers.getByRole('listitem').filter({ hasText: purchase })
+  const paid = layer(f.paid.purchase)
+  const other = layer(f.unknown.purchase)
+  const transfer = paid.getByRole('button', { name: /Transfer stock/ })
+  const otherTransfer = other.getByRole('button', { name: /Transfer stock/ })
+  await expect(other).toContainText('Open shortage')
+  await paid.getByRole('link', { name: /Count stock/ }).click()
+  const count = page.getByRole('dialog', { name: 'Count stock', exact: true })
+  await count.getByLabel('Confirm physical bin code').fill(f.a.code)
+  await count.getByLabel('Witnessed quantity').fill('5')
+  await count.getByLabel('Reason for count').fill('One missing from the paid delivery')
+  await count.getByRole('button', { name: 'Record observation' }).click()
+  await page.getByText('Review stock adjustment', { exact: true }).click()
+  await page.getByRole('link', { name: 'Choose reductions and post stock loss' }).click()
+  await describe(page, f.a.code, 'Record the single missing unit')
+  await commit(page).click()
+  await expect(receipt(page)).toContainText('Record the single missing unit')
+
+  const wholeBin = (url: URL) => url.pathname === countsPath && !url.searchParams.has('positionId') &&
+    !url.searchParams.has('observationId') && !url.searchParams.has('commandId')
+  let attempt = 0
+  await page.route(wholeBin, async route => {
+    if (++attempt === 2) { await route.abort(); return }
+    const response = await route.fetch()
+    await route.fulfill({ response, json: { ...await response.json(), complete: false, shortages: [] } })
+  })
+  await receipt(page).getByRole('button', { name: 'Close stock loss' }).click()
+  await expect(paid).toContainText('5 in bin')
+  await expect(page.getByText(/Partial shortage read/)).toBeVisible()
+  for (const row of [paid, other]) await expect(row).toContainText('Open shortage')
+  await expect(transfer).toBeDisabled()
+  await page.getByRole('button', { name: 'Retry shortage read' }).click()
+  await expect(page.getByText(/Open shortages could not be verified/)).toBeVisible()
+  await expect(paid).toContainText('Open shortage')
+  await expect(transfer).toBeDisabled()
+  await page.unroute(wholeBin)
+  await page.getByRole('button', { name: 'Retry shortage read' }).click()
+  await expect(transfer).toBeEnabled()
+  await expect(paid).not.toContainText('Open shortage')
+  await expect(other).toContainText('Open shortage')
+  await expect(otherTransfer).toBeDisabled()
+
+  await transfer.click()
+  const move = page.getByRole('dialog', { name: 'Transfer stock', exact: true })
+  await move.getByLabel('Destination bin', { exact: true }).selectOption(f.b.id)
+  await move.getByLabel('Confirm source bin code').fill(f.a.code)
+  await move.getByLabel('Confirm destination bin code').fill(f.b.code)
+  await move.getByLabel('Count moved').fill('1')
+  await move.getByLabel('Reason', { exact: true }).fill('Move one remaining unbacked unit')
+  await move.getByRole('button', { name: 'Confirm transfer' }).click()
+  await expect(move).toHaveCount(0)
+  await expect(paid).toContainText('4 in bin')
+  await expect(page.getByRole('list', { name: 'Movements involving this bin' })).toContainText('Move one remaining unbacked unit')
+  await expect(transfer).toBeEnabled()
+
+  // Another operator reopens a shortage after this bin read and before the transfer preflight.
+  await f.write('receiving/counts', 8, { purchaseId: f.paid.purchaseId, positionId: f.position, locationId: f.a.id,
+    confirmedLocationCode: f.a.code, countedQuantity: 3, reason: 'A later witnessed shortage' })
+  await transfer.click()
+  await expect(paid).toContainText('Open shortage')
+  await expect(transfer).toBeDisabled()
+  await expect(move).toHaveCount(0)
+  await expect(otherTransfer).toBeDisabled()
+})
