@@ -68,11 +68,14 @@ internal sealed record PutawayCommand : PurchaseChange
     public required Guid CatalogId { get; init; }
     public required Guid LocationId { get; init; }
     public required string ConfirmedLocationCode { get; init; }
+    // Preserve the wire digest of an existing putaway request that omitted this field.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ConfirmedCatalogRevision { get; init; }
     public required int Quantity { get; init; }
 
     protected override bool Valid() => ValidParent && DeliveryId != Guid.Empty &&
         CatalogId != Guid.Empty && LocationId != Guid.Empty && Text(ConfirmedLocationCode, 48) &&
-        ValidQuantity(Quantity);
+        ConfirmedCatalogRevision is null or > 0 && ValidQuantity(Quantity);
 }
 
 internal sealed record OfferCommand : PurchaseChange

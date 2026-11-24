@@ -143,7 +143,24 @@ public sealed class ReceivingTests
             row => row.CommandId == winner.CommandId && row.CorrelationId == winner.CorrelationId);
         Assert.Equal("offer", (await references.Diagnostic(winner.CorrelationId, token)).Kind);
 
-        await references.Save(catalog with
+        var olderIntakePurchase = await receiving.Save(new PurchaseCommand
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = 0, Reference = "PO-older-intake-" + prefix,
+            Source = "Fictional invoice", Currency = "USD", OrderedQuantity = 8, PendingChargeMinor = null
+        }, Guid.NewGuid(), token);
+        var olderDelivery = await receiving.Save(delivery with
+        {
+            CommandId = Guid.NewGuid(), PurchaseId = olderIntakePurchase.EntityId,
+            ExpectedRevision = olderIntakePurchase.Revision
+        }, Guid.NewGuid(), token);
+        var firstPlacementCommand = putaway with
+        {
+            CommandId = Guid.NewGuid(), PurchaseId = olderIntakePurchase.EntityId, DeliveryId = olderDelivery.EntityId,
+            ExpectedRevision = olderDelivery.Revision, Quantity = 3
+        };
+        var firstPlacement = await receiving.Save(firstPlacementCommand, Guid.NewGuid(), token);
+
+        var correction = await references.Save(catalog with
         {
             CommandId = Guid.NewGuid(), Id = item.EntityId, ExpectedRevision = item.Revision, Condition = "used"
         }, Guid.NewGuid(), token);
@@ -158,6 +175,41 @@ public sealed class ReceivingTests
             Backing = [new(secondPosition.EntityId, 1)]
         }, Guid.NewGuid(), token))).Code);
         Assert.Equal(winner.Revision, (await Read()).Revision);
+
+        async Task<PurchaseRow> ReadOlderIntake() => Assert.Single((await receiving.Snapshot(token)).Purchases,
+            p => p.Id == olderIntakePurchase.EntityId);
+        var remaining = firstPlacementCommand with
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = firstPlacement.Revision, Quantity = 2
+        };
+        Assert.Equal("catalog_reconfirmation_required", (await Assert.ThrowsAsync<Fault>(() =>
+            receiving.Save(remaining, Guid.NewGuid(), token))).Code);
+        Assert.Equal("catalog_reconfirmation_required", (await Assert.ThrowsAsync<Fault>(() =>
+            receiving.Save(remaining with { ConfirmedCatalogRevision = item.Revision }, Guid.NewGuid(), token))).Code);
+        var wrongItem = await references.Save(catalog with
+        {
+            CommandId = Guid.NewGuid(), ItemNumber = prefix + "-other"
+        }, Guid.NewGuid(), token);
+        Assert.Equal("catalog_ineligible", (await Assert.ThrowsAsync<Fault>(() =>
+            receiving.Save(remaining with { CatalogId = wrongItem.EntityId, ConfirmedCatalogRevision = wrongItem.Revision },
+                Guid.NewGuid(), token))).Code);
+        var rejected = await ReadOlderIntake();
+        Assert.Equal(firstPlacement.Revision, rejected.Revision);
+        AssertStock(rejected, 8, 5, 3);
+
+        var confirmed = remaining with { ConfirmedCatalogRevision = correction.Revision };
+        var reconfirmed = await receiving.Save(confirmed, Guid.NewGuid(), token);
+        Assert.Equal(reconfirmed, await receiving.Save(confirmed, Guid.NewGuid(), token));
+        Assert.Equal(firstPlacement, await receiving.Save(firstPlacementCommand, Guid.NewGuid(), token));
+        var reconfirmedPurchase = await ReadOlderIntake();
+        AssertStock(reconfirmedPurchase, 8, 3, 5);
+        var unchangedDelivery = Assert.Single(reconfirmedPurchase.Deliveries);
+        Assert.Equal(olderDelivery.EntityId, unchangedDelivery.Id);
+        Assert.Equal(item.EntityId, unchangedDelivery.CatalogId);
+        Assert.Equal(item.Revision, unchangedDelivery.CatalogRevision);
+        Assert.Equal(800, unchangedDelivery.ItemCostMinor);
+        Assert.Equal(item.Revision, Assert.Single(unchangedDelivery.Placements, row => row.Id == firstPlacement.EntityId).CatalogRevision);
+        Assert.Equal(correction.Revision, Assert.Single(unchangedDelivery.Placements, row => row.Id == reconfirmed.EntityId).CatalogRevision);
     }
 
     private static void AssertStock(PurchaseRow purchase, int onHand, int unavailable, int free)

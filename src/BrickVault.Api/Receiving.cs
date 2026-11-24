@@ -53,10 +53,10 @@ internal sealed class Receiving(NpgsqlDataSource db)
                         Nullable(NpgsqlDbType.Uuid, d.CatalogId), Nullable(NpgsqlDbType.Integer, d.ItemCostMinor)),
                     PutawayCommand p => Query(connection, tx, """
                         INSERT INTO brickvault.placements(id,command_id,purchase_id,delivery_id,catalog_id,
-                            location_id,location_code,quantity)
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                            location_id,location_code,quantity,confirmed_catalog_revision)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
                         """, id, p.CommandId, p.PurchaseId, p.DeliveryId, p.CatalogId, p.LocationId,
-                        p.ConfirmedLocationCode, p.Quantity),
+                        p.ConfirmedLocationCode, p.Quantity, Nullable(NpgsqlDbType.Integer, p.ConfirmedCatalogRevision)),
                     _ => throw new InvalidOperationException()
                 };
                 await insert.ExecuteNonQueryAsync(token);
@@ -72,12 +72,15 @@ internal sealed class Receiving(NpgsqlDataSource db)
             throw Rejected("duplicate_receiving_reference", "This purchase or delivery reference already exists.");
         }
         catch (PostgresException ex) when (ex.ConstraintName is
-            "receiving_quantity" or "receiving_catalog" or "receiving_delivery" or "receiving_bin" or "receiving_backing")
+            "receiving_quantity" or "receiving_catalog" or "receiving_catalog_reconfirmation" or
+            "receiving_delivery" or "receiving_bin" or "receiving_backing")
         {
             throw ex.ConstraintName switch
             {
                 "receiving_quantity" => Rejected("quantity_unavailable", "There are fewer units available for this action."),
                 "receiving_catalog" => Rejected("catalog_ineligible", "Confirm a matching, eligible catalog identity and condition."),
+                "receiving_catalog_reconfirmation" => Rejected("catalog_reconfirmation_required",
+                    "The catalog changed since receipt or confirmation. Review the current identity and confirm it before putaway."),
                 "receiving_delivery" => Rejected("delivery_mismatch", "Select a delivery from this purchase."),
                 "receiving_bin" => Rejected("bin_confirmation_mismatch", "The confirmed code must match the selected bin."),
                 _ => Rejected("backing_mismatch", "Select matching stock placements that are available to back this offer.")

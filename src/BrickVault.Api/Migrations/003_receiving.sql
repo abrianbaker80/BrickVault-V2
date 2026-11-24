@@ -34,6 +34,7 @@ CREATE TABLE brickvault.placements (
     delivery_id uuid NOT NULL,
     catalog_id uuid NOT NULL REFERENCES brickvault.catalog(id),
     catalog_revision integer NOT NULL CHECK (catalog_revision > 0),
+    confirmed_catalog_revision integer CHECK (confirmed_catalog_revision = catalog_revision),
     location_id uuid NOT NULL REFERENCES brickvault.locations(id),
     location_code varchar(48) NOT NULL,
     quantity integer NOT NULL CHECK (quantity BETWEEN 1 AND 1000000),
@@ -109,9 +110,13 @@ BEGIN
 
     SELECT revision INTO NEW.catalog_revision FROM brickvault.catalog
     WHERE id = NEW.catalog_id AND integration_eligible FOR SHARE;
-    IF NOT FOUND OR (delivery.catalog_id IS NOT NULL
-        AND (delivery.catalog_id <> NEW.catalog_id OR delivery.catalog_revision <> NEW.catalog_revision)) THEN
+    IF NOT FOUND OR (delivery.catalog_id IS NOT NULL AND delivery.catalog_id <> NEW.catalog_id) THEN
         RAISE check_violation USING CONSTRAINT = 'receiving_catalog';
+    END IF;
+    IF (NEW.confirmed_catalog_revision IS NOT NULL AND NEW.confirmed_catalog_revision <> NEW.catalog_revision)
+        OR (delivery.catalog_revision <> NEW.catalog_revision
+            AND NEW.confirmed_catalog_revision IS DISTINCT FROM NEW.catalog_revision) THEN
+        RAISE check_violation USING CONSTRAINT = 'receiving_catalog_reconfirmation';
     END IF;
     PERFORM 1 FROM brickvault.locations
     WHERE id = NEW.location_id AND code = NEW.location_code FOR SHARE;
