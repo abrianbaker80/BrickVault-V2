@@ -1446,6 +1446,95 @@
           }
         }
       }
+    },
+    "/api/v1/receiving/bins/{locationId}/positions/{positionId}/shortages/{caseId}/adjustment-review": {
+      "get": {
+        "operationId": "getStockAdjustmentReview",
+        "parameters": [
+          {
+            "name": "locationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "positionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 112,
+              "pattern": "^v1\\.[0-9a-f]{32}\\.[0-9a-f]{32}\\.[1-9][0-9]{0,9}\\.[0-9a-f]{32}$"
+            },
+            "description": "Pass nextAfter from the same case, position and purchase revision. Reload from page one after stale_adjustment_page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "description": "Review an open witnessed shortage and the minimum offer backing reduction a confirmed loss would need. Whole-position totals are independent of page size. This authenticated read changes no stock or allocation.",
+        "responses": {
+          "200": {
+            "description": "Consistent shortage review",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockAdjustmentReview"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Purchase changed after the cursor was issued. Reload the review from the first page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4562,6 +4651,225 @@
           "unknownCostFreeQuantity",
           "knownItemCostMinor",
           "knownPurchaseComponentsMinor"
+        ],
+        "additionalProperties": false
+      },
+      "AdjustmentReceiptEvidence": {
+        "type": "object",
+        "properties": {
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deliveryReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deliveryQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "itemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000,
+            "description": "Original whole-delivery item cost. Zero is documented and null is unknown."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "originPlacementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "deliveryId",
+          "deliveryReference",
+          "deliveryQuantity",
+          "itemCostMinor",
+          "currency",
+          "originPlacementId",
+          "catalogId",
+          "catalogRevision"
+        ],
+        "additionalProperties": false
+      },
+      "AdjustmentOfferBacking": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "backedQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "Current backing from this position only."
+          },
+          "unitPriceMinor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000000
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          }
+        },
+        "required": [
+          "id",
+          "backedQuantity",
+          "unitPriceMinor",
+          "currency"
+        ],
+        "additionalProperties": false
+      },
+      "StockAdjustmentReview": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "stock-adjustment-review"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "The case and aggregate facts are complete at asOf. Follow nextAfter for more offer rows."
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "caseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/AdjustmentReceiptEvidence"
+          },
+          "latestObservation": {
+            "$ref": "#/components/schemas/StockCountObservation"
+          },
+          "ledgerQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "candidateLossQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "Current ledger minus observed quantity, floored at zero. This read posts no loss."
+          },
+          "postLossLedgerQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "protectedProjectQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "protectedProjectShortfall": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "offerBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "Sum of current offer backing at this position across all pages."
+          },
+          "offerCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "Number of offers backed at this position across all pages."
+          },
+          "offerCapacityAfterLoss": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "Projected ledger less protected project units, floored at zero."
+          },
+          "minimumOfferBackingReduction": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "Minimum reduction needed across all offer backing. No offer is selected."
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdjustmentOfferBacking"
+            },
+            "maxItems": 100
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 112,
+            "pattern": "^v1\\.[0-9a-f]{32}\\.[0-9a-f]{32}\\.[1-9][0-9]{0,9}\\.[0-9a-f]{32}$"
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "location",
+          "positionId",
+          "caseId",
+          "purchaseId",
+          "purchaseRevision",
+          "receipt",
+          "latestObservation",
+          "ledgerQuantity",
+          "candidateLossQuantity",
+          "postLossLedgerQuantity",
+          "protectedProjectQuantity",
+          "protectedProjectShortfall",
+          "offerBackedQuantity",
+          "offerCount",
+          "offerCapacityAfterLoss",
+          "minimumOfferBackingReduction",
+          "offers",
+          "nextAfter"
         ],
         "additionalProperties": false
       }
