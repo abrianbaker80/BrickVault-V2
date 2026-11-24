@@ -141,7 +141,33 @@ Invoke-Foundation stop --state $state
 Invoke-Foundation start --state $destination
 ```
 
-The qualification command exercises publication, retry and fresh recovery with a local rclone test destination. Issue #6 contains the separate external-storage rehearsal result. The dedicated server has a nightly schedule and freshness monitoring. Record retention decisions and a timed full-guest rebuild before production cutover. [M2 checkpoint](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
+The qualification command exercises publication, retry and fresh recovery with a local rclone test destination. Issue #6 contains the separate external-storage rehearsal result. The dedicated server has a nightly schedule and freshness monitoring. The timed full-guest rehearsal below covers the M2 reference dataset. Set retention and recovery targets for the production workload before cutover. [M2 checkpoint](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
+
+## Rehearse a full guest rebuild
+
+Use a recovery computer with hardware virtualization, space for a new guest disk and a trusted Ubuntu 24.04 x64 recovery environment. Keep an independent copy of the expected workspace, catalog, locations, audit entries, original command payloads and receipts. Have the source age identity and public receipt trust file available in recovery custody.
+
+1. Start the timer before provisioning the VM or installing missing tools. Verify the OS image against the distributor's signed checksum using its trusted signing key. Boot a fresh Ubuntu 24.04 x64 guest with its own disk, hostname and private HTTPS origin. Limit access to the rehearsal clients and the administration channel. Pin the guest's SSH host key using its hypervisor console.
+2. On the guest, install the reviewed foundation scripts, the service account and nftables as described under [Run Workbench on the private server](#run-workbench-on-the-private-server). Run `python3 scripts/foundation/manage.py setup` to install the pinned tools from verified downloads and signed OS packages. Use the same PostgreSQL build and architecture on the recovery workstation and guest. Leave the guest service stopped and its instance path unused.
+3. Fetch the encrypted archive and signed sidecar from the provider. Authenticate both against the independent public trust file. On the trusted recovery workstation, run the commands below from the reviewed checkout as the recovery user in an isolated Linux network namespace with loopback enabled. Set `DOWNLOAD` and `POINT` to the downloaded directory and point name, `STATE` and `NEW_KEYS` to separate fresh private paths, and `PORT` to the rehearsal origin's port. Keep both decryption identities in workstation custody. [Provider download and public trust](m2-cloud-receipts.md)
+
+   ```sh
+   set -eu
+   umask 077
+   python3 scripts/foundation/cloud_receipt.py verify \
+     --directory "$DOWNLOAD" --point "$POINT" --trust "$TRUST"
+   python3 scripts/foundation/offhost.py recover \
+     --file "$DOWNLOAD/$POINT.age" --receipt "$DOWNLOAD/$POINT.json" \
+     --identity "$SOURCE_IDENTITY" --state "$STATE" --recovery "$NEW_KEYS" --port "$PORT"
+   test ! -e "$STATE/pgdata/postmaster.pid"
+   test -z "$(find "$STATE" -name '*.agekey' -print -quit)"
+   LC_ALL=C .tools/foundation/pgsql/bin/pg_controldata "$STATE/pgdata" |
+     grep -Eq '^Database cluster state:[[:space:]]+shut down$'
+   ```
+
+4. Transfer only the stopped instance tree, including its exact verified release, over the pinned SSH channel into an unused private staging directory on the guest. Preserve modes and assign ownership to the guest's `brickvault` account. Compare hashes for the transferred files against the stopped source. After they match, rename the staged tree to the instance path used by the unit. As that account, run `python3 scripts/foundation/manage.py configure-lan --state "$STATE_ON_GUEST" --lan-origin "$REHEARSAL_ORIGIN"`. Install the egress and Workbench units and enable and start Workbench using the server procedure above.
+5. Pin the rebuilt gateway's public CA in a fresh client profile. Sign in with its new owner credential. Compare the workspace identity, catalog, locations and audit to the separate checkpoint. Replay the original commands with their original IDs and payloads. Confirm identical receipts, unchanged audit counts and settled worker jobs. Record elapsed time to this first authenticated comparison.
+6. Reboot the rehearsal VM. Confirm a new boot ID, automatic service readiness and the same CA. Sign in again from the client and repeat the comparisons and replays. Stop the timer when those checks pass and manually power down the rehearsal VM. Record the elapsed time, archive size, guest resources and any image, package, tool or recovery materials available before timing began. A production recovery objective needs measurements at the expected production volume.
 
 ## Compatibility and maintenance
 
