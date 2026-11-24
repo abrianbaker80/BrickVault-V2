@@ -68,12 +68,15 @@ Sessions expire after eight hours. The worker purges expired session rows. Audit
 
 ## Run Workbench on the private server
 
-Give the guest a stable private DNS or mDNS name and permit the HTTPS port from authorized workstations in its firewall. Restrict administration to the management network. Install nftables from the signed guest package repository. Install the pinned tools, reviewed Linux release and repository scripts under `/opt/brickvault-v2` as root. Create the dedicated operating system account `brickvault` with a private home at `/var/lib/brickvault-v2`. Generate the age identity on the recovery workstation. Deliver only its public recipient to the guest.
+Give the guest a stable private DNS or mDNS name and permit the HTTPS port from authorized workstations in its firewall. Restrict administration to the management network. Install nftables from the signed guest package repository. Install the pinned tools, reviewed Linux release and repository scripts under `/opt/brickvault-v2` as root. Generate the age identity on the recovery workstation. Deliver only its public recipient to the guest.
+
+The hosted installer creates a locked-password system user and group with a private home and a shell for the controller's restricted SSH capture key. Stock Ubuntu 24.04 reserves non-root UIDs and GIDs 1–999 for system accounts. When a regular user's last login session ends, systemd-logind can remove the shared memory still in use by PostgreSQL. Run the installer before initializing a new instance. The Workbench service also checks its identity before starting PostgreSQL. [PostgreSQL 18 kernel resources, section 18.4.2](https://www.postgresql.org/docs/18/kernel-resources.html)
 
 Run these commands in a Linux shell after setting `WORKBENCH_ORIGIN` to the canonical HTTPS origin (including port 49480) and `PUBLIC_RECIPIENT` to the age public recipient. Keep the administrator's code and release files read-only to the service account.
 
 ```sh
 cd /opt/brickvault-v2
+sudo python3 scripts/foundation/guest_account.py install
 sudo -H -u brickvault python3 scripts/foundation/manage.py init \
   --state /var/lib/brickvault-v2/instance --port 49480 \
   --lan-origin "$WORKBENCH_ORIGIN" --recipient "$PUBLIC_RECIPIENT"
@@ -86,6 +89,13 @@ sudo -H -u brickvault python3 scripts/foundation/manage.py status --state /var/l
 Deliver the gateway's public CA from `instance/caddy-store/pki/authorities/local/root.crt` over the authenticated administration channel. Calculate its SHA-256 over the DER certificate and verify it on the workstation. In a private workstation directory, save the CA and a `connection.json` containing `origin`, `ca` (the certificate path) and `caSha256` (the lowercase DER digest). Open Workbench with `python scripts/foundation/browser.py remote --connection <connection.json>`. The launcher trusts this CA within the dedicated Firefox profile. Deliver the operator password separately. Only the HTTPS gateway accepts application traffic from the LAN. PostgreSQL and the API listen on loopback. A dedicated nftables chain limits new connections from the application account to loopback. Established workstation replies and operating system updates continue normally.
 
 Use systemd to start and stop the supervised service. Before a credential rotation or other maintenance requiring a stopped instance, stop the unit, use the management command, then restart the unit and verify readiness and sign-in. Capture a fresh recovery point before a migration or bulk change. [Nightly backup operations](m2-hosted-backups.md) · [Recovery after controller loss](m2-cloud-receipts.md)
+
+### Migrate a guest that uses a regular service UID
+
+1. Verify a current signed recovery point, pause controller captures, and let the current capture finish. Record the service UID/GID and the checksum of its forced-command `authorized_keys` file privately. Stop the Workbench unit and confirm that its PostgreSQL process and service-account login sessions have ended.
+2. Keep the account name, instance and SSH key. Select unused system IDs from Ubuntu's system-account allocation range and confirm each is unused with `getent`. As root, use `groupmod -g "$new_gid" brickvault` and `usermod -u "$new_uid" -g brickvault -s /bin/sh brickvault`, then `passwd -l brickvault`. Reassign files bearing the old UID or GID within the service home and any deliberately mounted instance directories. Preserve modes, including the 0700 home and SSH directory and 0600 authorized key file. Recheck ownership and the key checksum.
+3. Install the updated scripts and units. Run `guest_account.py install` as root to validate the existing account. Run `systemctl daemon-reload` and `systemctl restart brickvault-egress.service` before starting Workbench. nftables resolves the account name to a numeric UID when loading the chain. Confirm the output rule targets the new UID with `nft -n list chain inet brickvault_egress output`.
+4. Start Workbench, confirm readiness and resume controller captures. Run a fresh controller capture with `nightly.py run --config "$controller_config" --before-change` and wait for its signed provider readback. On the guest, confirm the capture session has logged out and wait through logind's configured `UserStopDelaySec` (10 seconds by default). From the workstation, sign out, sign in again through the pinned Workbench profile, and open the workspace. Confirm the expected records are visible and the service stayed running.
 
 ## Back up and restore to a second instance
 

@@ -25,6 +25,7 @@ jobs:
       - run: python3 scripts/foundation/manage.py build
       - run: npx playwright install --with-deps firefox
         working-directory: src/workbench
+      - run: python3 scripts/foundation/verify_guest_account.py
       - run: python3 scripts/foundation/verify_cloud_receipt.py
       - run: sudo python3 scripts/foundation/verify_nightly.py
       - run: python3 scripts/foundation/manage.py verify --port 25440

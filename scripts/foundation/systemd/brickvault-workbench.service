@@ -11,8 +11,8 @@ Group=brickvault
 WorkingDirectory=/opt/brickvault-v2
 Environment=HOME=/var/lib/brickvault-v2
 Environment=PYTHONDONTWRITEBYTECODE=1
-StateDirectory=brickvault-v2
-StateDirectoryMode=0700
+ReadWritePaths=/var/lib/brickvault-v2
+ExecStartPre=/usr/bin/python3 /opt/brickvault-v2/scripts/foundation/guest_account.py check
 ExecStart=/usr/bin/python3 /opt/brickvault-v2/scripts/foundation/manage.py supervise --state /var/lib/brickvault-v2/instance
 Restart=on-failure
 RestartSec=5s
