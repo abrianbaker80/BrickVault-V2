@@ -72,12 +72,8 @@ test('a partial move commits 256 selected offer allocations in a single receipt'
   await form.getByLabel('Reason', { exact: true }).fill('Counted 256 backed units')
   const lines = form.getByRole('spinbutton', { name: /Move backed units for offer/ })
   await expect(lines).toHaveCount(256)
-  await lines.evaluateAll(inputs => {
-    for (const input of inputs as HTMLInputElement[]) {
-      input.value = '1'
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    }
-  })
+  for (const offerId of offers)
+    await form.getByLabel('Move backed units for offer ' + offerId, { exact: true }).fill('1')
   await expect(form).toContainText('256 units to move · 256 backed')
   const saved = page.waitForResponse(r => r.url().endsWith('/receiving/transfers') && r.request().method() === 'POST')
   await form.getByRole('button', { name: 'Confirm transfer' }).click()
