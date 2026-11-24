@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -7,6 +6,10 @@ namespace BrickVault.Api;
 
 internal sealed record TransferCommand
 {
+    // One million distinct lines is the physical upper bound for one position.
+    // 128 MiB admits that many normally serialized GUID/quantity pairs plus the command envelope.
+    internal const int MaxRequestBodyBytes = 128 * 1024 * 1024;
+
     public required Guid CommandId { get; init; }
     public required int ExpectedRevision { get; init; }
     public required Guid PurchaseId { get; init; }
@@ -32,14 +35,36 @@ internal sealed record TransferCommand
             SourcePlacementId == Guid.Empty || SourceLocationId == Guid.Empty || DestinationLocationId == Guid.Empty ||
             SourceLocationId == DestinationLocationId || !TextFits(ConfirmedSourceLocationCode, 48) ||
             !TextFits(ConfirmedDestinationLocationCode, 48) || !ValidQuantity(Quantity) || !TextFits(Reason, 200) ||
-            Backing is null || (MoveAllBacking && Backing.Length != 0) ||
-            Backing.Any(b => b is null || b.OfferId == Guid.Empty || !ValidQuantity(b.Quantity)) ||
-            Backing.Select(b => b.OfferId).Distinct().Count() != Backing.Length)
-            throw new Fault(400, "invalid_transfer", "Supply both bin confirmations, a quantity and a reason. Choose distinct offer allocations or all backing.");
+            Backing is null || (MoveAllBacking && Backing.Length != 0))
+            throw Invalid();
+
+        if (Backing.Length > Quantity) throw OverAllocated();
+        HashSet<Guid> offers = [];
+        var remaining = Quantity;
+        foreach (var line in Backing)
+        {
+            if (line is null || line.OfferId == Guid.Empty || !ValidQuantity(line.Quantity) || !offers.Add(line.OfferId))
+                throw Invalid();
+            if (line.Quantity > remaining) throw OverAllocated();
+            remaining -= line.Quantity;
+        }
     }
 
-    public byte[] Digest() => SHA256.HashData(Encoding.UTF8.GetBytes(
-        "transfer\n" + JsonSerializer.Serialize(this, Wire.Json)));
+    private static Fault Invalid() => new(400, "invalid_transfer",
+        "Supply both bin confirmations, a quantity and a reason. Choose distinct offer allocations or all backing.");
+
+    private static Fault OverAllocated() => new(409, "transfer_backing_unavailable",
+        "The selected offer quantities exceed the physical quantity being moved.");
+
+    public byte[] Digest()
+    {
+        using var hash = SHA256.Create();
+        using var stream = new CryptoStream(Stream.Null, hash, CryptoStreamMode.Write);
+        stream.Write("transfer\n"u8);
+        JsonSerializer.Serialize(stream, this, Wire.Json);
+        stream.FlushFinalBlock();
+        return hash.Hash!;
+    }
 }
 
 internal sealed record TransferBacking([property: JsonRequired] Guid OfferId, [property: JsonRequired] int Quantity);
