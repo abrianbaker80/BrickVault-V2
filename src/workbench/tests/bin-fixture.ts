@@ -53,7 +53,7 @@ export async function fixture(page: Page) {
     backing: [{ placementId: position, quantity: 3 }] })
   await page.getByRole('button', { name: 'Refresh', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Inspect ' + a.name })).toBeVisible()
-  return { a, b, empty, paid, unknown, catalogId, write, firstOffer, secondOffer: () => write('receiving/offers', 5, {
+  return { a, b, empty, paid, unknown, catalogId, position, write, firstOffer, secondOffer: () => write('receiving/offers', 5, {
     purchaseId: paid.purchaseId, catalogId, unitPriceMinor: 225, backing: [{ placementId: position, quantity: 2 }]
   }), item: fields.name, headers, revise: () => write('catalog', 1, {
     ...fields, id: catalogId, name: 'Reidentified plate ' + key

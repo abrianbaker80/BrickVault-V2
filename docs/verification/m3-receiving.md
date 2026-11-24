@@ -50,6 +50,12 @@ If a count shows fewer pieces than expected, follow **Review build holds for thi
 
 In an isolated workspace, receive ten pieces at a documented cost, back an unpublished offer with two, then hold three for one project and four for another. Count five. Verify that both reservations still show in full and new reservations are blocked. Release two pieces from the second project. Check that the first still holds three, the second holds two, the offer still backs two and the ledger still shows ten. Retry the saved release and verify its original receipt, then repeat the reads after encrypted restore. [Build hold qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/23)
 
+## Review the effect of a count shortage
+
+Open the count receipt and expand **Review stock adjustment**. Confirm the latest witnessed count and current ledger quantity. Check how many units would remain after a loss, how many are reserved for projects and which unpublished offers use this position. The receipt cost covers the entire delivery in its own currency. Unknown cost and a documented zero display separately.
+
+For example, if a receipt position has six units, one reserved for a project and five backing two unpublished offers, a count of three leaves capacity for two units of offer backing. The review shows that three units of backing need a decision. Open another page of offers to identify all affected commitments. If another operator records a newer count, reload the review to see the revised quantities. Opening this review leaves the stock ledger, commitments and recorded costs intact.
+
 ## Stage a schema upgrade
 
 Build the current release from the checkout. Stop the source instance and use a new output directory with room for another complete cluster. The command copies the stopped cluster, operator credentials, workspace identity and established certificate authority into private staging. It applies the candidate migrations and database grants, compares the original business records and verifies the opening stock and offer backing in both directions against the receiving records. Existing positions retain their IDs. Transferring stock requires schema 4. A successful run exposes the stopped candidate at `<output>/instance`. Preserve the original instance and its matching encrypted backup.
