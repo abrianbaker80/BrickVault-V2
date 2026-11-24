@@ -13,6 +13,7 @@ import shutil
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -382,6 +383,93 @@ def qualify_listener_probe():
     probe_listener("127.0.0.1", port)
 
 
+def session_lookups(s):
+    return set(s.sql("SELECT encode(lookup,'hex') FROM brickvault.sessions;").splitlines())
+
+
+def expire_one_session(s, first, other, password):
+    before = session_lookups(s)
+    other.login(password)
+    current = session_lookups(s)
+    renewed = current - before
+    require(
+        len(before) == len(current) == 2 and len(renewed) == 1,
+        "Signing in again did not replace exactly one session.",
+    )
+    expired = renewed.pop()
+    require(
+        s.sql(
+            f"UPDATE brickvault.sessions SET expires_at=statement_timestamp() - interval '1 minute' "
+            f"WHERE lookup=decode('{expired}','hex') RETURNING 1;",
+            role="bv_migrator",
+        )
+        == "1",
+        "The isolated fixture did not expire exactly one row.",
+    )
+    other.call("workspace", expected=401)
+    first.call("workspace")
+    require(
+        session_lookups(s) == current,
+        "The expired cookie was rejected only after the session row was removed.",
+    )
+    # Roll back the deliberately unfiltered worker query so the paused worker can later clean it.
+    require(
+        s.sql(
+            r"""
+            BEGIN;
+            DELETE FROM brickvault.sessions;
+            \echo :ROW_COUNT
+            ROLLBACK;
+            """,
+            role="bv_worker",
+        )
+        == "1",
+        "Unfiltered worker DELETE was not restricted to the expired row.",
+    )
+    return current - {expired}
+
+
+def legacy_grants_test(s, archive):
+    refresh = [
+        sys.executable,
+        Path(__file__).with_name("manage.py"),
+        "refresh-grants",
+        "--state",
+        s.path,
+    ]
+    expected_failure(lambda: execute(refresh))
+    stop(s)
+    s.pg_start()
+    try:
+        # Reproduce the prior M2 grants in this stopped, disposable cluster for the old archive.
+        s.sql(
+            """
+            BEGIN;
+            ALTER TABLE brickvault.sessions DISABLE ROW LEVEL SECURITY;
+            DROP POLICY sessions_api ON brickvault.sessions;
+            DROP POLICY sessions_worker_read ON brickvault.sessions;
+            DROP POLICY sessions_worker_delete ON brickvault.sessions;
+            COMMIT;
+            """,
+            role="bv_migrator",
+        )
+        sessions = session_lookups(s)
+        require(sessions, "Legacy backup test needs source session rows.")
+        backup(s, archive)
+    finally:
+        s.pg_stop()
+    execute(refresh)
+    execute(refresh)
+    start(s)
+    require(
+        session_lookups(s) == sessions
+        and s.sql("SELECT row_security_active('brickvault.sessions');", role="bv_worker")
+        == "t",
+        "Repeat maintenance did not preserve source sessions and enable worker row security.",
+    )
+    print("Stopped-instance grant refresh and repeat: passed.", flush=True)
+
+
 def verify(port):
     if not 1024 <= port <= 65527:
         raise ValueError("Qualification needs nine consecutive unprivileged ports.")
@@ -514,6 +602,7 @@ def verify(port):
                 lambda r: r["workerState"] == "stale",
                 secs=30,
             )
+            surviving_session = expire_one_session(s, first, other, password)
             name = {
                 **loc,
                 "id": replay["entityId"],
@@ -543,6 +632,28 @@ def verify(port):
             )
             (s.path / "pause-worker").unlink()
             poll(lambda: first.call(diag), lambda r: r["jobState"] == "done")
+            poll(lambda: session_lookups(s), lambda rows: rows == surviving_session)
+            other.call("workspace", expected=401)
+            require(
+                any(
+                    entry["commandId"] == changed["commandId"]
+                    and entry["correlationId"] == changed["correlationId"]
+                    for entry in first.call("workspace")["audit"]
+                ),
+                "Worker recovery lost the surviving session or correlated audit.",
+            )
+            other.login(password)
+            other.call("session", "DELETE", expected=204)
+            other.call("workspace", expected=401)
+            require(
+                session_lookups(s) == surviving_session,
+                "API sign-out removed the wrong session or failed to revoke the signed-out session.",
+            )
+            first.call("workspace")
+            print(
+                "Expired cookie denied before purge, worker DELETE bounded, restart purged only expired row, active sibling and correlated audit preserved: passed.",
+                flush=True,
+            )
             poll(
                 lambda: first.call("diagnostics/" + blocked["correlationId"]),
                 lambda r: r["jobState"] == "blocked",
@@ -651,6 +762,12 @@ def verify(port):
             wrong = lab / "recovery" / "different.agekey"
             execute([BIN / ("age-keygen" + EXT), "-o", wrong])
             expected_failure(lambda: restore(s, archive, wrong, "bv_m2_broken"))
+            legacy_archive = lab / "recovery" / "prior-grants.age"
+            legacy_grants_test(s, legacy_archive)
+            require(
+                first.call("workspace")["audit"] == before["audit"],
+                "Grant refresh changed the authenticated session or its audit.",
+            )
             from verify_offhost import verify_offhost
 
             verify_offhost(s, lab, port + 3, before, Browser)
@@ -705,7 +822,20 @@ def verify(port):
                     == "0",
                     "Restore revived an owner session.",
                 )
-                activate(rescue, target)
+                legacy_target = "bv_m2_restore_prior_grants"
+                restore(rescue, legacy_archive, key, legacy_target)
+                require(
+                    rescue.sql("SELECT count(*) FROM brickvault.sessions;", legacy_target)
+                    == "0"
+                    and rescue.sql(
+                        "SELECT row_security_active('brickvault.sessions');",
+                        legacy_target,
+                        "bv_worker",
+                    )
+                    == "t",
+                    "Restore of prior grants revived sessions or omitted worker row security.",
+                )
+                activate(rescue, legacy_target)
                 start(rescue)
                 recovered = Browser(rescue)
                 recovered.call("workspace", expected=401)
@@ -727,6 +857,10 @@ def verify(port):
                     recovered.call("catalog", "POST", catalog, expected=(200, 201))
                     == rec,
                     "Restored command replay differed.",
+                )
+                print(
+                    "Current and prior archive restore exclude live sessions; prior archive signs in with hardened worker policy: passed.",
+                    flush=True,
                 )
 
             finally:
