@@ -4,6 +4,7 @@ import argparse
 import base64
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,9 +12,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
-from cloud_receipt import FIELDS, SIDECAR, load_small, publish_local, verify_sidecar
+from cloud_receipt import (
+    FIELDS,
+    SIDECAR,
+    encoded,
+    load_small,
+    publish_local,
+    validated_pin,
+    verify_sidecar,
+)
 from instance import child_env, write_private
 from offhost import (
     POINT,
@@ -27,6 +37,10 @@ from offhost import (
     verify_file,
 )
 from runtime import exclusive
+
+# Wait for the desktop sync client to publish the already captured files.
+READBACK_DELAYS = (60, 180, 420, 900, 1800, 3600)
+READBACK_WINDOW = 2 * 60 * 60
 
 
 @contextmanager
@@ -279,9 +293,75 @@ def sync_point(ssh, target, state, receipt, trust):
     return copied
 
 
-def verify_onedrive(config, state, receipts, status):
+def record_readback(profile, trust, state, receipt, scope, deadline):
     import onedrive_reader
 
+    point = receipt["point"]
+    with tempfile.TemporaryDirectory(dir=state) as temp:
+        directory = Path(temp) / "download"
+        onedrive_reader.download(
+            profile,
+            trust,
+            point,
+            directory,
+            expected_receipt=receipt,
+            deadline=deadline,
+        )
+    now = datetime.now(timezone.utc).isoformat()
+    write_private(
+        state / "onedrive-readbacks" / (point + ".json"),
+        json.dumps(
+            {
+                "point": point,
+                "sha256": receipt["sha256"],
+                "verifiedAt": now,
+                **scope,
+            }
+        ),
+    )
+    return now
+
+
+def scope_id(scope):
+    return hashlib.sha256(encoded(scope)).hexdigest()
+
+
+def restore_cloud_mark(scope, proofs, status):
+    marks = status.setdefault("cloudMarks", {})
+    previous = status.get("cloudPoint")
+    if previous and "cloudScope" not in status:
+        # Legacy readbacks stored the account enrollment beside the point.
+        proof = load_small(proofs / (validate_point(previous) + ".json"))
+        if proof.get("point") != previous or not proof.get("enrollment"):
+            raise RecoveryError(
+                "The previous OneDrive point needs its original readback proof."
+            )
+        prior = {"enrollment": proof["enrollment"], "lineage": proof.get("lineage")}
+        status["cloudScope"] = scope_id(prior)
+        marks[status["cloudScope"]] = {
+            "cloudPoint": previous,
+            "cloudVerifiedAt": status["cloudVerifiedAt"],
+            "sha256": proof["sha256"],
+        }
+    active = scope_id(scope)
+    legacy = scope_id(scope | {"lineage": None})
+    known_scope = active if marks.get(active, {}).get("cloudPoint") else legacy
+    known = marks.get(known_scope)
+    if known:
+        status.update(
+            cloudScope=known_scope,
+            cloudPoint=known["cloudPoint"],
+            cloudVerifiedAt=known["cloudVerifiedAt"],
+        )
+    return active, legacy, known["cloudPoint"] if known else ""
+
+
+def verify_onedrive(
+    config, state, receipts, status, *, allow_retry=True, previous_local=None
+):
+    import onedrive_reader
+
+    status["cloudSyncVerified"] = False
     profile = onedrive_reader.profile_path(config["oneDriveProfile"])
     authfile = profile / "authorization.json"
     auth = json.loads(authfile.read_text()) if authfile.is_file() else {}
@@ -290,58 +370,117 @@ def verify_onedrive(config, state, receipts, status):
             "Complete the Microsoft account sign-in for the OneDrive read-only backup reader."
         )
     enrollment = [str(profile), auth["verifiedAt"]]
+    _, lineage = validated_pin(load_small(config["receiptTrust"]))
+    scope = {"enrollment": enrollment, "lineage": [str(value) for value in lineage]}
     proofs = state / "onedrive-readbacks"
     proofs.mkdir(mode=0o700, exist_ok=True)
-    latest = receipts[-1]["point"]
-    failures = []
+    latest = max(receipt["point"] for receipt in receipts)
+    legacy_status = "cloudScope" not in status
+    active_scope, legacy_scope, high_water = restore_cloud_mark(scope, proofs, status)
+    current = status["cloudMarks"].setdefault(active_scope, {})
+    last_seen = max(high_water, current.get("controllerPoint", ""))
+    if legacy_status and high_water and previous_local:
+        last_seen = max(last_seen, previous_local)
+    current["controllerPoint"] = max(latest, last_seen)
+    if latest < last_seen:
+        raise RecoveryError(
+            "The controller inventory ends before a previously authenticated recovery point."
+        )
+    pending = []
     for receipt in receipts:
         point = receipt["point"]
         proof_file = proofs / (point + ".json")
         evidence = json.loads(proof_file.read_text()) if proof_file.exists() else {}
+        legacy = status["cloudMarks"].get(legacy_scope, {})
+        if point == legacy.get("cloudPoint") and receipt["sha256"] != legacy["sha256"]:
+            raise RecoveryError(
+                "The controller archive differs from the previously verified OneDrive point."
+            )
         if (
             point != latest
+            and evidence.get("point") == point
             and evidence.get("sha256") == receipt["sha256"]
             and evidence.get("enrollment") == enrollment
+            and evidence.get("lineage") == scope["lineage"]
         ):
             continue
-        try:
-            with tempfile.TemporaryDirectory(dir=state) as temp:
-                directory = Path(temp) / "download"
-                onedrive_reader.download(
-                    profile, config["receiptTrust"], point, directory
+        pending.append(receipt)
+    delays = iter(READBACK_DELAYS if allow_retry else ())
+    deadline = time.monotonic() + READBACK_WINDOW
+    retry_deadline = None
+    status_file = state / "status.json"
+    while pending:
+        status.update(
+            state="checking-onedrive",
+            nextReadbackAt=None,
+            pendingReadbacks=len(pending),
+        )
+        write_private(status_file, json.dumps(status))
+        delayed = []
+        failures = []
+        for index, receipt in enumerate(pending):
+            try:
+                onedrive_reader.remaining_timeout(READBACK_WINDOW, retry_deadline)
+                verified = record_readback(
+                    profile,
+                    config["receiptTrust"],
+                    state,
+                    receipt,
+                    scope,
+                    retry_deadline,
                 )
-                trusted = read_receipt(directory / (point + ".json"), point)
-                if any(trusted.get(field) != receipt.get(field) for field in FIELDS):
-                    raise RecoveryError(
-                        "OneDrive's signed point differs from the selected controller point."
-                    )
-            now = datetime.now(timezone.utc).isoformat()
-            write_private(
-                proof_file,
-                json.dumps(
-                    {
-                        "point": point,
-                        "sha256": receipt["sha256"],
-                        "verifiedAt": now,
-                        "enrollment": enrollment,
-                    }
-                ),
+                point = receipt["point"]
+                if point == status["cloudMarks"].get(legacy_scope, {}).get(
+                    "cloudPoint"
+                ):
+                    del status["cloudMarks"][legacy_scope]
+                if point >= high_water:
+                    high_water = point
+                    mark = {"cloudPoint": point, "cloudVerifiedAt": verified}
+                    current.update(mark)
+                    status.update(cloudScope=active_scope, **mark)
+                    write_private(status_file, json.dumps(status))
+                if point == latest:
+                    status["cloudSyncVerified"] = True
+            except onedrive_reader.ReadbackDeadline as exc:
+                delayed.extend(pending[index:])
+                delay_reason = failure_reason(exc)
+                break
+            except onedrive_reader.ReadbackPending as exc:
+                delayed.append(receipt)
+                delay_reason = failure_reason(exc)
+            except (
+                OSError,
+                ValueError,
+                KeyError,
+                RecoveryError,
+                subprocess.SubprocessError,
+            ) as exc:
+                failures.append(failure_reason(exc))
+        status["pendingReadbacks"] = len(delayed)
+        if failures:
+            raise RecoveryError(
+                f"{len(failures)} OneDrive readback(s) require attention. {failures[0]}"
             )
-            if point == latest:
-                status.update(
-                    cloudSyncVerified=True, cloudPoint=point, cloudVerifiedAt=now
-                )
-        except (
-            OSError,
-            ValueError,
-            KeyError,
-            RecoveryError,
-            subprocess.SubprocessError,
-        ) as exc:
-            failures.append(failure_reason(exc))
-    if failures:
+        if not delayed:
+            return
+        delay = next(delays, None)
+        if delay is not None and time.monotonic() + delay < deadline:
+            status.update(
+                state="waiting-onedrive",
+                nextReadbackAt=(
+                    datetime.now(timezone.utc) + timedelta(seconds=delay)
+                ).isoformat(),
+            )
+            write_private(status_file, json.dumps(status))
+            time.sleep(delay)
+            if time.monotonic() < deadline:
+                pending = delayed
+                retry_deadline = deadline
+                continue
+        status["nextReadbackAt"] = None
         raise RecoveryError(
-            f"{len(failures)} OneDrive readback(s) require attention. {failures[0]}"
+            f"{len(delayed)} OneDrive readback(s) still unavailable. {delay_reason}"
         )
 
 
@@ -361,11 +500,14 @@ def catch_up(config):
     with exclusive(state / "sync.lock"):
         status_file = state / "status.json"
         status = json.loads(status_file.read_text()) if status_file.exists() else {}
+        previous_local = status.get("point")
         status.update(
             attemptedAt=datetime.now(timezone.utc).isoformat(),
             state="running",
             lastError=None,
             cloudSyncVerified=False,
+            nextReadbackAt=None,
+            pendingReadbacks=0,
         )
         write_private(status_file, json.dumps(status))
         try:
@@ -383,11 +525,18 @@ def catch_up(config):
             latest = None
             receipts = []
             failed = []
+            seen = set()
             for line in response.stdout.splitlines():
                 try:
                     receipt = json.loads(line)
+                    point = validate_point(receipt["point"])
+                    if point in seen:
+                        raise RecoveryError(
+                            "The controller inventory contains a duplicate recovery point."
+                        )
+                    seen.add(point)
                     copied += int(sync_point(ssh, target, state, receipt, trust))
-                    latest = receipt["point"]
+                    latest = max(latest or "", point)
                     receipts.append(receipt)
                 except (
                     OSError,
@@ -408,7 +557,14 @@ def catch_up(config):
                 )
             if receipts and config.get("oneDriveProfile"):
                 try:
-                    verify_onedrive(config, state, receipts, status)
+                    verify_onedrive(
+                        config,
+                        state,
+                        receipts,
+                        status,
+                        allow_retry=not failed,
+                        previous_local=previous_local,
+                    )
                 except (
                     OSError,
                     ValueError,
@@ -418,6 +574,7 @@ def catch_up(config):
                 ) as exc:
                     failed.append(failure_reason(exc))
             if failed:
+                status["cloudSyncVerified"] = False
                 raise RecoveryError(
                     f"{len(failed)} mirror point(s) require attention. {failed[0]}"
                 )
@@ -455,10 +612,16 @@ def health(config):
         fresh = timedelta(0) <= age <= timedelta(hours=config.get("freshnessHours", 30))
     cloud_fresh = (
         fresh
+        and status.get("state") == "verified-onedrive"
         and status.get("point") == status.get("cloudPoint")
         and status.get("cloudSyncVerified") is True
     )
-    print(json.dumps(status | {"fresh": fresh, "cloudFresh": cloud_fresh}))
+    public_status = {
+        key: value
+        for key, value in status.items()
+        if key not in ("cloudScope", "cloudMarks")
+    }
+    print(json.dumps(public_status | {"fresh": fresh, "cloudFresh": cloud_fresh}))
     if (
         not fresh
         or status.get("state") == "failed"
