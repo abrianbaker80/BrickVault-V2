@@ -1026,6 +1026,74 @@
           }
         ]
       }
+    },
+    "/api/v1/inventory/positions/{positionId}/movements": {
+      "get": {
+        "operationId": "readPositionMovements",
+        "parameters": [
+          {
+            "name": "positionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Movements involving only the selected position, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionMovementPage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Location is not registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3463,6 +3531,101 @@
           "correlationId"
         ],
         "additionalProperties": false
+      },
+      "PositionMovementPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "position-movements"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PositionMovement"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "scope",
+          "positionId",
+          "asOf",
+          "complete",
+          "nextAfter",
+          "rows"
+        ]
+      },
+      "PositionMovement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sourcePlacementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "destinationPlacementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sourceLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "destinationLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "sourcePlacementId",
+          "destinationPlacementId",
+          "sourceLocationCode",
+          "destinationLocationCode",
+          "quantity",
+          "reason",
+          "occurredAt"
+        ]
       }
     },
     "securitySchemes": {
