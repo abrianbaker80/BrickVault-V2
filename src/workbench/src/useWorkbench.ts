@@ -1,11 +1,12 @@
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
-import { api, ApiFailure, explain, forget, readJournal, remember } from './api'
-import type { CatalogInput, Command, Held, LocationInput, Session, Workspace } from './api'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
+import { api, ApiFailure, commandLabel, explain, forget, InvalidCommand, readJournal, remember } from './api'
+import type { CatalogInput, Command, Held, LocationInput, ReceivingWorkspace, Session, Workspace } from './api'
 
 type ReadState = 'loading' | 'ready' | 'disconnected' | 'partial'
-export function useWorkbench() {
+export function useWorkbench(page: Ref<string>) {
   const session = shallowRef<Session | null>(null)
   const workspace = shallowRef<Workspace | null>(null)
+  const receiving = shallowRef<ReceivingWorkspace | null>(null)
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
   const error = ref('')
@@ -33,6 +34,7 @@ export function useWorkbench() {
     ++generation
     session.value = null
     workspace.value = null
+    receiving.value = null
     pending.value = []
     held.value = []
     signedOut.value = true
@@ -56,16 +58,20 @@ export function useWorkbench() {
       if (current !== generation) return
       if (session.value?.workspaceId !== authenticated.workspaceId) {
         workspace.value = null
+        receiving.value = null
         notice.value = null
         readState.value = 'loading'
       }
       session.value = authenticated
       signedOut.value = false
       loadPending()
-      const result = await api.workspace()
+      const [result, stock] = await Promise.all([
+        api.workspace(page.value === 'activity'), page.value === 'receiving' ? api.receiving() : null
+      ])
       if (current !== generation) return
       workspace.value = result
-      readState.value = result.complete ? 'ready' : 'partial'
+      receiving.value = stock
+      readState.value = result.complete && (!stock || stock.complete) ? 'ready' : 'partial'
     } catch (reason) {
       if (current !== generation) return
       if (reason instanceof ApiFailure && reason.status === 401) {
@@ -111,6 +117,8 @@ export function useWorkbench() {
     if (document.visibilityState === 'visible' && session.value && readState.value === 'ready' &&
         !submitting.value && !authBusy.value) void refresh(true)
   }
+  watch(() => page.value === 'receiving' || page.value === 'activity' ? page.value : 'references',
+    () => { if (session.value) void refresh() })
   onMounted(() => {
     loadPending()
     void refresh()
@@ -143,18 +151,22 @@ export function useWorkbench() {
       const receipt = await api.save(command, session.value.csrfToken)
       forget(command)
       loadPending()
-      notice.value = { message: 'Saved ' + command.body.name + ' · revision ' + receipt.revision + '.',
+      notice.value = { message: 'Saved ' + commandLabel(command) + ' · revision ' + receipt.revision + '.',
         correlationId: receipt.correlationId }
       await refresh()
+      return receipt
     } catch (reason) {
       if (expired(reason)) return
       if (reason instanceof ApiFailure && reason.detail?.code === 'workspace_mismatch') {
         await refresh()
         error.value = 'The workspace changed. The original command is held for its issuing workspace.'
       } else if (reason instanceof ApiFailure && reason.detail &&
-          ['invalid_reference', 'duplicate_reference', 'revision_conflict'].includes(reason.detail.code)) {
+          ['invalid_reference', 'duplicate_reference', 'invalid_receiving', 'duplicate_receiving_reference',
+            'revision_conflict', 'command_mismatch', 'catalog_ineligible', 'catalog_reconfirmation_required', 'bin_confirmation_mismatch',
+            'quantity_unavailable', 'delivery_mismatch', 'backing_mismatch'].includes(reason.detail.code)) {
         forget(command)
         loadPending()
+        if (reason.status === 409) await refresh()
         error.value = explain(reason)
       } else {
         // The gateway, transport or client may fail after commit. Keep the exact payload for replay.
@@ -167,22 +179,26 @@ export function useWorkbench() {
   }
 
   async function create(input: { kind: 'catalog'; fields: CatalogInput } | { kind: 'location'; fields: LocationInput }, workspaceId: string) {
-    loadPending()
-    if (!canCreate.value || workspaceId !== session.value?.workspaceId) return
     const identity = { commandId: crypto.randomUUID(), expectedRevision: 0 }
     const command: Command = input.kind === 'catalog'
       ? { workspaceId, kind: 'catalog', body: { ...input.fields, ...identity } }
       : { workspaceId, kind: 'location', body: { ...input.fields, ...identity } }
+    return record(command)
+  }
+  async function record(command: Command) {
+    loadPending()
+    if (!canCreate.value || command.workspaceId !== session.value?.workspaceId) return
     try {
       remember(command)
       loadPending()
-    } catch {
+    } catch (reason) {
+      if (reason instanceof InvalidCommand) { error.value = reason.message; return }
       journalError.value = 'This browser could not save the command for recovery. The request has not been sent.'
       return
     }
-    await send(command)
+    return send(command)
   }
 
-  return { session, workspace, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
-    canSend, canCreate, refresh, signIn, signOut, create, send, expired }
+  return { session, workspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
+    canSend, canCreate, refresh, signIn, signOut, create, record, send, expired }
 }

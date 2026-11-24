@@ -9,10 +9,37 @@ export type Location = Schema['LocationRow']
 export type Diagnostic = Schema['Diagnostic']
 export type CatalogInput = Omit<Schema['CatalogCommand'], 'commandId' | 'id' | 'expectedRevision'>
 export type LocationInput = Pick<Schema['LocationCommand'], 'code' | 'name'>
-export type Command = { workspaceId: string } & (
+export type ReceivingWorkspace = Schema['ReceivingWorkspace']
+export type Purchase = Schema['PurchaseRow']
+export type ReceivingCommand = { workspaceId: string } & (
+  | { kind: 'purchase'; body: Schema['PurchaseCommand'] }
+  | { kind: 'delivery'; body: Schema['DeliveryCommand'] }
+  | { kind: 'putaway'; body: Schema['PutawayCommand'] }
+  | { kind: 'offer'; body: Schema['OfferCommand'] })
+export type Command = ReceivingCommand | { workspaceId: string } & (
   | { kind: 'catalog'; body: Schema['CatalogCommand'] }
   | { kind: 'location'; body: Schema['LocationCommand'] })
 export type Held = { workspaceId: string | null; commandId: string }
+export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | undefined>
+
+export function commandLabel(command: Command) {
+  switch (command.kind) {
+    case 'catalog': case 'location': return command.body.name
+    case 'purchase': return 'Purchase ' + command.body.reference
+    case 'delivery': return 'Delivery ' + command.body.reference
+    case 'putaway': return 'Putaway to ' + command.body.confirmedLocationCode
+    case 'offer': return 'Unpublished offer'
+  }
+}
+
+const commands = {
+  catalog: { path: 'catalog', valid: valid.CatalogCommand },
+  location: { path: 'locations', valid: valid.LocationCommand },
+  purchase: { path: 'receiving/purchases', valid: valid.PurchaseCommand },
+  delivery: { path: 'receiving/deliveries', valid: valid.DeliveryCommand },
+  putaway: { path: 'receiving/putaway', valid: valid.PutawayCommand },
+  offer: { path: 'receiving/offers', valid: valid.OfferCommand }
+}
 
 export class ApiFailure extends Error {
   constructor(readonly status: number, readonly detail?: Schema['Error']) {
@@ -23,6 +50,8 @@ export class ApiFailure extends Error {
 export class ContractFailure extends Error {
   constructor() { super('This Workbench could not verify the server response. Check the application version.') }
 }
+
+export class InvalidCommand extends Error {}
 
 async function request(path: string, options: RequestInit = {}) {
   if (window.location.protocol !== 'https:') throw new Error('Open the private HTTPS address to connect.')
@@ -55,14 +84,17 @@ export const api = {
   async signOut(csrf: string) {
     await request('session', { method: 'DELETE', headers: { 'X-CSRF-Token': csrf } })
   },
-  workspace: () => read('workspace', valid.Workspace),
+  workspace: (allAudit = false) => read(allAudit ? 'workspace?audit=all' : 'workspace', valid.Workspace),
+  receiving: () => read('receiving', valid.ReceivingWorkspace),
   diagnostic: (id: string) => read('diagnostics/' + encodeURIComponent(id), valid.Diagnostic),
   async save(command: Command, csrf: string) {
-    const path = command.kind === 'catalog' ? 'catalog' : 'locations'
-    const receipt = await read(path, valid.Receipt, {
+    const options = {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Workspace-Id': command.workspaceId },
       body: JSON.stringify(command.body)
-    })
+    }
+    const path = commands[command.kind].path
+    const receipt = command.kind === 'catalog' || command.kind === 'location'
+      ? await read(path, valid.Receipt, options) : await read(path, valid.ReceivingReceipt, options)
     if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind) throw new ContractFailure()
     return receipt
   }
@@ -73,7 +105,7 @@ const prefix = 'brickvault.v2.pending.'
 const uuid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i
 const journalKey = (workspaceId: string, commandId: string) => prefix + workspaceId + '.' + commandId
 export function readJournal(activeId: string) {
-  const commands: Command[] = []
+  const queued: Command[] = []
   const held: Held[] = []
   for (const key of Object.keys(localStorage)) {
     if (key.startsWith(legacy)) {
@@ -87,16 +119,15 @@ export function readJournal(activeId: string) {
     const { workspaceId, kind, body } = value
     if (!uuid.test(workspaceId) || key !== journalKey(workspaceId, body.commandId)) throw new Error('Invalid recovery identity')
     if (workspaceId !== activeId) held.push({ workspaceId, commandId: body.commandId })
-    else if (kind === 'catalog' && valid.CatalogCommand(body)) commands.push({ workspaceId, kind, body })
-    else if (kind === 'location' && valid.LocationCommand(body)) commands.push({ workspaceId, kind, body })
+    else if (Object.hasOwn(commands, kind) && commands[kind as Command['kind']].valid(body)) queued.push(value)
     else throw new Error('Invalid recovery record')
   }
-  return { commands, held }
+  return { commands: queued, held }
 }
 
 export function remember(command: Command) {
-  const validBody = command.kind === 'catalog' ? valid.CatalogCommand(command.body) : valid.LocationCommand(command.body)
-  if (!validBody) throw new Error('Invalid command')
+  const validBody = commands[command.kind].valid(command.body)
+  if (!validBody) throw new InvalidCommand('Check the required fields and quantities before saving.')
   localStorage.setItem(journalKey(command.workspaceId, command.body.commandId), JSON.stringify(command))
 }
 export function forget(command: Command) {
