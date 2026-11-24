@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
+from time import monotonic, sleep
 import uuid
 
 from cloud_receipt import (
@@ -326,42 +326,84 @@ def scope_id(scope):
     return hashlib.sha256(encoded(scope)).hexdigest()
 
 
-def restore_cloud_mark(scope, proofs, status):
-    marks = status.setdefault("cloudMarks", {})
-    previous = status.get("cloudPoint")
-    if previous and "cloudScope" not in status:
-        # Legacy readbacks stored the account enrollment beside the point.
-        proof = load_small(proofs / (validate_point(previous) + ".json"))
-        if proof.get("point") != previous or not proof.get("enrollment"):
-            raise RecoveryError(
-                "The previous OneDrive point needs its original readback proof."
+def migrate_legacy_evidence(mirror, trust, proofs, scope, status):
+    """Bind the pre-scope local observation and any provider proof to authenticated lineage."""
+    local = status.get("point")
+    cloud = status.get("cloudPoint")
+    try:
+        signed = {}
+        for point in {local, cloud} - {None}:
+            validate_point(point)
+            sidecar = mirror / (point + SIDECAR)
+            archive = mirror / (point + ".age")
+            if sidecar.is_symlink() or archive.is_symlink():
+                raise RecoveryError("A legacy recovery point uses a symbolic link.")
+            signed[point] = verify_sidecar(sidecar, point, trust)
+            verify_file(archive, signed[point])
+
+        mark = {"controllerPoint": max(signed)}
+        prior = scope
+        if cloud:
+            proof_file = proofs / (cloud + ".json")
+            if proof_file.is_symlink():
+                raise RecoveryError("The historic provider proof uses a symbolic link.")
+            proof = load_small(proof_file)
+            if not isinstance(proof, dict):
+                raise RecoveryError("Invalid private OneDrive readback proof.")
+            enrollment = proof.get("enrollment")
+            if (
+                proof.get("point") != cloud
+                or proof.get("sha256") != signed[cloud]["sha256"]
+                or not isinstance(enrollment, list)
+                or len(enrollment) != 2
+                or not all(isinstance(value, str) and value for value in enrollment)
+                or proof.get("lineage", scope["lineage"]) != scope["lineage"]
+                or not isinstance(proof.get("verifiedAt"), str)
+                or not proof["verifiedAt"]
+            ):
+                raise RecoveryError(
+                    "The private OneDrive readback proof conflicts with its signed point."
+                )
+            prior = scope | {"enrollment": enrollment}
+            mark.update(
+                cloudPoint=cloud,
+                cloudVerifiedAt=proof["verifiedAt"],
+                sha256=proof["sha256"],
             )
-        prior = {"enrollment": proof["enrollment"], "lineage": proof.get("lineage")}
-        status["cloudScope"] = scope_id(prior)
-        marks[status["cloudScope"]] = {
-            "cloudPoint": previous,
-            "cloudVerifiedAt": status["cloudVerifiedAt"],
-            "sha256": proof["sha256"],
-        }
-    active = scope_id(scope)
-    legacy = scope_id(scope | {"lineage": None})
-    known_scope = active if marks.get(active, {}).get("cloudPoint") else legacy
-    known = marks.get(known_scope)
-    if known:
-        status.update(
-            cloudScope=known_scope,
-            cloudPoint=known["cloudPoint"],
-            cloudVerifiedAt=known["cloudVerifiedAt"],
-        )
-    return active, legacy, known["cloudPoint"] if known else ""
+    except (
+        OSError,
+        AttributeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        RecoveryError,
+        subprocess.SubprocessError,
+    ) as exc:
+        raise RecoveryError(
+            f"Cannot authenticate the legacy backup evidence with the commissioned receipt trust. {failure_reason(exc)} "
+            "Restore its signed point and private evidence, or commission a separate source with a fresh workstation state."
+        ) from exc
+    prior_id = scope_id(prior)
+    status["cloudMarks"] = {prior_id: mark}
+    if cloud:
+        status["cloudScope"] = prior_id
 
 
 def verify_onedrive(
-    config, state, receipts, status, *, allow_retry=True, previous_local=None
+    config, state, receipts, status, *, allow_retry=True, local_status=None
 ):
     import onedrive_reader
 
     status["cloudSyncVerified"] = False
+    legacy = "cloudMarks" not in status and (
+        status.get("point") or status.get("cloudPoint")
+    )
+    if (
+        local_status
+        and not legacy
+        and local_status["point"] >= (status.get("point") or "")
+    ):
+        status.update(local_status)
     profile = onedrive_reader.profile_path(config["oneDriveProfile"])
     authfile = profile / "authorization.json"
     auth = json.loads(authfile.read_text()) if authfile.is_file() else {}
@@ -370,29 +412,43 @@ def verify_onedrive(
             "Complete the Microsoft account sign-in for the OneDrive read-only backup reader."
         )
     enrollment = [str(profile), auth["verifiedAt"]]
-    _, lineage = validated_pin(load_small(config["receiptTrust"]))
+    trust = load_small(config["receiptTrust"])
+    _, lineage = validated_pin(trust)
     scope = {"enrollment": enrollment, "lineage": [str(value) for value in lineage]}
     proofs = state / "onedrive-readbacks"
     proofs.mkdir(mode=0o700, exist_ok=True)
     latest = max(receipt["point"] for receipt in receipts)
-    legacy_status = "cloudScope" not in status
-    active_scope, legacy_scope, high_water = restore_cloud_mark(scope, proofs, status)
-    current = status["cloudMarks"].setdefault(active_scope, {})
+    if legacy:
+        migrate_legacy_evidence(
+            outside_checkout(config["mirror"]), trust, proofs, scope, status
+        )
+    active_scope = scope_id(scope)
+    current = status.setdefault("cloudMarks", {}).setdefault(active_scope, {})
+    high_water = current.get("cloudPoint", "")
+    if high_water:
+        status.update(
+            cloudScope=active_scope,
+            cloudPoint=high_water,
+            cloudVerifiedAt=current["cloudVerifiedAt"],
+        )
     last_seen = max(high_water, current.get("controllerPoint", ""))
-    if legacy_status and high_water and previous_local:
-        last_seen = max(last_seen, previous_local)
     current["controllerPoint"] = max(latest, last_seen)
     if latest < last_seen:
         raise RecoveryError(
             "The controller inventory ends before a previously authenticated recovery point."
         )
+    if local_status:
+        status.update(local_status)
     pending = []
     for receipt in receipts:
         point = receipt["point"]
         proof_file = proofs / (point + ".json")
         evidence = json.loads(proof_file.read_text()) if proof_file.exists() else {}
-        legacy = status["cloudMarks"].get(legacy_scope, {})
-        if point == legacy.get("cloudPoint") and receipt["sha256"] != legacy["sha256"]:
+        if (
+            point == high_water
+            and current.get("sha256")
+            and receipt["sha256"] != current["sha256"]
+        ):
             raise RecoveryError(
                 "The controller archive differs from the previously verified OneDrive point."
             )
@@ -406,7 +462,7 @@ def verify_onedrive(
             continue
         pending.append(receipt)
     delays = iter(READBACK_DELAYS if allow_retry else ())
-    deadline = time.monotonic() + READBACK_WINDOW
+    deadline = monotonic() + READBACK_WINDOW
     retry_deadline = None
     status_file = state / "status.json"
     while pending:
@@ -430,14 +486,10 @@ def verify_onedrive(
                     retry_deadline,
                 )
                 point = receipt["point"]
-                if point == status["cloudMarks"].get(legacy_scope, {}).get(
-                    "cloudPoint"
-                ):
-                    del status["cloudMarks"][legacy_scope]
                 if point >= high_water:
                     high_water = point
                     mark = {"cloudPoint": point, "cloudVerifiedAt": verified}
-                    current.update(mark)
+                    current.update(mark, sha256=receipt["sha256"])
                     status.update(cloudScope=active_scope, **mark)
                     write_private(status_file, json.dumps(status))
                 if point == latest:
@@ -465,7 +517,7 @@ def verify_onedrive(
         if not delayed:
             return
         delay = next(delays, None)
-        if delay is not None and time.monotonic() + delay < deadline:
+        if delay is not None and monotonic() + delay < deadline:
             status.update(
                 state="waiting-onedrive",
                 nextReadbackAt=(
@@ -473,8 +525,8 @@ def verify_onedrive(
                 ).isoformat(),
             )
             write_private(status_file, json.dumps(status))
-            time.sleep(delay)
-            if time.monotonic() < deadline:
+            sleep(delay)
+            if monotonic() < deadline:
                 pending = delayed
                 retry_deadline = deadline
                 continue
@@ -500,7 +552,6 @@ def catch_up(config):
     with exclusive(state / "sync.lock"):
         status_file = state / "status.json"
         status = json.loads(status_file.read_text()) if status_file.exists() else {}
-        previous_local = status.get("point")
         status.update(
             attemptedAt=datetime.now(timezone.utc).isoformat(),
             state="running",
@@ -549,7 +600,7 @@ def catch_up(config):
             if latest is None and not failed:
                 raise RecoveryError("No verified controller points are available yet.")
             if latest:
-                status.update(
+                local_status = dict(
                     point=latest,
                     verifiedAt=datetime.now(timezone.utc).isoformat(),
                     copied=copied,
@@ -563,7 +614,7 @@ def catch_up(config):
                         receipts,
                         status,
                         allow_retry=not failed,
-                        previous_local=previous_local,
+                        local_status=local_status,
                     )
                 except (
                     OSError,
@@ -573,6 +624,8 @@ def catch_up(config):
                     subprocess.SubprocessError,
                 ) as exc:
                     failed.append(failure_reason(exc))
+            elif latest:
+                status.update(local_status)
             if failed:
                 status["cloudSyncVerified"] = False
                 raise RecoveryError(

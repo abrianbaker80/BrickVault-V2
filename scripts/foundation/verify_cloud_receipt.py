@@ -260,9 +260,7 @@ class CloudReceipts(unittest.TestCase):
             patch.object(onedrive_reader, "rclone_program", return_value="fixture"),
             patch.object(subprocess, "run", side_effect=transfer),
             patch.object(backup_mirror, "READBACK_DELAYS", (1, 2)),
-            patch.object(
-                backup_mirror.time, "sleep", side_effect=wait_for_upload
-            ) as sleep,
+            patch.object(backup_mirror, "sleep", side_effect=wait_for_upload) as sleep,
             redirect_stdout(io.StringIO()),
         ):
             backup_mirror.catch_up(config)
@@ -322,6 +320,67 @@ class CloudReceipts(unittest.TestCase):
             # An older subset cannot replace the cloud high-water mark, including on upgrade.
             fault = None
             saved_latest = listing.pop()
+            saved_older = listing[0]
+            # Actual pre-upgrade shape after the very first owner copy and a pending cloud upload.
+            pending_state = backup_mirror.managed_dir(
+                self.root / "pending-state", "nightly-mirror-state"
+            )
+            pending_config = config | {"state": pending_state}
+            pending_file = pending_state / "status.json"
+            baseline = {
+                "state": "failed",
+                "attemptedAt": verified["attemptedAt"],
+                "lastError": "Provider file unavailable.",
+                "point": latest,
+                "verifiedAt": verified["verifiedAt"],
+                "copied": 1,
+                "cloudSyncVerified": False,
+            }
+            pending_file.write_bytes(cloud.encoded(baseline))
+            provider_reads.clear()
+            for _ in range(2):
+                with self.assertRaisesRegex(RecoveryError, "ends before"):
+                    backup_mirror.catch_up(pending_config)
+                upgraded = json.loads(pending_file.read_text())
+                self.assertEqual(upgraded["point"], latest)
+                self.assertEqual(upgraded["verifiedAt"], baseline["verifiedAt"])
+                self.assertNotIn("cloudPoint", upgraded)
+                self.assertNotIn("cloudVerifiedAt", upgraded)
+                self.assertFalse(upgraded["cloudSyncVerified"])
+                self.assertEqual(
+                    next(iter(upgraded["cloudMarks"].values())),
+                    {"controllerPoint": latest},
+                )
+            self.assertEqual(provider_reads, [])
+
+            # A legacy unsigned pair needs its controller's authenticated offer to establish lineage.
+            pending_file.write_bytes(cloud.encoded(baseline))
+            local_archive = config["mirror"] / (latest + ".age")
+            local_archive.write_bytes(b"wrong local ciphertext")
+            with self.assertRaisesRegex(RecoveryError, "fresh workstation state"):
+                backup_mirror.catch_up(pending_config)
+            self.assertNotIn("cloudMarks", json.loads(pending_file.read_text()))
+            local_archive.write_bytes(content)
+            (config["mirror"] / (latest + cloud.SIDECAR)).unlink()
+            with self.assertRaisesRegex(RecoveryError, "fresh workstation state"):
+                backup_mirror.catch_up(pending_config)
+            unsigned = json.loads(pending_file.read_text())
+            self.assertNotIn("cloudMarks", unsigned)
+            self.assertEqual(unsigned["point"], latest)
+            self.assertEqual(provider_reads, [])
+            listing[:] = [saved_latest]
+            fault = 3
+            with patch.object(backup_mirror, "READBACK_DELAYS", ()):
+                with self.assertRaisesRegex(RecoveryError, "still unavailable"):
+                    backup_mirror.catch_up(pending_config)
+            awaiting = json.loads(pending_file.read_text())
+            self.assertEqual(
+                next(iter(awaiting["cloudMarks"].values())), {"controllerPoint": latest}
+            )
+            self.assertNotIn("cloudPoint", awaiting)
+            self.assertFalse(awaiting["cloudSyncVerified"])
+            fault = None
+            listing[:] = [saved_older]
             legacy_proof = json.loads(saved_proof)
             legacy_proof.pop("lineage")
             proof.write_bytes(cloud.encoded(legacy_proof))
@@ -330,6 +389,12 @@ class CloudReceipts(unittest.TestCase):
             legacy_status.pop("cloudMarks")
             status_file.write_bytes(cloud.encoded(legacy_status))
             provider_reads.clear()
+            proof.write_bytes(cloud.encoded(legacy_proof | {"sha256": "0" * 64}))
+            with self.assertRaisesRegex(RecoveryError, "readback proof conflicts"):
+                backup_mirror.catch_up(config)
+            self.assertNotIn("cloudMarks", json.loads(status_file.read_text()))
+            self.assertEqual(provider_reads, [])
+            proof.write_bytes(cloud.encoded(legacy_proof))
             with self.assertRaisesRegex(RecoveryError, "ends before"):
                 backup_mirror.catch_up(config)
             truncated = json.loads(status_file.read_text())
@@ -348,7 +413,6 @@ class CloudReceipts(unittest.TestCase):
             self.assertFalse(partial["cloudSyncVerified"])
 
             # Pruning historical exports still permits a fresh verification of the newest point.
-            saved_older = listing[0]
             listing[:] = [saved_latest]
             backup_mirror.catch_up(config)
             backup_mirror.health(config)
@@ -409,6 +473,33 @@ class CloudReceipts(unittest.TestCase):
                     | {"signedReceipt": base64.b64encode(other_sidecar).decode()}
                 )
             ]
+            # The same reader enrollment cannot assign an unscoped old proof to a new commissioned lineage.
+            foreign_state = backup_mirror.managed_dir(
+                self.root / "old-source-state", "nightly-mirror-state"
+            )
+            foreign_proofs = foreign_state / "onedrive-readbacks"
+            foreign_proofs.mkdir()
+            prior_proof = foreign_proofs / (latest + ".json")
+            prior_proof.write_bytes(cloud.encoded(legacy_proof))
+            foreign_file = foreign_state / "status.json"
+            foreign_file.write_bytes(cloud.encoded(legacy_status))
+            provider_reads.clear()
+            for _ in range(2):
+                with self.assertRaisesRegex(RecoveryError, "fresh workstation state"):
+                    backup_mirror.catch_up(config | {"state": foreign_state})
+                rejected = json.loads(foreign_file.read_text())
+                self.assertNotIn("cloudScope", rejected)
+                self.assertNotIn("cloudMarks", rejected)
+                self.assertEqual(rejected["cloudPoint"], latest)
+                self.assertFalse(rejected["cloudSyncVerified"])
+            self.assertEqual(prior_proof.read_bytes(), cloud.encoded(legacy_proof))
+            self.assertEqual(provider_reads, [])
+            fresh = config | {"state": self.root / "new-source-state"}
+            backup_mirror.catch_up(fresh)
+            self.assertEqual(
+                json.loads((fresh["state"] / "status.json").read_text())["cloudPoint"],
+                other_point,
+            )
             backup_mirror.catch_up(config)
             recommissioned = json.loads(status_file.read_text())
             self.assertNotEqual(recommissioned["cloudScope"], restored["cloudScope"])
@@ -438,8 +529,9 @@ class CloudReceipts(unittest.TestCase):
             patch.object(backup_mirror, "record_readback", side_effect=read),
             patch.object(backup_mirror, "READBACK_WINDOW", 10),
             patch.object(backup_mirror, "READBACK_DELAYS", (1, 2)),
-            patch.object(backup_mirror.time, "monotonic", side_effect=lambda: clock),
-            patch.object(backup_mirror.time, "sleep") as sleep,
+            patch.object(backup_mirror, "monotonic", side_effect=lambda: clock),
+            patch.object(onedrive_reader, "monotonic", side_effect=lambda: clock),
+            patch.object(backup_mirror, "sleep") as sleep,
         ):
             status = {}
             with self.assertRaisesRegex(RecoveryError, "still unavailable"):
@@ -504,7 +596,7 @@ class CloudReceipts(unittest.TestCase):
 
                 with (
                     patch.object(
-                        onedrive_reader.time, "monotonic", side_effect=lambda: clock
+                        onedrive_reader, "monotonic", side_effect=lambda: clock
                     ),
                     patch.object(subprocess, "run", side_effect=transfer),
                 ):
@@ -540,8 +632,8 @@ class CloudReceipts(unittest.TestCase):
         for ticks, waits in (([0, 7201], 0), ([0, 1, 7201], 1)):
             with (
                 self.subTest(ticks=ticks),
-                patch.object(backup_mirror.time, "monotonic", side_effect=ticks),
-                patch.object(backup_mirror.time, "sleep") as sleep,
+                patch.object(backup_mirror, "monotonic", side_effect=ticks),
+                patch.object(backup_mirror, "sleep") as sleep,
                 patch.object(
                     backup_mirror,
                     "record_readback",
