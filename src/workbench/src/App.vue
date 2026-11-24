@@ -3,32 +3,42 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import boxes from 'lucide-static/icons/boxes.svg?raw'
 import locations from 'lucide-static/icons/layout-grid.svg?raw'
 import activity from 'lucide-static/icons/clipboard-list.svg?raw'
+import intake from 'lucide-static/icons/package-open.svg?raw'
 import brand from './assets/brand.webp'
 import Register from './Register.vue'
 import Activity from './Activity.vue'
 import RecordForm from './RecordForm.vue'
+import Receiving from './Receiving.vue'
 import { useWorkbench } from './useWorkbench'
 import type { CatalogInput, LocationInput } from './api'
+import { commandLabel } from './api'
 import { time } from './presentation'
 
 const pages = {
   catalog: { title: 'Catalog', icon: boxes, description: 'Inspect item identity, source rights and catalog mappings.' },
   locations: { title: 'Locations', icon: locations, description: 'Register the places where inventory can be stored.' },
+  receiving: { title: 'Receiving', icon: intake, description: 'Receive deliveries, confirm bin counts and prepare unpublished offers.' },
   activity: { title: 'Activity', icon: activity, description: 'Trace recorded changes and check background work.' }
 }
 type Page = keyof typeof pages
 const route = () => {
   const hash = window.location.hash.slice(1)
+  if (hash === 'receiving' || hash.startsWith('receiving/')) return 'receiving'
   return hash === 'locations' || hash === 'activity' ? hash : 'catalog'
 }
 const page = ref<Page>(route())
-const { session, workspace, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
-  canSend, canCreate, refresh, signIn, signOut, create, send, expired } = useWorkbench()
+const { session, workspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
+  canSend, canCreate, refresh, signIn, signOut, create, record, send, expired } = useWorkbench(page)
+const referencePage = computed(() => page.value === 'catalog' || page.value === 'locations')
 const password = ref('')
 const dialogKind = ref<'catalog' | 'location' | null>(null)
 const formWorkspace = ref('')
-watch(() => session.value?.workspaceId, () => { dialogKind.value = null })
 const heading = ref<HTMLElement>()
+watch(() => session.value?.workspaceId, async () => {
+  dialogKind.value = null
+  await nextTick()
+  heading.value?.focus()
+})
 const addButton = ref<HTMLButtonElement>()
 const status = computed(() => ({ loading: 'Loading', ready: 'Connected', disconnected: 'Disconnected', partial: 'Partial read' })[readState.value])
 async function navigate() {
@@ -104,11 +114,12 @@ function openForm() {
         <template v-else>
           <div class="page-heading">
             <div><h1 ref="heading" tabindex="-1">{{ pages[page].title }}</h1><p>{{ pages[page].description }}</p></div>
-            <button v-if="page !== 'activity'" ref="addButton" class="primary add" :disabled="!canCreate" @click="openForm"><span aria-hidden="true">+</span> {{ page === 'catalog' ? 'New catalog item' : 'New location' }}</button>
+            <button v-if="referencePage" ref="addButton" class="primary add" :disabled="!canCreate" @click="openForm"><span aria-hidden="true">+</span> {{ page === 'catalog' ? 'New catalog item' : 'New location' }}</button>
           </div>
           <div class="read-bar">
             <span class="read-state" role="status"><i :class="{ live: readState === 'ready' }" aria-hidden="true"></i>{{ status }}</span>
-            <span v-if="workspace">Last read {{ time(workspace.asOf) }}</span>
+            <span v-if="page === 'receiving' && receiving">Last read {{ time(receiving.asOf) }}</span>
+            <span v-else-if="workspace && page !== 'receiving'">Last read {{ time(workspace.asOf) }}</span>
             <button :disabled="readState === 'loading' || submitting || authBusy" @click="refresh()">Refresh</button>
           </div>
           <p v-if="error && !dialogKind" class="warning" role="alert">{{ error }}</p>
@@ -120,7 +131,7 @@ function openForm() {
             <h2>Pending confirmation</h2>
             <p>Confirm the original command with the server. A retry keeps its original ID.</p>
             <ul><li v-for="command in pending" :key="command.body.commandId">
-              <div><strong>{{ command.body.name }}</strong><small>{{ command.body.commandId }}</small></div>
+              <div><strong>{{ commandLabel(command) }}</strong><small>{{ command.body.commandId }}</small></div>
               <button :disabled="!canSend" @click="send(command)">Retry command</button>
             </li></ul>
           </section>
@@ -133,12 +144,16 @@ function openForm() {
           </section>
           <p v-if="!workspace && readState === 'loading'" role="status">Loading workspace…</p>
           <div v-if="workspace">
-            <div v-if="page !== 'activity'" class="metrics" role="group" :aria-label="readState === 'ready' ? 'Reference totals' : 'Last received reference counts'">
+            <div v-if="referencePage" class="metrics" role="group" :aria-label="readState === 'ready' ? 'Reference totals' : 'Last received reference counts'">
               <div><span>Catalog items</span><strong>{{ workspace.catalog.length }}</strong></div>
               <div><span>Locations</span><strong>{{ workspace.locations.length }}</strong></div>
               <div><span>Integration blocked</span><strong>{{ workspace.catalog.filter(row => !row.integrationEligible).length }}</strong></div>
             </div>
             <Activity v-if="page === 'activity'" :workspace="workspace" :connected="readState === 'ready'" @failure="expired" />
+            <template v-else-if="page === 'receiving'">
+              <Receiving v-if="receiving" :key="session.workspaceId" :stock="receiving" :workspace="workspace" :workspace-id="session.workspaceId" :enabled="canCreate" :uncertain="pending.length > 0 && !submitting" :dispatch="record" />
+              <p v-else role="status">{{ readState === 'loading' ? 'Loading receiving records…' : 'Receiving records are unavailable.' }}</p>
+            </template>
             <Register v-else :key="page" :page="page" :workspace="workspace" />
           </div>
           <RecordForm v-if="dialogKind" :kind="dialogKind" :enabled="canCreate" :saving="submitting"
