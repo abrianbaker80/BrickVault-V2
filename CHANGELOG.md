@@ -2,6 +2,10 @@
 
 ## M2 isolated technical foundation
 
+- The Windows backup task retries delayed OneDrive uploads within the same run and verifies the signed receipt and encrypted archive. The server continues to capture nightly. [Hosted backup operations](docs/verification/m2-hosted-backups.md)
+
+- Restricted database cleanup to expired operator sessions. Existing instances can refresh the policy while stopped. A retained client kept its active session and original command receipts across the update and restart. [Foundation runbook](docs/verification/m2-foundation.md)
+
 - Added the authenticated Vue Workbench, ASP.NET Core API and PostgreSQL reference register. Catalog and location commands retain their receipts across retries. Activity links recorded changes to the worker's result.
 - Added a local TLS gateway, separate database roles, owner credential rotation, versioned migrations and an encrypted backup with release and data verification on restore. The runbook describes the qualification scope and outstanding production gates. [Foundation runbook](docs/verification/m2-foundation.md) · [M2 issue #6](https://github.com/abrianbaker80/BrickVault-V2/issues/6)
 - Recorded the owner's authorization of M2 and direction to continue routine approved work through independent review and protected checkpoints. Major decisions return to the owner. [Decision register](docs/architecture/DECISIONS.md)
