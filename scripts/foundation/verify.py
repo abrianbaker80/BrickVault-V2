@@ -35,7 +35,7 @@ from instance import (
     lan_endpoint,
     probe_listener,
 )
-from recovery import activate, backup, restore
+from recovery import backup, restore
 from runtime import (
     configure_lan,
     end,
@@ -387,6 +387,19 @@ def session_lookups(s):
     return set(s.sql("SELECT encode(lookup,'hex') FROM brickvault.sessions;").splitlines())
 
 
+def worker_delete_count(s):
+    # Exercise the DELETE policy without a WHERE or RETURNING that may also apply the SELECT policy.
+    return s.sql(
+        r"""
+        BEGIN;
+        DELETE FROM brickvault.sessions;
+        \echo :ROW_COUNT
+        ROLLBACK;
+        """,
+        role="bv_worker",
+    )
+
+
 def expire_one_session(s, first, other, password):
     before = session_lookups(s)
     other.login(password)
@@ -412,21 +425,27 @@ def expire_one_session(s, first, other, password):
         session_lookups(s) == current,
         "The expired cookie was rejected only after the session row was removed.",
     )
-    # Roll back the deliberately unfiltered worker query so the paused worker can later clean it.
     require(
-        s.sql(
-            r"""
-            BEGIN;
-            DELETE FROM brickvault.sessions;
-            \echo :ROW_COUNT
-            ROLLBACK;
-            """,
-            role="bv_worker",
-        )
-        == "1",
+        worker_delete_count(s) == "1",
         "Unfiltered worker DELETE was not restricted to the expired row.",
     )
     return current - {expired}
+
+
+def remove_session_policies(s, database=None):
+    """Reproduce the previous grants on a stopped, disposable database without changing its data."""
+    s.sql(
+        """
+        BEGIN;
+        ALTER TABLE brickvault.sessions DISABLE ROW LEVEL SECURITY;
+        DROP POLICY sessions_api ON brickvault.sessions;
+        DROP POLICY sessions_worker_read ON brickvault.sessions;
+        DROP POLICY sessions_worker_delete ON brickvault.sessions;
+        COMMIT;
+        """,
+        database,
+        role="bv_migrator",
+    )
 
 
 def legacy_grants_test(s, archive):
@@ -441,18 +460,7 @@ def legacy_grants_test(s, archive):
     stop(s)
     s.pg_start()
     try:
-        # Reproduce the prior M2 grants in this stopped, disposable cluster for the old archive.
-        s.sql(
-            """
-            BEGIN;
-            ALTER TABLE brickvault.sessions DISABLE ROW LEVEL SECURITY;
-            DROP POLICY sessions_api ON brickvault.sessions;
-            DROP POLICY sessions_worker_read ON brickvault.sessions;
-            DROP POLICY sessions_worker_delete ON brickvault.sessions;
-            COMMIT;
-            """,
-            role="bv_migrator",
-        )
+        remove_session_policies(s)
         sessions = session_lookups(s)
         require(sessions, "Legacy backup test needs source session rows.")
         backup(s, archive)
@@ -835,8 +843,40 @@ def verify(port):
                     == "t",
                     "Restore of prior grants revived sessions or omitted worker row security.",
                 )
-                activate(rescue, legacy_target)
+                # Simulate a target verified by the previous restore tooling before its activation.
+                # Its receipt and checked facts are still valid, but its session grants are older.
+                remove_session_policies(rescue, legacy_target)
+                require(
+                    rescue.database != legacy_target
+                    and rescue.sql(
+                        "SELECT row_security_active('brickvault.sessions');",
+                        legacy_target,
+                        "bv_worker",
+                    )
+                    == "f",
+                    "Activation fixture did not retain an inactive target with legacy grants.",
+                )
+                execute(
+                    [
+                        sys.executable,
+                        Path(__file__).with_name("manage.py"),
+                        "activate",
+                        "--state",
+                        rescue.path,
+                        "--target",
+                        legacy_target,
+                    ]
+                )
+                rescue = Instance(rescue.path)
                 start(rescue)
+                require(
+                    rescue.database == legacy_target
+                    and rescue.sql(
+                        "SELECT row_security_active('brickvault.sessions');", role="bv_worker"
+                    )
+                    == "t",
+                    "Activation did not harden the previously verified target.",
+                )
                 recovered = Browser(rescue)
                 recovered.call("workspace", expected=401)
                 recovered.login(
@@ -845,6 +885,10 @@ def verify(port):
                 require(
                     recovered.lineage == first.lineage,
                     "Faithful restore lost workspace identity.",
+                )
+                require(
+                    len(session_lookups(rescue)) == 1 and worker_delete_count(rescue) == "0",
+                    "Worker could delete the active session in the previously verified target.",
                 )
                 after = recovered.call("workspace")
                 require(
@@ -859,7 +903,7 @@ def verify(port):
                     "Restored command replay differed.",
                 )
                 print(
-                    "Current and prior archive restore exclude live sessions; prior archive signs in with hardened worker policy: passed.",
+                    "Current and prior archives excluded live sessions; activation of a previously verified target hardened worker deletion and preserved sign-in: passed.",
                     flush=True,
                 )
 
