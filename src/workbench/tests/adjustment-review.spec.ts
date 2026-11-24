@@ -83,4 +83,3 @@ test('offer pages keep their confirmed rows and restart when a newer count chang
   await expect(review).toContainText('The latest count supports no stock loss.')
   await expect(review.locator('dd')).toHaveText(['26','27','0','26','0','26','26','Unknown (EUR)'])
 })
-
