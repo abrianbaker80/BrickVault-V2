@@ -45,5 +45,5 @@ internal sealed record StockShortageCase(Guid Id, Guid PositionId, Guid Purchase
     Guid OpeningObservationId, DateTime OpenedAt, int OpeningMissingQuantity, Guid LatestObservationId,
     DateTime LatestObservedAt, int LatestObservedMissingQuantity);
 internal sealed record BinCountSnapshot(string Scope, DateTime AsOf, bool Complete, LocationRow Location,
-    IReadOnlyList<CountPosition> Positions, IReadOnlyList<StockCountObservation> Observations,
+    Guid? PositionId, Guid? NextAfter, IReadOnlyList<CountPosition> Positions, IReadOnlyList<StockCountObservation> Observations,
     IReadOnlyList<StockShortageCase> Shortages);

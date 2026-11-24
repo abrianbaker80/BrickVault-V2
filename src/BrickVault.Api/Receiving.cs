@@ -138,7 +138,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
             SELECT delivery_id,p.id,p.catalog_id,p.catalog_revision,p.location_id,p.location_code,p.quantity,
                 COALESCE((SELECT sum(b.quantity) FROM brickvault.current_offer_backing b WHERE b.placement_id=p.id),0)::integer,
                 c.integration_eligible AND c.revision=p.catalog_revision
-                    AND NOT EXISTS (SELECT 1 FROM brickvault.stock_shortage_cases sc WHERE sc.position_id=p.id)
+                    AND NOT EXISTS (SELECT 1 FROM brickvault.stock_shortage_cases sc WHERE sc.position_id=p.id AND sc.resolved_by_command_id IS NULL)
             FROM brickvault.current_placement_stock p JOIN brickvault.catalog c ON c.id=p.catalog_id
             WHERE p.quantity > 0
             ORDER BY p.location_code,p.id

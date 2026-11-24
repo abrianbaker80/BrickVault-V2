@@ -12,7 +12,7 @@ internal static class PositionRows
                 c.id,c.revision,c.item_type,c.item_number,c.variant,c.name,c.color_id,c.color_state,c.condition,
                 c.completeness,c.source,c.license,c.mapping,c.integration_eligible,
                 buy.revision,p.location_code,
-                EXISTS(SELECT 1 FROM brickvault.stock_shortage_cases sc WHERE sc.position_id=p.id)
+                EXISTS(SELECT 1 FROM brickvault.stock_shortage_cases sc WHERE sc.position_id=p.id AND sc.resolved_by_command_id IS NULL)
             """;
     internal const string From = """
             FROM brickvault.current_placement_stock p

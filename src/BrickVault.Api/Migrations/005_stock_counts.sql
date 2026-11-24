@@ -14,21 +14,29 @@ CREATE TABLE brickvault.stock_count_observations (
     offer_backed_quantity integer NOT NULL CHECK (offer_backed_quantity BETWEEN 0 AND ledger_quantity),
     counted_quantity integer NOT NULL CHECK (counted_quantity BETWEEN 0 AND 1000000),
     reason varchar(200) NOT NULL CHECK (length(trim(reason)) > 0),
+    observed_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     FOREIGN KEY (purchase_id,position_id) REFERENCES brickvault.placement_positions(purchase_id,id),
     UNIQUE (position_id,id),
     UNIQUE (purchase_id,expected_purchase_revision)
 );
 
-CREATE INDEX stock_count_observations_location ON brickvault.stock_count_observations(location_id);
+CREATE INDEX stock_count_observations_location_history
+    ON brickvault.stock_count_observations(location_id,observed_at DESC,id DESC);
+CREATE INDEX stock_count_observations_position_history
+    ON brickvault.stock_count_observations(position_id,observed_at DESC,id DESC);
 CREATE INDEX stock_count_observations_position_revision
     ON brickvault.stock_count_observations(position_id,expected_purchase_revision DESC);
 
 -- Its identity is the opening count. Later counts cannot close or replace it.
 CREATE TABLE brickvault.stock_shortage_cases (
     id uuid PRIMARY KEY,
-    position_id uuid NOT NULL UNIQUE,
+    position_id uuid NOT NULL,
+    resolved_by_command_id uuid REFERENCES brickvault.audit(command_id),
     FOREIGN KEY (position_id,id) REFERENCES brickvault.stock_count_observations(position_id,id)
 );
+
+CREATE UNIQUE INDEX stock_shortage_cases_open_position
+    ON brickvault.stock_shortage_cases(position_id) WHERE resolved_by_command_id IS NULL;
 
 CREATE FUNCTION brickvault.capture_stock_count() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -63,7 +71,7 @@ CREATE FUNCTION brickvault.open_stock_shortage() RETURNS trigger LANGUAGE plpgsq
     SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
     INSERT INTO brickvault.stock_shortage_cases(id,position_id) VALUES (NEW.id,NEW.position_id)
-    ON CONFLICT (position_id) DO NOTHING;
+    ON CONFLICT (position_id) WHERE resolved_by_command_id IS NULL DO NOTHING;
     RETURN NULL;
 END;
 $$;
@@ -95,7 +103,7 @@ BEGIN
     ELSE
         affected_position := NEW.source_position_id;
     END IF;
-    IF EXISTS (SELECT 1 FROM brickvault.stock_shortage_cases WHERE position_id=affected_position) THEN
+    IF EXISTS (SELECT 1 FROM brickvault.stock_shortage_cases WHERE position_id=affected_position AND resolved_by_command_id IS NULL) THEN
         RAISE check_violation USING CONSTRAINT='stock_shortage_open';
     END IF;
     RETURN NEW;

@@ -109,7 +109,8 @@ try
     api.MapGet("/receiving", (CancellationToken ct) => receiving.LegacySnapshot(ct));
     api.MapGet("/receiving/current", (CancellationToken ct) => receiving.Snapshot(ct));
     api.MapGet("/receiving/bins/{locationId:guid}/counts",
-        (Guid locationId, CancellationToken ct) => counts.Snapshot(locationId, ct));
+        (Guid locationId, Guid? positionId, Guid? after, int? limit, Guid? observationId, Guid? commandId,
+            CancellationToken ct) => counts.Snapshot(locationId, ct, positionId, after, limit ?? 25, observationId, commandId));
     api.MapPost("/receiving/counts", (HttpContext c, CancellationToken ct) => Save<StockCountCommand>(c, counts.Save, ct));
     api.MapGet("/inventory/positions", (string? q, string? itemType, Guid? locationId, Guid? positionId, Guid? after, int? limit, CancellationToken ct) =>
         inventory.Search(q, itemType, locationId, positionId, after, limit ?? 25, ct));

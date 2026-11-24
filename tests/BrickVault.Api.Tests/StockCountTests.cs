@@ -56,20 +56,21 @@ public sealed class StockCountTests
                 CommandId = Guid.NewGuid(), ExpectedRevision = revision, PurchaseId = order.EntityId,
                 Reference = label, Quantity = quantity, CatalogId = item.EntityId, ItemCostMinor = cost
             }, Guid.NewGuid(), token);
-        Task<Receipt> Place(Receipt delivery, LocationRow location, int quantity) =>
+        Task<Receipt> Place(Receipt delivery, LocationRow location, int quantity, int? expectedRevision = null) =>
             receiving.Save(new PutawayCommand
             {
-                CommandId = Guid.NewGuid(), ExpectedRevision = delivery.Revision, PurchaseId = order.EntityId,
+                CommandId = Guid.NewGuid(), ExpectedRevision = expectedRevision ?? delivery.Revision, PurchaseId = order.EntityId,
                 DeliveryId = delivery.EntityId, CatalogId = item.EntityId, LocationId = location.Id,
                 ConfirmedLocationCode = location.Code, Quantity = quantity
             }, Guid.NewGuid(), token);
         var zero = await Deliver(order.Revision, "Documented zero", 6, 0);
         var origin = await Place(zero, a, 6);
         var unknown = await Deliver(origin.Revision, "Unknown basis", 4, null);
-        var other = await Place(unknown, b, 4);
+        var other = await Place(unknown, b, 3);
+        var sameBinOther = await Place(unknown, a, 1, other.Revision);
         var terms = new OfferCommand
         {
-            CommandId = Guid.NewGuid(), ExpectedRevision = other.Revision, PurchaseId = order.EntityId,
+            CommandId = Guid.NewGuid(), ExpectedRevision = sameBinOther.Revision, PurchaseId = order.EntityId,
             CatalogId = item.EntityId, UnitPriceMinor = 200, Backing = [new(origin.EntityId, 3), new(other.EntityId, 1)]
         };
         var offer = await receiving.Save(terms, Guid.NewGuid(), token);
@@ -102,7 +103,7 @@ public sealed class StockCountTests
             Count(request with { CountedQuantity = 1 }))).Code);
         Assert.Equal("revision_conflict", (await Assert.ThrowsAsync<Fault>(() =>
             Count(request with { CommandId = Guid.NewGuid() }))).Code);
-        var snapshot = await counts.Snapshot(a.Id, token);
+        var snapshot = await counts.Snapshot(a.Id, token, origin.EntityId);
         Assert.Equal("bin-counts", snapshot.Scope);
         Assert.True(snapshot.Complete);
         var position = Assert.Single(snapshot.Positions);
@@ -145,7 +146,7 @@ public sealed class StockCountTests
             catch (Fault e) when (e.Code == "revision_conflict") { return null; }
         }
         var recount = Assert.Single((await Task.WhenAll(Recount(), Recount())).OfType<Receipt>());
-        var later = await counts.Snapshot(a.Id, token);
+        var later = await counts.Snapshot(a.Id, token, origin.EntityId);
         Assert.Equal(2, later.Observations.Count);
         var laterCount = Assert.Single(later.Observations, row => row.Id == recount.EntityId);
         Assert.Equal(1, laterCount.UnidentifiedSurplusQuantity);
@@ -157,9 +158,44 @@ public sealed class StockCountTests
         Assert.Equal(0, stillOpen.LatestObservedMissingQuantity);
         Assert.Equal(recount.EntityId, stillOpen.LatestObservationId);
 
+        var separate = await Count(request with
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = recount.Revision,
+            PositionId = sameBinOther.EntityId, CountedQuantity = 1, Reason = "Independent position in this bin"
+        });
+        var binPage = await counts.Snapshot(a.Id, token, limit: 1);
+        Assert.Equal(2, binPage.Positions.Count);
+        Assert.Null(binPage.PositionId);
+        Assert.Equal(separate.EntityId, Assert.Single(binPage.Observations).Id);
+        Assert.Equal(separate.EntityId, binPage.NextAfter);
+        Assert.Equal(stillOpen, Assert.Single(binPage.Shortages));
+        var firstPage = await counts.Snapshot(a.Id, token, origin.EntityId, limit: 1);
+        Assert.Equal(origin.EntityId, firstPage.PositionId);
+        Assert.Equal(origin.EntityId, Assert.Single(firstPage.Positions).PositionId);
+        Assert.Equal(recount.EntityId, Assert.Single(firstPage.Observations).Id);
+        Assert.Equal(recount.EntityId, firstPage.NextAfter);
+        Assert.Equal(stillOpen, Assert.Single(firstPage.Shortages));
+        var olderPage = await counts.Snapshot(a.Id, token, origin.EntityId, firstPage.NextAfter, 1);
+        Assert.Equal(receipt.EntityId, Assert.Single(olderPage.Observations).Id);
+        Assert.Null(olderPage.NextAfter);
+        Assert.Equal(stillOpen, Assert.Single(olderPage.Shortages));
+        var exact = await counts.Snapshot(a.Id, token, observationId: receipt.EntityId);
+        Assert.Equal(origin.EntityId, exact.PositionId);
+        Assert.Equal(receipt.EntityId, Assert.Single(exact.Observations).Id);
+        Assert.Equal(stillOpen, Assert.Single(exact.Shortages));
+        Assert.Null(exact.NextAfter);
+        var replayLookup = await counts.Snapshot(a.Id, token, origin.EntityId, commandId: receipt.CommandId);
+        Assert.Equal(receipt.CorrelationId, Assert.Single(replayLookup.Observations).CorrelationId);
+        Assert.Equal("invalid_count_cursor", (await Assert.ThrowsAsync<Fault>(() =>
+            counts.Snapshot(a.Id, token, origin.EntityId, separate.EntityId, 1))).Code);
+        Assert.Equal("unknown_count_position", (await Assert.ThrowsAsync<Fault>(() =>
+            counts.Snapshot(b.Id, token, origin.EntityId))).Code);
+        Assert.Equal("unknown_count_observation", (await Assert.ThrowsAsync<Fault>(() =>
+            counts.Snapshot(a.Id, token, sameBinOther.EntityId, observationId: receipt.EntityId))).Code);
+
         var unaffected = await transfers.Save(move with
         {
-            CommandId = Guid.NewGuid(), ExpectedRevision = recount.Revision, SourcePlacementId = other.EntityId,
+            CommandId = Guid.NewGuid(), ExpectedRevision = separate.Revision, SourcePlacementId = other.EntityId,
             SourceLocationId = b.Id, ConfirmedSourceLocationCode = b.Code
         }, Guid.NewGuid(), token);
         var after = await Purchase();
@@ -170,7 +206,7 @@ public sealed class StockCountTests
         Assert.Equal(4, Assert.Single(after.Offers).BackedQuantity);
         Assert.Equal(3, Assert.Single(Assert.Single(after.Offers).Backing, line => line.PlacementId == origin.EntityId).Quantity);
         Assert.Equal(0, Assert.Single(Assert.Single(after.Deliveries, row => row.Id == zero.EntityId).Placements).FreeToBackQuantity);
-        Assert.Equal(0, (await bins.Snapshot(a.Id, token)).FreeToBackQuantity);
+        Assert.Equal(1, (await bins.Snapshot(a.Id, token)).FreeToBackQuantity);
         var register = await inventory.Search(null, null, null, origin.EntityId, null, 25, token);
         Assert.Equal(0, Assert.Single(register.Rows).Layer.FreeToBackQuantity);
         Assert.Equal(1, (await bins.Snapshot(c.Id, token)).FreeToBackQuantity);
