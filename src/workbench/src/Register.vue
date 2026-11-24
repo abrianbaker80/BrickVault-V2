@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import BinStock from './BinStock.vue'
 import { label } from './presentation'
 import type { Catalog, Location, Workspace } from './api'
-const props = defineProps<{ page: 'catalog' | 'locations'; workspace: Workspace }>()
+const props = defineProps<{ page: 'catalog' | 'locations'; workspace: Workspace; connected: boolean }>()
+const emit = defineEmits<{ failure: [reason: unknown] }>()
 const query = ref('')
 const search = ref<HTMLInputElement>()
 const host = ref<HTMLElement>()
 const detail = ref<HTMLElement>()
 const compact = ref(true)
 const inspectedId = ref<string | null>(null)
-const inspected = computed(() => props.workspace[props.page].find(row => row.id === inspectedId.value))
+const current = computed(() => props.workspace[props.page].find(row => row.id === inspectedId.value))
+const inspected = computed<Catalog | Location | undefined>(previous =>
+  current.value || (!props.workspace.complete && previous?.id === inspectedId.value ? previous : undefined))
 const title = computed(() => props.page === 'catalog' ? 'Catalog register' : 'Location register')
 const matches = (values: string[]) => values.some(v => v.toLowerCase().includes(query.value.trim().toLowerCase()))
 const catalog = computed(() => props.workspace.catalog.filter(r => matches([r.name, r.itemNumber, r.variant || '', r.itemType])))
@@ -93,6 +97,7 @@ onBeforeUnmount(() => {
   <component v-if="inspected" :is="compact ? 'dialog' : 'aside'" ref="detail" class="panel inspector"
     aria-labelledby="item-title" @cancel.prevent="close" @keydown.esc.prevent="close">
     <header class="panel-head"><h2 id="item-title">{{ inspected.name }}</h2><button class="close" aria-label="Close details" @click="close">×</button></header>
+    <p v-if="!current" class="warning" role="status">The partial register omits this record. Showing its last received details.</p>
     <dl class="details">
       <template v-if="'itemType' in inspected">
         <dt>Item type</dt><dd>{{ label(inspected.itemType) }}</dd>
@@ -105,6 +110,8 @@ onBeforeUnmount(() => {
       <template v-else><dt>Location code</dt><dd>{{ inspected.code }}</dd></template>
       <dt>Record ID</dt><dd>{{ inspected.id }}</dd><dt>Revision</dt><dd>{{ inspected.revision }}</dd>
     </dl>
+    <BinStock v-if="'code' in inspected" :key="inspected.id" :location="inspected" :as-of="workspace.asOf"
+      :connected="connected" @failure="emit('failure', $event)" />
   </component>
   </div>
 </template>

@@ -16,7 +16,7 @@ import { time } from './presentation'
 
 const pages = {
   catalog: { title: 'Catalog', icon: boxes, description: 'Inspect item identity, source rights and catalog mappings.' },
-  locations: { title: 'Locations', icon: locations, description: 'Register the places where inventory can be stored.' },
+  locations: { title: 'Locations', icon: locations, description: 'Register storage locations and inspect the stock confirmed in each bin.' },
   receiving: { title: 'Receiving', icon: intake, description: 'Receive deliveries, confirm bin counts and prepare unpublished offers.' },
   activity: { title: 'Activity', icon: activity, description: 'Trace recorded changes and check background work.' }
 }
@@ -154,7 +154,7 @@ function openForm() {
               <Receiving v-if="receiving" :key="session.workspaceId" :stock="receiving" :workspace="workspace" :workspace-id="session.workspaceId" :enabled="canCreate" :uncertain="pending.length > 0 && !submitting" :dispatch="record" />
               <p v-else role="status">{{ readState === 'loading' ? 'Loading receiving records…' : 'Receiving records are unavailable.' }}</p>
             </template>
-            <Register v-else :key="page" :page="page" :workspace="workspace" />
+            <Register v-else :key="session.workspaceId + page" :page="page" :workspace="workspace" :connected="readState !== 'disconnected'" @failure="expired" />
           </div>
           <RecordForm v-if="dialogKind" :kind="dialogKind" :enabled="canCreate" :saving="submitting"
             :error="error || journalError || (readState === 'disconnected' ? 'Reconnect before sending.' : '')" @close="closeForm" @save="submit" />
