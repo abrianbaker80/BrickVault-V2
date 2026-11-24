@@ -2249,116 +2249,24 @@
         "additionalProperties": false
       },
       "BinStockLayer": {
-        "type": "object",
-        "properties": {
-          "placementId": {
-            "type": "string",
-            "format": "uuid"
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/StockPositionLayer"
           },
-          "purchaseId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "purchaseReference": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "deliveryId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "deliveryReference": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "receiptCommandId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "receiptCorrelationId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "receiptQuantity": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 1000000,
-            "description": "The whole delivery's original quantity, including stock outside this bin."
-          },
-          "receiptItemCostMinor": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "minimum": 0,
-            "maximum": 100000000,
-            "description": "Documented acquisition amount for the whole delivery in its purchase currency. Null represents unknown; zero is a documented zero. This is not a bin allocation or unit cost."
-          },
-          "currency": {
-            "type": "string",
-            "pattern": "^[A-Z]{3}$"
-          },
-          "catalogId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "catalogRevision": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Revision recorded on the placement."
-          },
-          "currentCatalog": {
-            "$ref": "#/components/schemas/CatalogRow"
-          },
-          "locationCodeAtPutaway": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 48
-          },
-          "quantity": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 1000000
-          },
-          "backedQuantity": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000
-          },
-          "unbackedQuantity": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000
-          },
-          "freeToBackQuantity": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000
+          {
+            "type": "object",
+            "properties": {
+              "quantity": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000000
+              }
+            },
+            "required": [
+              "quantity"
+            ]
           }
-        },
-        "required": [
-          "placementId",
-          "purchaseId",
-          "purchaseReference",
-          "deliveryId",
-          "deliveryReference",
-          "receiptCommandId",
-          "receiptCorrelationId",
-          "receiptQuantity",
-          "receiptItemCostMinor",
-          "currency",
-          "catalogId",
-          "catalogRevision",
-          "currentCatalog",
-          "locationCodeAtPutaway",
-          "quantity",
-          "backedQuantity",
-          "unbackedQuantity",
-          "freeToBackQuantity"
-        ],
-        "additionalProperties": false
+        ]
       },
       "TransferCommand": {
         "type": "object",
@@ -2961,7 +2869,7 @@
         "additionalProperties": false,
         "properties": {
           "layer": {
-            "$ref": "#/components/schemas/BinStockLayer"
+            "$ref": "#/components/schemas/StockPositionLayer"
           },
           "originPlacementId": {
             "type": "string",
@@ -2976,6 +2884,118 @@
           "originPlacementId",
           "location"
         ]
+      },
+      "StockPositionLayer": {
+        "type": "object",
+        "properties": {
+          "placementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deliveryReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "receiptCommandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiptCorrelationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiptQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "The whole delivery's original quantity, including stock outside this bin."
+          },
+          "receiptItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000,
+            "description": "Documented acquisition amount for the whole delivery in its purchase currency. Null represents unknown; zero is a documented zero. This is not a bin allocation or unit cost."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Revision recorded on the placement."
+          },
+          "currentCatalog": {
+            "$ref": "#/components/schemas/CatalogRow"
+          },
+          "locationCodeAtPutaway": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "backedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "unbackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "freeToBackQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "placementId",
+          "purchaseId",
+          "purchaseReference",
+          "deliveryId",
+          "deliveryReference",
+          "receiptCommandId",
+          "receiptCorrelationId",
+          "receiptQuantity",
+          "receiptItemCostMinor",
+          "currency",
+          "catalogId",
+          "catalogRevision",
+          "currentCatalog",
+          "locationCodeAtPutaway",
+          "quantity",
+          "backedQuantity",
+          "unbackedQuantity",
+          "freeToBackQuantity"
+        ],
+        "additionalProperties": false
       }
     },
     "securitySchemes": {
