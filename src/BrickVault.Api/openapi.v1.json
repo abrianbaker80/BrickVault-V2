@@ -5468,7 +5468,7 @@
           },
           "backingCurrent": {
             "type": "boolean",
-            "description": "False when catalog eligibility or its recorded revision has changed. The internal offer remains unpublished."
+            "description": "True when the offer has remaining backing and its catalog revision is current and eligible. The offer remains unpublished."
           }
         },
         "required": [

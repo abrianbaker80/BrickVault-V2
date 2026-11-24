@@ -251,11 +251,18 @@ public sealed class StockLossTests
         Assert.Equal(receipt, await Save(accepted.Request));
 
         // Other fixture tests share this isolated database. Release the remaining fictional project hold.
-        await holds.Save(new StockHoldReleaseCommand
+        var released = await holds.Save(new StockHoldReleaseCommand
         {
             CommandId = Guid.NewGuid(), ExpectedRevision = moved.Revision, PurchaseId = purchase.EntityId,
             HoldId = secondHold.EntityId, Quantity = 1, Reason = "Close the fictional project reservation"
         }, Guid.NewGuid(), token);
+        var reopened = await Witness(released.Revision, origin.EntityId, a, 1);
+        Assert.Equal(reopened.EntityId, Assert.Single((await counts.Snapshot(a.Id, token, origin.EntityId)).Shortages).Id);
+        Assert.Equal(reopened.EntityId, Assert.Single((await counts.Snapshot(a.Id, token, commandId: reopened.CommandId)).Shortages).Id);
+        Assert.Empty((await counts.Snapshot(a.Id, token, observationId: firstCount.EntityId)).Shortages);
+        Assert.Empty((await counts.Snapshot(a.Id, token, commandId: latest.CommandId)).Shortages);
+        Assert.Equal(receipt.EntityId, (await Read(a.Id, origin.EntityId, observationId: latest.EntityId)).PostingId);
+        Assert.Equal("unknown_stock_loss", await Reject(() => Read(a.Id, origin.EntityId, observationId: reopened.EntityId)));
         await using var connection = await db.OpenConnectionAsync(token);
         await using var grants = Database.Query(connection, null, """
             SELECT NOT has_table_privilege('brickvault.stock_loss_postings','UPDATE,DELETE')
