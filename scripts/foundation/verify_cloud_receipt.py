@@ -2,16 +2,20 @@
 
 from contextlib import contextmanager
 import hashlib
+import base64
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import uuid
 
 import cloud_receipt as cloud
+import backup_mirror
+import onedrive_reader
 from offhost import FORMAT, RecoveryError
 
 
@@ -93,6 +97,87 @@ class CloudReceipts(unittest.TestCase):
 
     def download(self):
         cloud.download_signed(None, self.output, self.point, self.trust)
+
+    def test_onedrive_signed_mirror_and_independent_download(self):
+        self.publish()
+        point = self.point
+        raw = (self.provider / (point + cloud.SIDECAR)).read_bytes()
+        mirror = self.root / "mirror"
+        mirror.mkdir()
+        encoded = base64.b64encode(raw).decode()
+        trust = cloud.load_small(self.trust)
+        backup_mirror.mirror_signed_receipt(mirror, point, self.receipt, encoded, trust)
+        self.assertEqual((mirror / (point + cloud.SIDECAR)).read_bytes(), raw)
+        with self.assertRaises(RecoveryError):
+            backup_mirror.mirror_signed_receipt(
+                mirror, point, self.receipt | {"bytes": 1}, encoded, trust
+            )
+        profile = self.root / "reader"
+        profile.mkdir()
+        (profile / ".brickvault-v2-offhost").write_text("onedrive-reader")
+        (profile / "authorization.json").write_text(
+            json.dumps({"state": "ready", "verifiedAt": "enrollment"})
+        )
+        calls = []
+        original_run = subprocess.run
+
+        def provider(command, **kwargs):
+            if "listremotes" in command:
+                self.assertIn("onedrive", command)
+                return SimpleNamespace(returncode=0, stdout=b"bv2onedrive:\n")
+            if "copyto" in command:
+                src, dst = command[-2:]
+                self.assertTrue(src.startswith("bv2onedrive:BrickVault V2 Backup/"))
+                name = src.split("/")[-1]
+                calls.append(name)
+                remote = self.provider / name
+                if not remote.exists():
+                    return SimpleNamespace(returncode=3)
+                shutil.copyfile(remote, dst)
+                return SimpleNamespace(returncode=0)
+            return original_run(command, **kwargs)
+
+        with patch.object(
+            onedrive_reader, "rclone_program", return_value="fixture"
+        ), patch.object(subprocess, "run", side_effect=provider):
+            config = {"oneDriveProfile": profile, "receiptTrust": self.trust}
+            state = self.root / "state"
+            state.mkdir()
+            status = {}
+            backup_mirror.verify_onedrive(config, state, [self.receipt], status)
+            self.assertTrue(status["cloudSyncVerified"])
+            self.assertEqual(status["cloudPoint"], point)
+            self.assertEqual(calls, [point + cloud.SIDECAR, point + ".age"])
+            (mirror / (point + ".age")).write_bytes(self.archive.read_bytes())
+            self.archive.write_bytes(b"corrupt remote, healthy local mirror")
+            with self.assertRaises(RecoveryError):
+                onedrive_reader.download(profile, self.trust, point, self.output)
+            self.assertFalse(self.output.exists())
+            (self.provider / (point + cloud.SIDECAR)).unlink()
+            with self.assertRaises(RecoveryError):
+                onedrive_reader.download(profile, self.trust, point, self.output)
+            self.assertFalse(self.output.exists())
+
+    def test_enrollment_rejects_broader_or_non_microsoft_permissions(self):
+        start = "http://127.0.0.1:53682/auth?state=fixture"
+        with patch.object(
+            onedrive_reader.http.client, "HTTPConnection"
+        ) as http, patch.object(onedrive_reader.os, "startfile", create=True) as launch:
+            response = http.return_value.getresponse.return_value
+            response.status = 307
+            approved = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?scope=Files.Read%20offline_access"
+            response.getheader.return_value = approved
+            onedrive_reader.open_authorization(start)
+            launch.assert_called_once_with(approved)
+            for url in (
+                approved + "%20Files.ReadWrite",
+                approved.replace("login.microsoftonline.com", "example.com"),
+                approved.replace("https:", "http:"),
+            ):
+                response.getheader.return_value = url
+                with self.assertRaises(RecoveryError):
+                    onedrive_reader.open_authorization(start)
+            self.assertEqual(launch.call_count, 1)
 
     def test_retry_and_controller_loss(self):
         self.publish()

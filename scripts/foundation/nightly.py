@@ -15,7 +15,7 @@ import tempfile
 import uuid
 from zoneinfo import ZoneInfo
 
-from backup_mirror import export_point
+from backup_mirror import complete_previous_export, export_point
 from cloud_receipt import download_signed, publish_signed
 from instance import Instance, write_private
 from offhost import (
@@ -128,8 +128,7 @@ def capture_command(settings):
     ]
 
 
-def binding(settings, route):
-    mirror = settings.get("mirrorExport")
+def mirror_identity(mirror):
     mirror_identity = None
     if mirror is not None:
         folder = Path(mirror["directory"])
@@ -141,8 +140,12 @@ def binding(settings, route):
                 "Use an absolute authorized mirror export path and a named reader group."
             )
         mirror_identity = [os.path.normcase(str(folder.resolve())), group]
+    return mirror_identity
+
+
+def binding(settings, route):
     values = [
-        mirror_identity,
+        mirror_identity(settings.get("mirrorExport")),
         str(uuid.UUID(settings["sourceId"])),
         str(uuid.UUID(settings["workspaceId"])),
         settings["hostKeyAlias"],
@@ -270,6 +273,7 @@ def publish_point(points, point, route, context, settings):
         route, folder, receipt, settings["receiptSigningKey"], settings["receiptTrust"]
     )
     receipt["verifiedAt"] = utcnow().isoformat()
+    receipt["mirrorBinding"] = mirror_identity(settings.get("mirrorExport"))
     write_private(folder / (point + ".json"), json.dumps(receipt, sort_keys=True))
     if settings.get("mirrorExport"):
         export_point(local, receipt, settings["mirrorExport"])
@@ -301,6 +305,13 @@ def inspect_exports(points, settings, status, context):
             receipt = read_receipt(folder / (point + ".json"), point)
             if receipt.get("publicationContext") == context:
                 export_point(folder / (point + ".age"), receipt, export)
+            elif receipt.get(
+                "mirrorBinding",
+                settings.get("priorMirrorExports", {}).get(
+                    receipt.get("publicationContext")
+                ),
+            ) == mirror_identity(export):
+                complete_previous_export(folder / (point + ".age"), receipt, export)
             failures.pop(point, None)
         except (OSError, ValueError, KeyError, RecoveryError) as exc:
             failures[point] = failure_reason(exc)

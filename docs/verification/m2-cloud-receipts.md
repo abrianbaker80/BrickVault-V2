@@ -1,23 +1,29 @@
 # Recover a signed cloud point
 
-The controller signs a receipt after it uploads an encrypted point and verifies its downloaded bytes. The signed receipt records the point, archive size and SHA-256, source instance, workspace and publication context. It uses the OpenSSH Ed25519 signature namespace `brickvault-v2-cloud-receipt-v1`. The controller uploads the signed receipt using immutable copy and verifies the provider's returned copy. A completed point has two provider objects named `<point>.age` and `<point>.receipt.json`.
+A completed recovery point has an encrypted archive named `<point>.age` and a signed receipt named `<point>.receipt.json`. The receipt authenticates the point name, archive size and SHA-256, source instance, workspace and publication context. The controller signs with OpenSSH Ed25519 in the namespace `brickvault-v2-cloud-receipt-v1`. Google Drive and OneDrive can each supply the pair for recovery.
 
-Keep the private signing key on the controller. Before relying on the backups, copy the **public** trust file through an independently authenticated channel to recovery custody. It contains `publicKey` (an OpenSSH Ed25519 public key with its type and base64 fields), `sourceId` and `workspaceId`. Preserve that trusted copy independently of both the controller and the backup provider. Recovery also requires the separately held age decryption identity. When rotating the controller signing key, deliver its new public key over the independently authenticated channel. Keep older trust files for points made with earlier keys.
+The private signing key stays on the controller. Keep the **public** trust file and the separately held age decryption identity in recovery custody. The public trust file contains the signing key, source ID and workspace ID. Deliver it through a channel that independently authenticates the controller. When rotating the signing key, retain the earlier public trust files for older points. The scheduled cloud backup contains encrypted data and public evidence. Keep the age identity and the reader's encrypted credential profile outside both sync folders.
 
-## When the controller is unavailable
+## Download from either provider
 
-Use a clean machine with this release, Python and OpenSSH `ssh-keygen`. Download the latest pair from the `BrickVault-V2` provider folder using independent provider access. Use the capture timestamp at the start of the point identifier to check its age against the expected recovery window. If a newer point fails authentication or is missing one of its objects, record that failure before choosing an older recovery point.
+On a clean machine with this release, Python and OpenSSH, choose the latest complete capture within the expected recovery window. A failed authentication or a missing file warrants investigation before selecting an older point.
 
-For a manual provider download, place the two files in the same private directory. Supply the separately held trust file. This command runs entirely offline.
-
-```text
-python scripts/foundation/cloud_receipt.py verify --trust TRUST.json --directory DOWNLOAD_DIR --point POINT
-```
-
-Alternatively, a recovery host with its own authenticated and encrypted rclone transport can discover the newest published signed point, download both files, and verify them in a new directory.
+For Google Drive, use the `BrickVault-V2` folder. A recovery host with an independent encrypted rclone transport can discover the newest signed point and download both objects into a new private directory.
 
 ```text
 python scripts/foundation/cloud_receipt.py download --transport TRANSPORT.json --trust TRUST.json --output NEW_DOWNLOAD_DIR
 ```
 
-Use `--point POINT` with the download command to select a specific capture. Both commands authenticate the receipt against the independently held key and expected lineage, then check the actual archive size and SHA-256. On success they produce the trusted `<point>.json` used by `offhost.py recover`. Supply it with `--receipt`, the matching encrypted archive with `--file`, and the age identity with `--identity` during the restore.
+For OneDrive Personal, use the `BrickVault V2 Backup` folder. The Windows backup owner's enrolled read-only reader fetches both objects directly from Microsoft into an empty directory outside the sync root. It authenticates the signature with the separately held trust file and verifies the downloaded ciphertext size and SHA-256.
+
+```text
+python scripts/foundation/onedrive_reader.py download --profile READER_DIRECTORY --trust TRUST.json --point POINT --output NEW_DOWNLOAD_DIR
+```
+
+From either provider's website, an owner can also download the two objects into a fresh private directory and verify them offline. This path works when the original controller or workstation is unavailable.
+
+```text
+python scripts/foundation/cloud_receipt.py verify --trust TRUST.json --directory DOWNLOAD_DIR --point POINT
+```
+
+Successful verification emits the trusted `<point>.json`. Supply it with `--receipt`, the downloaded archive with `--file`, and the separately held age decryption identity with `--identity` to `offhost.py recover`.
