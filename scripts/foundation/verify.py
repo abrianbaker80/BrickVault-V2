@@ -178,6 +178,16 @@ def migration_test(s):
         "A failed transfer migration partially changed the receiving database.",
     )
     s.sql("DROP TABLE brickvault.placement_transfers;", db, "bv_migrator")
+    s.migrate(db, to=4)
+    s.sql("CREATE TABLE brickvault.stock_shortage_cases(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "4"
+        and s.sql("SELECT to_regclass('brickvault.stock_count_observations') IS NULL", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted count upgrade changed the transfer database.",
+    )
+    s.sql("DROP TABLE brickvault.stock_shortage_cases;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -191,11 +201,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "4",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "5",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v4, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v5, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -218,17 +228,21 @@ def qualify_staged_upgrade(lab, port, source_version):
             f"INSERT INTO brickvault.locations(id,revision,code,name) VALUES ('{fixture}',1,'OLD-01','Original bin')",
             role="bv_migrator",
         )
-        if source_version == 3:
+        if source_version >= 3:
             from verify_transfer import seed_opening_position
 
-            seed_opening_position(original, fixture)
+            records = seed_opening_position(original, fixture)
+            if source_version == 4:
+                from verify_transfer import seed_previous_transfer
+
+                seed_previous_transfer(original, fixture, *records)
         expected_failure(lambda: stage_upgrade(original, output))
         require(not output.exists(), "Running source created a staged directory.")
     finally:
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "4"), (original, str(source_version))):
+    for inst, schema in ((candidate, "5"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -559,7 +573,7 @@ def verify(port):
     qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in (2, 3):
+        for source_version in (2, 3, 4):
             qualify_staged_upgrade(lab, port, source_version)
         runtime_dir = lab / "runtime"
         runtime_dir.mkdir()
@@ -828,10 +842,12 @@ def verify(port):
             from verify_transfer import qualify_transfer, verify_restored_transfers
 
             from verify_register import verify_register
+            from verify_counts import qualify_counts, verify_restored_counts
 
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
             verify_register(first, transfer)
+            counts = qualify_counts(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -984,6 +1000,7 @@ def verify(port):
                 verify_recovered_receiving(recovered, receiving)
                 verify_restored_transfers(recovered, transfer)
                 verify_register(recovered, transfer)
+                verify_restored_counts(recovered, counts)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]

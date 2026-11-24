@@ -25,6 +25,8 @@ internal sealed class Fault(int status, string code, string message) : Exception
     public string Code { get; } = code;
     public static Fault Invalid() => new(400, "invalid_reference", "Check the required fields, allowed values and field lengths.");
     public static Fault Conflict() => new(409, "revision_conflict", "This reference has changed. Reload its current revision.");
+    public static Fault StockShortageOpen() => new(409, "stock_shortage_open",
+        "An open witnessed shortage blocks new backing and transfers from this position.");
     public static Fault SignIn() => new(401, "sign_in_required", "Sign in to open the foundation workspace.");
 }
 
