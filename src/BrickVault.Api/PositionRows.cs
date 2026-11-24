@@ -22,17 +22,16 @@ internal static class PositionRows
             JOIN brickvault.catalog c ON c.id=p.catalog_id
             """;
 
-    internal static TransferPosition Read(NpgsqlDataReader r)
+    internal static BinStockLayer ReadLayer(NpgsqlDataReader r)
     {
         var recordedRevision = r.GetInt32(11);
         var quantity = r.GetInt32(13);
         var backed = r.GetInt32(14);
         var unbacked = quantity - backed;
         var current = References.ReadCatalog(r, 15);
-        var layer = new BinStockLayer(r.GetGuid(0), r.GetGuid(1), r.GetString(2), r.GetGuid(3), r.GetString(4),
+        return new BinStockLayer(r.GetGuid(0), r.GetGuid(1), r.GetString(2), r.GetGuid(3), r.GetString(4),
             r.GetGuid(5), r.GetGuid(6), r.GetInt32(7), Optional<int>(r, 8), r.GetString(9), r.GetGuid(10),
             recordedRevision, current, r.GetString(12), quantity, backed, unbacked,
             current.IntegrationEligible && current.Revision == recordedRevision ? unbacked : 0);
-        return new TransferPosition(layer, r.GetInt32(29), r.GetString(30), []);
     }
 }

@@ -38,7 +38,7 @@ internal sealed class BinStock(NpgsqlDataSource db)
             {PositionRows.From}
             WHERE p.location_id=$1 AND p.quantity > 0
             ORDER BY p.catalog_id,p.catalog_revision,buy.reference,d.reference,p.id
-            """, PositionRows.Read, token, locationId);
+            """, r => new TransferPosition(PositionRows.ReadLayer(r), r.GetInt32(29), r.GetString(30), []), token, locationId);
 
         List<TransferMovement> movements = [];
         if (includeMovements)

@@ -818,6 +818,16 @@
             }
           },
           {
+            "name": "positionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact physical position, including a depleted position."
+          },
+          {
             "name": "after",
             "in": "query",
             "required": false,
