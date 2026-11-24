@@ -1,21 +1,24 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import boxes from 'lucide-static/icons/boxes.svg?raw'
 import locations from 'lucide-static/icons/layout-grid.svg?raw'
+import stockIcon from 'lucide-static/icons/package-search.svg?raw'
 import activity from 'lucide-static/icons/clipboard-list.svg?raw'
 import intake from 'lucide-static/icons/package-open.svg?raw'
 import brand from './assets/brand.webp'
 import Register from './Register.vue'
 import Activity from './Activity.vue'
 import RecordForm from './RecordForm.vue'
-import Receiving from './Receiving.vue'
 import { useWorkbench } from './useWorkbench'
 import type { CatalogInput, LocationInput } from './api'
 import { commandLabel } from './api'
 import { time } from './presentation'
 
+const Receiving = defineAsyncComponent(() => import('./Receiving.vue'))
+const Inventory = defineAsyncComponent(() => import('./Inventory.vue'))
 const pages = {
   catalog: { title: 'Catalog', icon: boxes, description: 'Inspect item identity, source rights and catalog mappings.' },
+  inventory: { title: 'Inventory', icon: stockIcon, description: 'Find receipt-layer stock across bins and trace its custody.' },
   locations: { title: 'Locations', icon: locations, description: 'Register storage locations and inspect the stock confirmed in each bin.' },
   receiving: { title: 'Receiving', icon: intake, description: 'Receive deliveries, confirm bin counts and prepare unpublished offers.' },
   activity: { title: 'Activity', icon: activity, description: 'Trace recorded changes and check background work.' }
@@ -23,6 +26,7 @@ const pages = {
 type Page = keyof typeof pages
 const route = () => {
   const hash = window.location.hash.slice(1)
+  if (hash === 'inventory' || hash.startsWith('inventory/')) return 'inventory'
   if (hash === 'receiving' || hash.startsWith('receiving/')) return 'receiving'
   return hash === 'locations' || hash === 'activity' ? hash : 'catalog'
 }
@@ -119,7 +123,7 @@ function openForm() {
           <div class="read-bar">
             <span class="read-state" role="status"><i :class="{ live: readState === 'ready' }" aria-hidden="true"></i>{{ status }}</span>
             <span v-if="page === 'receiving' && receiving">Last read {{ time(receiving.asOf) }}</span>
-            <span v-else-if="workspace && page !== 'receiving'">Last read {{ time(workspace.asOf) }}</span>
+            <span v-else-if="workspace && page !== 'receiving' && page !== 'inventory'">Last read {{ time(workspace.asOf) }}</span>
             <button :disabled="readState === 'loading' || submitting || authBusy" @click="refresh()">Refresh</button>
           </div>
           <p v-if="error && !dialogKind" class="warning" role="alert">{{ error }}</p>
@@ -150,6 +154,7 @@ function openForm() {
               <div><span>Integration blocked</span><strong>{{ workspace.catalog.filter(row => !row.integrationEligible).length }}</strong></div>
             </div>
             <Activity v-if="page === 'activity'" :workspace="workspace" :connected="readState === 'ready'" @failure="expired" />
+            <Inventory v-else-if="page === 'inventory'" :key="session.workspaceId" :workspace="workspace" :connected="readState !== 'disconnected'" @failure="expired" />
             <template v-else-if="page === 'receiving'">
               <Receiving v-if="receiving" :key="session.workspaceId" :stock="receiving" :workspace="workspace" :workspace-id="session.workspaceId" :enabled="canCreate" :uncertain="pending.length > 0 && !submitting" :dispatch="record" />
               <p v-else role="status">{{ readState === 'loading' ? 'Loading receiving records…' : 'Receiving records are unavailable.' }}</p>
