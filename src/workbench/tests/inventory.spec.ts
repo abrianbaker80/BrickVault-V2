@@ -2,7 +2,7 @@ import { expect, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { test } from './trusted'
 import { audit, fixture } from './bin-fixture'
-import type { BinTransferSnapshot, StockPage } from '../src/api'
+import type { BinTransferSnapshot, PositionMovementPage, StockPage } from '../src/api'
 
 type Seed = Awaited<ReturnType<typeof fixture>>
 const register = (page: Page) => page.getByRole('region', { name: 'Stock register' })
@@ -41,6 +41,8 @@ test('Inventory searches across types and bins, pages by position, and retains s
   const itemNumber = 'BIN-' + f.a.code.slice(2)
   const { unknown, paid } = await positions(page, f)
   await moreType(f, itemNumber)
+  const binReads: string[] = []
+  page.on('request', r => { if (new URL(r.url()).pathname.startsWith('/api/v1/receiving/bins/')) binReads.push(r.url()) })
   await page.getByRole('link', { name: 'Inventory' }).click()
   await expect(query(page)).toBeVisible()
   await page.keyboard.press('/')
@@ -91,13 +93,22 @@ test('Inventory searches across types and bins, pages by position, and retains s
   await audit(page)
 
   await register(page).locator('[data-position="'+unknown.placementId+'"]').click()
+  await expect(detail(page)).toContainText(f.unknown.purchase)
+  await expect(detail(page).getByRole('region', { name: 'Position movement history' })).toContainText('No movements recorded for this position.')
   await f.write('receiving/transfers', 5, { purchaseId: paid.purchaseId, sourcePlacementId: paid.placementId,
     sourceLocationId: f.a.id, confirmedSourceLocationCode: f.a.code, destinationLocationId: f.b.id,
     confirmedDestinationLocationCode: f.b.code, quantity: 1, reason: 'Unrelated stock movement', backing: [] })
   const destination = await f.write('receiving/transfers', 3, { purchaseId: unknown.purchaseId, sourcePlacementId: unknown.placementId,
     sourceLocationId: f.a.id, confirmedSourceLocationCode: f.a.code, destinationLocationId: f.b.id,
     confirmedDestinationLocationCode: f.b.code, quantity: 3, reason: 'Move counted pouch', backing: [] })
+  const scoped = page.waitForResponse(r => new URL(r.url()).pathname === '/api/v1/inventory/positions/' + unknown.placementId + '/movements')
   await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+  const movementResponse = await scoped
+  expect(movementResponse.ok()).toBe(true)
+  const received: PositionMovementPage = await movementResponse.json()
+  expect(received.positionId).toBe(unknown.placementId)
+  expect(received.rows.map(m => m.reason)).toEqual(['Move counted pouch'])
+  expect(new URL(movementResponse.url()).searchParams.get('limit')).toBe('25')
   await expect(detail(page)).toContainText('This position has been fully transferred.')
   const history = detail(page).getByRole('region', { name: 'Position movement history' })
   await expect(history.getByRole('listitem')).toHaveCount(1)
@@ -128,6 +139,7 @@ test('Inventory searches across types and bins, pages by position, and retains s
   await totals(page, 1, 0)
   await register(page).locator('[data-position="'+unknown.placementId+'"]').click()
   await expect(dialog).toContainText('This position has been fully transferred.')
+  expect(binReads).toEqual([])
 })
 
 test('Inventory isolates failures, partial and stale reads from confirmed empty results', async ({ page, context }) => {
@@ -176,7 +188,7 @@ test('Inventory isolates failures, partial and stale reads from confirmed empty 
   await expect(register(page)).toContainText('No matching stock positions.')
   await page.goto('/#inventory/' + randomUUID())
   await expect(detail(page)).toContainText('No stock position was found for this ID.')
-  await page.route('**/receiving/bins/*/movements', route => route.abort('connectionreset'), {times:1})
+  await page.route('**/inventory/positions/*/movements?*', route => route.abort('connectionreset'), {times:1})
   await page.goto('/#inventory/'+paid.placementId)
   await expect(detail(page)).toContainText('Movement history is unavailable.')
   await expect(detail(page)).not.toContainText('No movements recorded for this position.')
@@ -188,4 +200,70 @@ test('Inventory isolates failures, partial and stale reads from confirmed empty 
   await expect(detail(page)).toContainText('The selected position was not returned.')
   await expect(stamp).toHaveText(receivedAt!)
   await expect(detail(page)).toContainText('Showing the last position read.')
+})
+
+
+test('movement pages keep the confirmed cursor and timestamp when a bounded history read fails', async ({ page }, info) => {
+  const f = await fixture(page)
+  const purchaseId = await f.write('receiving/purchases', 0, { reference:'HISTORY-' + f.a.code,
+    source:'Fictional history test', currency:'USD', orderedQuantity:27, pendingChargeMinor:null })
+  const deliveryId = await f.write('receiving/deliveries', 1, { purchaseId, reference:'Counted packages', quantity:27,
+    catalogId:f.catalogId, itemCostMinor:null })
+  const source = await f.write('receiving/putaway', 2, { purchaseId, deliveryId, catalogId:f.catalogId, locationId:f.a.id,
+    confirmedLocationCode:f.a.code, quantity:27 })
+  const ids:string[] = []
+  for (let n=1; n<=27; n++)
+    ids.push(await f.write('receiving/transfers', n+2, { purchaseId, sourcePlacementId:source, sourceLocationId:f.a.id,
+      confirmedSourceLocationCode:f.a.code, destinationLocationId:f.b.id, confirmedDestinationLocationCode:f.b.code,
+      quantity:1, reason:'Counted move ' + n, backing:[] }))
+
+  const path = '/api/v1/inventory/positions/' + source + '/movements'
+  const first = page.waitForResponse(r => new URL(r.url()).pathname === path)
+  await page.goto('/#inventory/' + source)
+  const initial: PositionMovementPage = await (await first).json()
+  expect(initial.scope).toBe('position-movements')
+  expect(initial.rows.map(m => m.id)).toEqual(ids.slice(2).reverse())
+  expect(initial.nextAfter).toBe(ids[2])
+  const panel = detail(page).getByRole('region', {name:'Position movement history'})
+  await expect(detail(page)).toContainText('This position has been fully transferred.')
+  await expect(panel.getByRole('listitem')).toHaveCount(25)
+  const stamp = panel.getByText(/^Movement read /)
+  const timestamp = await stamp.textContent()
+  const nextPage = (u: URL) => u.pathname === path && u.searchParams.get('after') === ids[2] && u.searchParams.get('limit') === '25'
+  await page.route(nextPage, r => r.abort('connectionreset'), {times:1})
+  const older = panel.getByRole('button', {name:'Older movements'})
+  await older.focus()
+  await page.keyboard.press('Enter')
+  const retry = panel.getByRole('button', {name:'Retry movement page 2'})
+  await expect(retry).toBeFocused()
+  await expect(panel).toContainText('Showing the last movement read.')
+  await expect(panel).toContainText('25 shown · Movement page 1')
+  await expect(stamp).toHaveText(timestamp!)
+  await expect(panel.getByRole('listitem')).toHaveCount(25)
+
+  const unrelated = { ...initial.rows[0], sourcePlacementId:randomUUID(), destinationPlacementId:randomUUID(), reason:'Unrelated row' }
+  await page.route(nextPage, r => r.fulfill({json:{...initial, rows:[unrelated]}}), {times:1})
+  await retry.click()
+  await expect(panel).toContainText('could not verify the server response')
+  await expect(panel).not.toContainText('Unrelated row')
+  await expect(stamp).toHaveText(timestamp!)
+  await page.route(nextPage, r => r.fulfill({json:{...initial, positionId:randomUUID(), rows:[]}}), {times:1})
+  const wrongPosition = page.waitForResponse(r => nextPage(new URL(r.url())))
+  await retry.click()
+  await wrongPosition
+  await expect(retry).toBeFocused()
+  await expect(panel).toContainText('25 shown · Movement page 1')
+  const real = page.waitForResponse(r => nextPage(new URL(r.url())))
+  await page.keyboard.press('Enter')
+  const last: PositionMovementPage = await (await real).json()
+  expect(last.rows.map(m => m.id)).toEqual(ids.slice(0,2).reverse())
+  expect(last.nextAfter).toBeNull()
+  await expect(panel).toContainText('2 shown · Movement page 2')
+  await expect(panel.getByRole('heading', {name:'Movement history'})).toBeFocused()
+  await expect(older).toBeDisabled()
+  await panel.screenshot({ path: info.outputPath('inventory-movement-history.png') })
+  await panel.getByRole('button', {name:'Newer movements'}).focus()
+  await page.keyboard.press('Enter')
+  await expect(panel).toContainText('25 shown · Movement page 1')
+  await expect(panel.getByRole('listitem').first()).toContainText('Counted move 27')
 })
