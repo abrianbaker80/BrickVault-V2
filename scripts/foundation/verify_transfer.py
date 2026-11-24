@@ -63,6 +63,7 @@ def seed_previous_transfer(instance, source_bin, purchase, position, offer):
             VALUES ('{transfer}','{offer}',1);
         INSERT INTO brickvault.commands(command_id,kind,digest,entity_id,revision,correlation_id)
             VALUES ('{command}','transfer',decode(repeat('00',32),'hex'),'{transfer}',5,gen_random_uuid());
+        INSERT INTO brickvault.audit(command_id,actor) VALUES ('{command}','operator');
         COMMIT;
         """, role="bv_migrator",
     )
