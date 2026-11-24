@@ -134,7 +134,7 @@ onBeforeUnmount(() => {
       @inspect="inspectBin" @recover="close" @failure="emit('failure', $event)" />
   </component>
   <StockLossWorkspace v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.lossPositionId"
-    :key="countLink.lossCaseId || countLink.lossReceiptId" :location="inspected" :position="countLink.lossPositionId"
+    :key="countLink.binId + '/' + countLink.lossPositionId + '/' + (countLink.lossReceiptId ? 'posting/' + countLink.lossReceiptId : 'case/' + countLink.lossCaseId)" :location="inspected" :position="countLink.lossPositionId"
     :catalog="workspace.catalog" :case-id="countLink.lossCaseId" :posting="countLink.lossReceiptId" :as-of="workspace.asOf" :connected="connected" :controls="transfers"
     @failure="emit('failure', $event)" @recover="close" @close="inspectBin(inspected.id)" />
   <BuildHolds v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.holdPositionId"
