@@ -165,6 +165,19 @@ def migration_test(s):
         "Interrupted receiving upgrade changed the supported M2 database.",
     )
     s.sql("DROP TABLE brickvault.purchases;", db, "bv_migrator")
+    s.migrate(db, to=3)
+    s.sql(
+        "CREATE TABLE brickvault.placement_transfers(test boolean);", db, "bv_migrator"
+    )
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version;", db) == "3"
+        and s.sql("SELECT to_regclass('brickvault.placement_positions') IS NULL;", db)
+        == "t"
+        and s.sql(inspect, db) == expected,
+        "A failed transfer migration partially changed the receiving database.",
+    )
+    s.sql("DROP TABLE brickvault.placement_transfers;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -178,38 +191,44 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "3",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "4",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations to v2 and v3, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v4, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
 
-def qualify_staged_upgrade(lab, port):
+def qualify_staged_upgrade(lab, port, source_version):
     """Exercise the operator's stopped-instance copy and prove the source still rolls back."""
     from upgrade import stage_upgrade
 
     migrate = Instance.migrate
-    with patch.object(Instance, "migrate", lambda inst: migrate(inst, to=2)):
-        original = init(lab / "schema2", lab / "schema2-keys", port)
+    with patch.object(
+        Instance, "migrate", lambda inst: migrate(inst, to=source_version)
+    ):
+        original = init(lab / f"schema{source_version}", lab / "stage-keys", port)
     fixture = new_id()
     query = f"SELECT code FROM brickvault.locations WHERE id='{fixture}'"
-    output = lab / "upgrade"
+    output = lab / f"upgrade-from-{source_version}"
     original.pg_start()
     try:
         original.sql(
             f"INSERT INTO brickvault.locations(id,revision,code,name) VALUES ('{fixture}',1,'OLD-01','Original bin')",
             role="bv_migrator",
         )
+        if source_version == 3:
+            from verify_transfer import seed_opening_position
+
+            seed_opening_position(original, fixture)
         expected_failure(lambda: stage_upgrade(original, output))
         require(not output.exists(), "Running source created a staged directory.")
     finally:
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "3"), (original, "2")):
+    for inst, schema in ((candidate, "4"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -224,7 +243,7 @@ def qualify_staged_upgrade(lab, port):
         finally:
             inst.pg_stop()
     print(
-        "Stopped M2 instance upgraded independently; original database re-opened with its original record.",
+        f"Stopped schema-{source_version} instance upgraded independently; original database retained its records.",
         flush=True,
     )
 
@@ -540,7 +559,8 @@ def verify(port):
     qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        qualify_staged_upgrade(lab, port)
+        for source_version in (2, 3):
+            qualify_staged_upgrade(lab, port, source_version)
         runtime_dir = lab / "runtime"
         runtime_dir.mkdir()
         if WIN:
@@ -805,7 +825,10 @@ def verify(port):
             first.login((s.path / "owner-login.txt").read_text().splitlines()[1])
             from verify_receiving import qualify_receiving, verify_recovered_receiving
 
+            from verify_transfer import qualify_transfer, verify_restored_transfers
+
             receiving = qualify_receiving(s, first, rec["entityId"])
+            receiving, transfer = qualify_transfer(first, receiving)
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -956,6 +979,7 @@ def verify(port):
                 )
                 after = recovered.call("workspace")
                 verify_recovered_receiving(recovered, receiving)
+                verify_restored_transfers(recovered, transfer)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]

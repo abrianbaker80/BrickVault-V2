@@ -13,9 +13,15 @@ The reference case receives eight identified units at a total item cost of USD 8
 
 In **Locations**, open the bin to see its confirmed stock. Each placement retains its purchase and delivery. The inspector shows the whole delivery’s documented cost and currency, or marks the cost unknown. One delivery may occupy several bins. Adding its displayed cost across placements would count the same evidence more than once. Backed and unbacked quantities reconcile to the on-hand count. The amount eligible for new backing also depends on the recorded catalog revision and its current eligibility.
 
+## Transfer stock between bins
+
+Open the source bin in **Locations** and select the receipt layer that physically moved. Choose the destination and enter both bin codes, the number moved and the reason. When the pieces back an offer, specify how many units of each offer move with them. The sum of the chosen backing and the unbacked units must fit the layer at the source. A transfer retains the recorded catalog revision, original delivery and cost basis.
+
+Check the source and destination after saving. Transfers appear in both bins’ movement history with the same command receipt. A later move from the destination keeps the original delivery. The purchase's physical, quarantined, reserved and free totals and its offer quantities stay consistent across the move. [Transfer qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/18)
+
 ## Stage a schema upgrade
 
-Build the current release from the checkout. Stop the M2 instance and use a new output directory with room for another complete cluster. The command copies the stopped cluster, operator credentials, workspace identity and established certificate authority into private staging. It applies the candidate migrations and database grants, compares the original business records and verifies the new receiving tables are empty. A successful run exposes the stopped candidate at `<output>/instance`. Preserve the original instance and its matching encrypted backup.
+Build the current release from the checkout. Stop the source instance and use a new output directory with room for another complete cluster. The command copies the stopped cluster, operator credentials, workspace identity and established certificate authority into private staging. It applies the candidate migrations and database grants, compares the original business records and verifies the opening stock and offer backing in both directions against the receiving records. Existing positions retain their IDs. Transferring stock requires schema 4. A successful run exposes the stopped candidate at `<output>/instance`. Preserve the original instance and its matching encrypted backup.
 
 ```text
 python scripts/foundation/manage.py build
@@ -28,4 +34,4 @@ For a systemd-managed guest, stop its Workbench unit before staging. An explicit
 
 ## Repeat verification
 
-Run `python scripts/foundation/manage.py verify` after a clean build. The qualification uses the normal private HTTPS API, PostgreSQL and Workbench. The restore check compares the purchase and both deliveries, their placements, offer backing, reference audit and original command receipts. A schema-2 backup still requires its archived release. A schema-3 backup also fingerprints the five receiving tables. [Setup and recovery](m2-foundation.md)
+Run `python scripts/foundation/manage.py verify` after a clean build. The qualification uses the normal private HTTPS API, PostgreSQL and Workbench. The restore check compares the purchase and both deliveries, their placements, offer backing, reference audit and original command receipts. A schema-2 backup still requires its archived release. Schema-3 backups also fingerprint the five receiving tables. Schema-4 backups add position identities, transfer events and transferred offer backing. Each archive requires its matching release. [Setup and recovery](m2-foundation.md)

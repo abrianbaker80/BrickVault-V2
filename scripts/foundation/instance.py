@@ -322,10 +322,13 @@ class Instance:
             ALTER TABLE brickvault.sessions ENABLE ROW LEVEL SECURITY;
             DO $grants$
             BEGIN
-                IF (SELECT max(version) FROM brickvault.schema_version) = 3 THEN
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 3 THEN
                     GRANT INSERT ON brickvault.purchases, brickvault.deliveries,
                         brickvault.placements, brickvault.offers, brickvault.offer_backing TO bv_api;
                     GRANT UPDATE (revision) ON brickvault.purchases TO bv_api;
+                END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 4 THEN
+                    GRANT INSERT ON brickvault.placement_transfers,brickvault.placement_transfer_backing TO bv_api;
                 END IF;
             END $grants$;
             COMMIT;
