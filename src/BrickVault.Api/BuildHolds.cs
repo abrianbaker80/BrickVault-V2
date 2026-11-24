@@ -93,14 +93,15 @@ internal sealed class BuildHolds(NpgsqlDataSource db)
             SELECT expected_purchase_revision FROM brickvault.stock_build_holds WHERE id=$1 AND position_id=$2
             """, after, positionId, token);
         var holds = await Rows(connection, tx, """
-            SELECT h.id,h.command_id,c.correlation_id,h.purpose,h.reason,h.quantity,h.released_quantity,h.remaining_quantity,a.occurred_at
+            SELECT h.id,h.command_id,c.correlation_id,h.purpose,h.reason,h.quantity,h.released_quantity,h.remaining_quantity,
+                a.occurred_at,h.expected_purchase_revision,h.location_code
             FROM brickvault.current_build_holds h JOIN brickvault.commands c ON c.command_id=h.command_id
             JOIN brickvault.audit a ON a.command_id=h.command_id
             WHERE h.position_id=$1 AND ($2::integer IS NULL OR h.expected_purchase_revision<$2)
               AND ($4::uuid IS NULL OR h.command_id=$4)
             ORDER BY h.expected_purchase_revision DESC LIMIT $3
             """, r => new StockHoldRow(r.GetGuid(0), r.GetGuid(1), r.GetGuid(2), r.GetString(3), r.GetString(4),
-                r.GetInt32(5), r.GetInt32(6), r.GetInt32(7), r.GetDateTime(8)),
+                r.GetInt32(5), r.GetInt32(6), r.GetInt32(7), r.GetDateTime(8), r.GetInt32(9), r.GetString(10)),
             token, positionId, Nullable(NpgsqlDbType.Integer, cursor), limit + 1, Nullable(NpgsqlDbType.Uuid, commandId));
         RequireMatch(holds.Count, commandId);
         var next = Next(holds, limit, h => h.Id);
@@ -128,14 +129,15 @@ internal sealed class BuildHolds(NpgsqlDataSource db)
             SELECT expected_purchase_revision FROM brickvault.stock_build_hold_releases WHERE id=$1 AND hold_id=$2
             """, after, holdId, token);
         var releases = await Rows(connection, tx, """
-            SELECT r.id,r.command_id,c.correlation_id,r.quantity,r.reason,r.shortage_id,r.expected_observation_id,a.occurred_at
+            SELECT r.id,r.command_id,c.correlation_id,r.quantity,r.reason,r.shortage_id,r.expected_observation_id,
+                a.occurred_at,r.purchase_id,r.expected_purchase_revision
             FROM brickvault.stock_build_hold_releases r JOIN brickvault.commands c ON c.command_id=r.command_id
             JOIN brickvault.audit a ON a.command_id=r.command_id
             WHERE r.hold_id=$1 AND ($2::integer IS NULL OR r.expected_purchase_revision<$2)
               AND ($4::uuid IS NULL OR r.command_id=$4)
             ORDER BY r.expected_purchase_revision DESC LIMIT $3
             """, r => new StockHoldReleaseRow(r.GetGuid(0), r.GetGuid(1), r.GetGuid(2), r.GetInt32(3), r.GetString(4),
-                Optional<Guid>(r, 5), Optional<Guid>(r, 6), r.GetDateTime(7)),
+                Optional<Guid>(r, 5), Optional<Guid>(r, 6), r.GetDateTime(7), r.GetGuid(8), r.GetInt32(9)),
             token, holdId, Nullable(NpgsqlDbType.Integer, cursor), limit + 1, Nullable(NpgsqlDbType.Uuid, commandId));
         RequireMatch(releases.Count, commandId);
         return new StockHoldReleasePage("hold-releases", asOf, true, holdId, releases, Next(releases, limit, r => r.Id));

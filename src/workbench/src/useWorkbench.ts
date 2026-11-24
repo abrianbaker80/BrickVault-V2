@@ -154,12 +154,14 @@ export function useWorkbench(page: Ref<string>) {
               const data = await api.positionHolds(command.body.locationId, command.body.positionId, '', command.body.commandId)
               const hold = data.holds[0]
               if (!data.complete || data.purchaseId !== command.body.purchaseId || hold.purpose !== command.body.purpose ||
-                  hold.reason !== command.body.reason || hold.quantity !== command.body.quantity) throw new Error('Hold receipt mismatch')
+                  hold.reason !== command.body.reason || hold.quantity !== command.body.quantity ||
+                  hold.expectedPurchaseRevision !== command.body.expectedRevision || hold.confirmedLocationCode !== command.body.confirmedLocationCode) throw new Error('Hold receipt mismatch')
               committed = hold
             } else {
               const data = await api.holdReleases(command.locationId, command.positionId, command.body.holdId, '', command.body.commandId)
               const release = data.releases[0]
               if (!data.complete || release.reason !== command.body.reason || release.quantity !== command.body.quantity ||
+                  release.purchaseId !== command.body.purchaseId || release.expectedPurchaseRevision !== command.body.expectedRevision ||
                   release.shortageId !== (command.body.shortageId ?? null) ||
                   release.expectedObservationId !== (command.body.expectedObservationId ?? null)) throw new Error('Release receipt mismatch')
               committed = release

@@ -65,12 +65,12 @@ internal sealed record StockHoldReleaseCommand : BuildHoldCommand
 }
 
 internal sealed record StockHoldRow(Guid Id, Guid CommandId, Guid CorrelationId, string Purpose, string Reason,
-    int Quantity, int ReleasedQuantity, int RemainingQuantity, DateTime CreatedAt);
+    int Quantity, int ReleasedQuantity, int RemainingQuantity, DateTime CreatedAt, int ExpectedPurchaseRevision, string ConfirmedLocationCode);
 internal sealed record StockHoldPositionSnapshot(string Scope, DateTime AsOf, bool Complete, LocationRow Location,
     Guid PositionId, Guid PurchaseId, int PurchaseRevision, int LedgerQuantity, int OfferBackedQuantity,
     int ReservedQuantity, int FreeQuantity, int AvailableToHoldQuantity, Guid? ShortageId, Guid? LatestObservationId,
     IReadOnlyList<StockHoldRow> Holds, Guid? NextAfter);
 internal sealed record StockHoldReleaseRow(Guid Id, Guid CommandId, Guid CorrelationId, int Quantity, string Reason,
-    Guid? ShortageId, Guid? ExpectedObservationId, DateTime ReleasedAt);
+    Guid? ShortageId, Guid? ExpectedObservationId, DateTime ReleasedAt, Guid PurchaseId, int ExpectedPurchaseRevision);
 internal sealed record StockHoldReleasePage(string Scope, DateTime AsOf, bool Complete, Guid HoldId,
     IReadOnlyList<StockHoldReleaseRow> Releases, Guid? NextAfter);

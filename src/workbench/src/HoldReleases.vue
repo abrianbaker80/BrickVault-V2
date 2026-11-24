@@ -11,6 +11,7 @@ const displayed = ref<string[]>([''])
 const retry = ref(0)
 const page = shallowRef<Awaited<ReturnType<typeof api.holdReleases>>>()
 const error = ref('')
+const partial = ref(false)
 const loading = ref(false)
 watch(() => [props.bin, props.position, props.hold, props.connected, props.asOf, requested.value, retry.value] as const,
   async ([bin, position, hold, connected, , cursors], _, clean) => {
@@ -21,7 +22,11 @@ watch(() => [props.bin, props.position, props.hold, props.connected, props.asOf,
     error.value = ''
     try {
       const result = await api.holdReleases(bin, position, hold, cursors.at(-1))
-      if (active) { page.value = result; displayed.value = cursors }
+      if (!active) return
+      partial.value = !result.complete
+      if (partial.value && page.value?.complete) return
+      page.value = result
+      displayed.value = cursors
     } catch (failure) {
       if (active) { error.value = explain(failure); emit('failure', failure) }
     } finally { if (active) loading.value = false }
@@ -32,8 +37,8 @@ watch(() => [props.bin, props.position, props.hold, props.connected, props.asOf,
     <p v-if="error || !connected" class="warning" role="status">{{ error || 'The workspace is offline.' }}
       {{ page ? 'Showing the last release read.' : 'Release history is unavailable.' }}</p>
     <p v-else-if="loading" role="status">Reading releases…</p>
-    <p v-else-if="page && !page.complete" class="warning" role="status">Partial release history.</p>
-    <button v-if="error && connected" @click="++retry">Retry release history</button>
+    <p v-else-if="partial" class="warning" role="status">Partial release history. {{ page?.complete ? 'Showing the last release read.' : 'Some releases may be missing.' }}</p>
+    <button v-if="(error || partial) && connected" :disabled="loading" @click="++retry">Retry release history</button>
     <ul v-if="page?.releases.length" class="receipt-lines">
       <li v-for="entry in page.releases" :key="entry.id"><strong>{{ entry.quantity }} released · {{ entry.reason }}</strong>
         <small>{{ time(entry.releasedAt) }}</small>
@@ -44,7 +49,7 @@ watch(() => [props.bin, props.position, props.hold, props.connected, props.asOf,
     <small v-if="page">Release read {{ time(page.asOf) }}</small>
     <nav v-if="page && (displayed.length > 1 || page.nextAfter)" aria-label="Release history pages">
       <button :disabled="!connected || loading || displayed.length < 2" @click="requested = displayed.slice(0,-1)">Newer releases</button>
-      <button :disabled="!connected || loading || !page.complete || !page.nextAfter" @click="page.nextAfter && (requested = [...displayed, page.nextAfter])">Older releases</button>
+      <button :disabled="!connected || loading || partial || !page.complete || !page.nextAfter" @click="page.nextAfter && (requested = [...displayed, page.nextAfter])">Older releases</button>
     </nav>
   </section>
 </template>

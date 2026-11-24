@@ -4243,6 +4243,16 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "expectedPurchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
           }
         },
         "required": [
@@ -4254,7 +4264,9 @@
           "quantity",
           "releasedQuantity",
           "remainingQuantity",
-          "createdAt"
+          "createdAt",
+          "expectedPurchaseRevision",
+          "confirmedLocationCode"
         ],
         "additionalProperties": false
       },
@@ -4270,8 +4282,7 @@
             "format": "date-time"
           },
           "complete": {
-            "type": "boolean",
-            "const": true
+            "type": "boolean"
           },
           "location": {
             "$ref": "#/components/schemas/LocationRow"
@@ -4407,6 +4418,15 @@
           "releasedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "expectedPurchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -4417,7 +4437,9 @@
           "reason",
           "shortageId",
           "expectedObservationId",
-          "releasedAt"
+          "releasedAt",
+          "expectedPurchaseRevision",
+          "purchaseId"
         ],
         "additionalProperties": false
       },
@@ -4433,8 +4455,7 @@
             "format": "date-time"
           },
           "complete": {
-            "type": "boolean",
-            "const": true
+            "type": "boolean"
           },
           "holdId": {
             "type": "string",

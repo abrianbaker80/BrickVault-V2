@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
-import { api, explain } from './api'
-import type { Location, TransferControls } from './api'
+import { api, ContractFailure, explain } from './api'
+import { countReceiptLink } from './countLinks'
+import type { CountObservation, Location, TransferControls } from './api'
 import { time } from './presentation'
 import HoldReleases from './HoldReleases.vue'
 
@@ -11,32 +12,35 @@ type Snapshot = Awaited<ReturnType<typeof api.positionHolds>>
 type Hold = Snapshot['holds'][number]
 const dialog = ref<HTMLDialogElement>()
 const snapshot = shallowRef<Snapshot>()
+const evidence = shallowRef<CountObservation>()
+const partial = ref(false)
 const reading = ref(false)
 const readError = ref('')
-const cursor = ref('')
-const previousPages = ref<string[]>([])
+const requested = shallowRef<string[]>([''])
+const displayed = shallowRef<string[]>([''])
 const change = ref(0)
 const sending = ref(false)
 const result = ref('')
 const historyId = ref('')
-const draft = shallowRef<{ revision: number; workspace: string; selected?: Hold; caseId: string | null; observation: string | null }>()
+const draft = shallowRef<{ revision: number; workspace: string; locationCode: string; selected?: Hold; caseId: string | null; observation: string | null }>()
 const amount = ref<number | ''>('')
 const binCode = ref('')
 const purpose = ref('')
 const reason = ref('')
 const message = ref('')
 const stale = computed(() => draft.value && snapshot.value && (draft.value.revision !== snapshot.value.purchaseRevision ||
-  draft.value.workspace !== props.controls.workspaceId || draft.value.caseId !== snapshot.value.shortageId ||
-  draft.value.observation !== snapshot.value.latestObservationId))
+  draft.value.workspace !== props.controls.workspaceId || draft.value.locationCode !== props.location.code || draft.value.caseId !== snapshot.value.shortageId ||
+  draft.value.observation !== snapshot.value.latestObservationId || (draft.value.selected &&
+  snapshot.value.holds.find(h => h.id === draft.value?.selected?.id)?.remainingQuantity !== draft.value.selected.remainingQuantity)))
 const ready = computed(() => props.connected && props.controls.enabled && !reading.value && !readError.value &&
-  snapshot.value?.complete && !sending.value)
+  snapshot.value?.complete && !partial.value && !sending.value)
 const maximum = computed(() => draft.value?.selected?.remainingQuantity ?? snapshot.value?.availableToHoldQuantity ?? 0)
 const canSave = computed(() => ready.value && !stale.value && draft.value && Number.isInteger(amount.value) &&
   Number(amount.value) > 0 && Number(amount.value) <= maximum.value && reason.value.trim().length > 0 &&
   (draft.value.selected || (purpose.value.trim().length > 0 && binCode.value === props.location.code)))
 
-watch(() => [props.positionId, props.location.id, props.connected, props.asOf, cursor.value, change.value] as const,
-  async ([position, bin, connected, , after], _, clean) => {
+watch(() => [props.positionId, props.location.id, props.connected, props.asOf, requested.value, change.value, props.location.revision] as const,
+  async ([position, bin, connected, , cursors], _, clean) => {
     let active = true
     clean(() => { active = false })
     reading.value = false
@@ -44,8 +48,28 @@ watch(() => [props.positionId, props.location.id, props.connected, props.asOf, c
     reading.value = true
     readError.value = ''
     try {
-      const next = await api.positionHolds(bin, position, after)
-      if (active) snapshot.value = next
+      const next = await api.positionHolds(bin, position, cursors.at(-1))
+      if (!active) return
+      if (next.location.revision < props.location.revision || Boolean(next.shortageId) !== Boolean(next.latestObservationId))
+        throw new ContractFailure()
+      partial.value = !next.complete
+      if (partial.value && snapshot.value?.complete) return
+      let observation: CountObservation | undefined
+      if (next.latestObservationId && next.complete) {
+        const counts = await api.binCounts(bin, { positionId: position, observationId: next.latestObservationId })
+        if (!active) return
+        if (!counts.complete) { partial.value = true; return }
+        const current = counts.shortages.find(c => c.id === next.shortageId)
+        if (current?.latestObservationId !== next.latestObservationId) {
+          readError.value = 'The shortage changed while its evidence was being read. Retry to review the latest count.'
+          return
+        }
+        if (counts.observations[0]?.purchaseId !== next.purchaseId) throw new ContractFailure()
+        observation = counts.observations[0]
+      }
+      snapshot.value = next
+      evidence.value = observation
+      displayed.value = cursors
     } catch (failure) {
       if (active) { readError.value = explain(failure); emit('failure', failure) }
     } finally { if (active) reading.value = false }
@@ -55,14 +79,13 @@ onMounted(() => dialog.value?.showModal())
 function edit(selected?: Hold) {
   const data = snapshot.value
   if (!ready.value || !data) return
-  draft.value = { selected, revision: data.purchaseRevision, workspace: props.controls.workspaceId,
+  draft.value = { selected, locationCode: data.location.code, revision: data.purchaseRevision, workspace: props.controls.workspaceId,
     caseId: data.shortageId, observation: data.latestObservationId }
   amount.value = ''; binCode.value = ''; purpose.value = ''; reason.value = ''; result.value = ''; message.value = ''
 }
 function page(after?: string | null) {
   if (!ready.value || draft.value) return
-  if (after) { previousPages.value.push(cursor.value); cursor.value = after }
-  else cursor.value = previousPages.value.pop() || ''
+  requested.value = after ? [...displayed.value, after] : displayed.value.slice(0, -1)
 }
 async function save() {
   if (!canSave.value || !draft.value || !snapshot.value) return
@@ -79,7 +102,7 @@ async function save() {
           body: { ...body, positionId: props.positionId, locationId: props.location.id, confirmedLocationCode: binCode.value, purpose: purpose.value.trim() } })
     if (receipt) {
       result.value = selected ? 'Released ' + body.quantity + ' from ' + selected.purpose + '.' : 'Reserved ' + body.quantity + ' for ' + purpose.value.trim() + '.'
-      draft.value = undefined; cursor.value = ''; previousPages.value = []; ++change.value
+      draft.value = undefined; requested.value = ['']; ++change.value
     } else if (props.controls.pending) emit('recover')
     else message.value = props.controls.feedback
   } finally { sending.value = false }
@@ -87,7 +110,7 @@ async function save() {
 </script>
 
 <template>
-  <dialog ref="dialog" aria-labelledby="hold-title" @cancel.prevent="!sending && emit('close')">
+  <dialog ref="dialog" aria-labelledby="hold-title" @cancel.prevent="!sending && emit('close')" @keydown.esc.stop>
     <header class="panel-head"><h2 id="hold-title">Build holds</h2>
       <button aria-label="Close build holds" class="close" :disabled="sending" @click="emit('close')">×</button></header>
     <div class="hold-body">
@@ -95,8 +118,8 @@ async function save() {
       <p v-if="readError || !connected" class="warning" role="alert">{{ readError || 'The workspace is offline.' }}
         {{ snapshot ? 'Showing the last confirmed read.' : 'Build hold details are unavailable.' }}</p>
       <p v-else-if="reading" role="status">Reading build holds…</p>
-      <p v-else-if="snapshot && !snapshot.complete" class="warning" role="status">Partial hold read. Refresh before making a change.</p>
-      <button v-if="readError && connected" :disabled="reading" @click="++change">Retry hold read</button>
+      <p v-else-if="partial" class="warning" role="status">Partial hold read. {{ snapshot?.complete ? 'Showing the last confirmed read.' : 'Hold or count evidence is incomplete.' }}</p>
+      <button v-if="(readError || partial) && connected" :disabled="reading" @click="++change">Retry hold read</button>
       <p v-if="result" role="status" class="notice">{{ result }}</p>
       <template v-if="snapshot">
         <small>Position read {{ time(snapshot.asOf) }}</small>
@@ -104,7 +127,15 @@ async function save() {
           <dt>Backed by offers</dt><dd>{{ snapshot.offerBackedQuantity }}</dd>
           <dt>Reserved for builds</dt><dd>{{ snapshot.reservedQuantity }}</dd>
           <dt>Available for a new hold</dt><dd>{{ snapshot.availableToHoldQuantity }}</dd></dl>
-        <p v-if="snapshot.shortageId" class="warning" role="status">This position has an open shortage. Choose a project to release pieces from. The count stays open for review.</p>
+        <section v-if="snapshot.shortageId" class="warning" aria-label="Shortage evidence">
+          <strong>This position has an open shortage.</strong>
+          <template v-if="evidence">
+            <p>{{ evidence.countedQuantity }} observed · {{ evidence.ledgerQuantity }} in the ledger at count · {{ evidence.missingQuantity }} missing</p>
+            <p>{{ evidence.reason }} · {{ time(evidence.observedAt) }}</p>
+            <a :href="countReceiptLink(location.id, evidence.id)">View latest witnessed count</a>
+          </template>
+          <p>Choose a project and quantity to release. The shortage stays open for review.</p>
+        </section>
         <template v-if="!draft">
           <button class="primary" :disabled="!ready || !snapshot.availableToHoldQuantity" @click="edit()">Create build hold</button>
           <ul v-if="snapshot.holds.length" class="receipt-lines" aria-label="Project holds">
@@ -119,8 +150,8 @@ async function save() {
             </li>
           </ul>
           <p v-else-if="ready">No build holds recorded for this position.</p>
-          <nav v-if="previousPages.length || snapshot.nextAfter" aria-label="Hold pages">
-            <button :disabled="!ready || !previousPages.length" @click="page()">Newer holds</button>
+          <nav v-if="displayed.length > 1 || snapshot.nextAfter" aria-label="Hold pages">
+            <button :disabled="!ready || displayed.length < 2" @click="page()">Newer holds</button>
             <button :disabled="!ready || !snapshot.nextAfter" @click="page(snapshot.nextAfter)">Older holds</button></nav>
         </template>
         <form v-else @submit.prevent="save">

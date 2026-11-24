@@ -4,7 +4,6 @@ import { api, ContractFailure, explain } from './api'
 import type { BinTransferSnapshot, Catalog, Location, TransferControls, TransferPosition } from './api'
 import TransferForm from './TransferForm.vue'
 import CountWorkspace from './CountWorkspace.vue'
-import BuildHolds from './BuildHolds.vue'
 import { countPositionLink, holdPositionLink, type CountLink } from './countLinks'
 import { itemLabel, money } from './receiving'
 import { time } from './presentation'
@@ -150,9 +149,6 @@ watch(() => [props.location.id, props.location.revision, props.asOf, props.conne
         </ul>
       </section>
     </template>
-    <BuildHolds v-if="countLink?.holdPositionId && countLink.binId === location.id" :key="countLink.holdPositionId"
-      :location="location" :position-id="countLink.holdPositionId" :as-of="asOf" :connected="connected" :controls="transfers"
-      @failure="emit('failure', $event)" @recover="recoverCount" @close="closeCount" />
     <CountWorkspace v-if="inspectingCount && countLink"
       :key="countLink.positionId || countLink.receiptId" :location="location" :position-id="countLink.positionId" :receipt-id="countLink.receiptId"
       :as-of="asOf" :connected="connected" :controls="transfers" :catalog="catalog"
