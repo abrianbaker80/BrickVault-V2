@@ -377,7 +377,11 @@ class CloudReceipts(unittest.TestCase):
     def test_historical_cutovers_are_complete_and_unambiguous(self):
         pin = cloud.load_small(self.trust)
         first = pin | {"before": "20250101T000000Z"}
-        second = pin | {"before": "20260101T000000Z", "sourceId": str(uuid.uuid4())}
+        second = pin | {
+            "before": "20260101T000000Z",
+            "sourceId": uuid.UUID(pin["sourceId"]).hex.upper(),
+            "workspaceId": "{" + pin["workspaceId"].upper() + "}",
+        }
         history = pin | {"previous": [first, second]}
         self.assertIs(cloud.signing_pin(history, self.point), second)
         for bad in (
@@ -406,6 +410,50 @@ class CloudReceipts(unittest.TestCase):
         self.assertEqual(
             combined["previous"], [first, second, pin | {"before": "20270101T000000Z"}]
         )
+
+    def test_reject_mixed_imported_history_before_verification_or_rotation(self):
+        commissioned = cloud.load_small(self.trust)
+        earlier = commissioned | {"before": "20250101T000000Z"}
+        retired = commissioned | {"before": "20260101T000000Z"}
+        incoming = self.root / "incoming.json"
+        incoming.write_bytes(
+            cloud.encoded(commissioned | {"publicKey": self.keygen(self.root / "next")})
+        )
+        original_incoming = incoming.read_bytes()
+        current_point = "20260101T000000Z-" + uuid.uuid4().hex
+        sidecar = self.root / "retained.receipt.json"
+        for field, receipt_field in (
+            ("sourceId", "sourceInstance"),
+            ("workspaceId", "workspaceId"),
+        ):
+            with self.subTest(field=field):
+                foreign_id = str(uuid.uuid4())
+                body = self.receipt | {receipt_field: foreign_id}
+                signed = cloud.ssh_keygen(
+                    ["sign", "-f", self.key, "-n", cloud.NAMESPACE], cloud.encoded(body)
+                )
+                sidecar.write_bytes(
+                    cloud.encoded({"receipt": body, "signature": signed.decode()})
+                )
+                history = commissioned | {
+                    "previous": [earlier, retired | {field: foreign_id}]
+                }
+                self.trust.write_bytes(cloud.encoded(history))
+                original_history = self.trust.read_bytes()
+                with self.assertRaises(RecoveryError):
+                    cloud.verify_sidecar(sidecar, self.point, history)
+                with self.assertRaises(RecoveryError):
+                    cloud.signing_pin(history, current_point)
+                output = self.root / ("rotation-" + field)
+                with self.assertRaises(RecoveryError):
+                    cloud.rotate_trust(self.trust, incoming, "20270101T000000Z", output)
+                self.assertFalse(output.exists())
+                output.write_bytes(b"previously commissioned trust")
+                with self.assertRaises(RecoveryError):
+                    cloud.rotate_trust(self.trust, incoming, "20270101T000000Z", output)
+                self.assertEqual(output.read_bytes(), b"previously commissioned trust")
+                self.assertEqual(self.trust.read_bytes(), original_history)
+                self.assertEqual(incoming.read_bytes(), original_incoming)
 
     def test_tamper_substitution_and_conflict(self):
         self.publish()

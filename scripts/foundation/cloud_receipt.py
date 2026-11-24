@@ -92,7 +92,7 @@ def ssh_keygen(args, content):
     return result.stdout
 
 
-def validate_pin(pin):
+def validated_pin_lineage(pin):
     if not isinstance(pin, dict):
         raise RecoveryError("Invalid signing pin in independently held receipt trust.")
     public = str(pin.get("publicKey", "")).split()
@@ -107,22 +107,24 @@ def validate_pin(pin):
     if not key.startswith(prefix) or len(key) != len(prefix) + 32:
         raise RecoveryError("Invalid OpenSSH Ed25519 public key.")
     try:
-        uuid.UUID(str(pin["sourceId"]))
-        uuid.UUID(str(pin["workspaceId"]))
-    except (ValueError, KeyError) as exc:
+        return uuid.UUID(pin["sourceId"]), uuid.UUID(pin["workspaceId"])
+    except (AttributeError, TypeError, ValueError, KeyError) as exc:
         raise RecoveryError(
             "Signing pins require their source and workspace IDs."
         ) from exc
 
 
 def signing_periods(trust):
-    validate_pin(trust)
+    commissioned = validated_pin_lineage(trust)
     previous = trust.get("previous", [])
     if not isinstance(previous, list):
         raise RecoveryError("Historical signing pins must be an ordered list.")
     last_cutover = ""
     for pin in previous:
-        validate_pin(pin)
+        if validated_pin_lineage(pin) != commissioned:
+            raise RecoveryError(
+                "Historical signing pins must retain the commissioned source and workspace IDs."
+            )
         cutoff = pin.get("before")
         if not isinstance(cutoff, str) or not re.fullmatch(
             r"[0-9]{8}T[0-9]{6}Z", cutoff
@@ -158,15 +160,12 @@ def rotate_trust(current_file, new_pin_file, cutover, output):
     current = load_small(current_file)
     previous = signing_periods(current)
     new = load_small(new_pin_file)
-    validate_pin(new)
+    incoming_lineage = validated_pin_lineage(new)
     if "previous" in new:
         raise RecoveryError(
             "Supply the single incoming controller pin and its lineage."
         )
-    if any(
-        uuid.UUID(new[field]) != uuid.UUID(current[field])
-        for field in ("sourceId", "workspaceId")
-    ):
+    if incoming_lineage != validated_pin_lineage(current):
         raise RecoveryError(
             "A signing-key rotation must retain the commissioned source and workspace IDs."
         )

@@ -8,7 +8,7 @@ The private signing key stays on the controller. Keep the **public** trust file 
 
 1. Let pending publications finish under the outgoing key. Choose the first UTC capture second for the incoming key after the last old-key capture. The timestamp prefix of a recovery point gives its capture second.
 2. Obtain the incoming public key through a channel that independently authenticates the controller. Confirm the commissioned source and workspace IDs. Use those three fields to create `NEW_PIN.json` in protected custody. Keep the existing trust file for the full retention period.
-3. Prepare a combined trust file in a fresh location. Supply the cutover in `YYYYMMDDTHHMMSSZ` format. The command preserves earlier signing periods and checks that the incoming pin belongs to the same source and workspace.
+3. Prepare a combined trust file in a fresh location. Supply the cutover in `YYYYMMDDTHHMMSSZ` format. Rotation and receipt verification both reject the entire trust history if any historical pin belongs to a different source or workspace. Rotation also checks the incoming pin against the commissioned IDs before writing the combined file.
 
    ```text
    python scripts/foundation/cloud_receipt.py rotate-trust --trust CURRENT_TRUST.json --new-pin NEW_PIN.json --cutover CUTOVER_UTC --output NEXT_TRUST.json
