@@ -827,8 +827,11 @@ def verify(port):
 
             from verify_transfer import qualify_transfer, verify_restored_transfers
 
+            from verify_register import verify_register
+
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
+            verify_register(first, transfer)
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -980,6 +983,7 @@ def verify(port):
                 after = recovered.call("workspace")
                 verify_recovered_receiving(recovered, receiving)
                 verify_restored_transfers(recovered, transfer)
+                verify_register(recovered, transfer)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]

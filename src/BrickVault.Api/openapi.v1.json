@@ -824,6 +824,169 @@
         },
         "description": "Read a complete receiving snapshot, including all positions backing each offer after transfers."
       }
+    },
+    "/api/v1/inventory/positions": {
+      "get": {
+        "operationId": "searchStockPositions",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 160
+            }
+          },
+          {
+            "name": "itemType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "part",
+                "set",
+                "minifigure",
+                "book",
+                "gear",
+                "instruction",
+                "original-box",
+                "catalog"
+              ]
+            }
+          },
+          {
+            "name": "locationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "positionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Exact physical position, including a depleted position."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Filtered stock positions and their totals in one consistent database read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockRegisterPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/positions/{positionId}/movements": {
+      "get": {
+        "operationId": "readPositionMovements",
+        "parameters": [
+          {
+            "name": "positionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Movements involving only the selected position, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionMovementPage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Location is not registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2154,116 +2317,24 @@
         "additionalProperties": false
       },
       "BinStockLayer": {
-        "type": "object",
-        "properties": {
-          "placementId": {
-            "type": "string",
-            "format": "uuid"
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/StockPositionLayer"
           },
-          "purchaseId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "purchaseReference": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "deliveryId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "deliveryReference": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 64
-          },
-          "receiptCommandId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "receiptCorrelationId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "receiptQuantity": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 1000000,
-            "description": "The whole delivery's original quantity, including stock outside this bin."
-          },
-          "receiptItemCostMinor": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "minimum": 0,
-            "maximum": 100000000,
-            "description": "Documented acquisition amount for the whole delivery in its purchase currency. Null represents unknown; zero is a documented zero. This is not a bin allocation or unit cost."
-          },
-          "currency": {
-            "type": "string",
-            "pattern": "^[A-Z]{3}$"
-          },
-          "catalogId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "catalogRevision": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Revision recorded on the placement."
-          },
-          "currentCatalog": {
-            "$ref": "#/components/schemas/CatalogRow"
-          },
-          "locationCodeAtPutaway": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 48
-          },
-          "quantity": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 1000000
-          },
-          "backedQuantity": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000
-          },
-          "unbackedQuantity": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000
-          },
-          "freeToBackQuantity": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 1000000
+          {
+            "type": "object",
+            "properties": {
+              "quantity": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000000
+              }
+            },
+            "required": [
+              "quantity"
+            ]
           }
-        },
-        "required": [
-          "placementId",
-          "purchaseId",
-          "purchaseReference",
-          "deliveryId",
-          "deliveryReference",
-          "receiptCommandId",
-          "receiptCorrelationId",
-          "receiptQuantity",
-          "receiptItemCostMinor",
-          "currency",
-          "catalogId",
-          "catalogRevision",
-          "currentCatalog",
-          "locationCodeAtPutaway",
-          "quantity",
-          "backedQuantity",
-          "unbackedQuantity",
-          "freeToBackQuantity"
-        ],
-        "additionalProperties": false
+        ]
       },
       "TransferCommand": {
         "type": "object",
@@ -2812,6 +2883,282 @@
           "purchases"
         ],
         "additionalProperties": false
+      },
+      "StockRegisterPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "const": "inventory-positions",
+            "type": "string"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "matchingPositions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "matchingUnits": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StockRegisterRow"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "matchingPositions",
+          "matchingUnits",
+          "nextAfter",
+          "rows"
+        ]
+      },
+      "StockRegisterRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "layer": {
+            "$ref": "#/components/schemas/StockPositionLayer"
+          },
+          "originPlacementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          }
+        },
+        "required": [
+          "layer",
+          "originPlacementId",
+          "location"
+        ]
+      },
+      "StockPositionLayer": {
+        "type": "object",
+        "properties": {
+          "placementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deliveryReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "receiptCommandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiptCorrelationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiptQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "The whole delivery's original quantity, including stock outside this bin."
+          },
+          "receiptItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000,
+            "description": "Documented acquisition amount for the whole delivery in its purchase currency. Null represents unknown; zero is a documented zero. This is not a bin allocation or unit cost."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Revision recorded on the placement."
+          },
+          "currentCatalog": {
+            "$ref": "#/components/schemas/CatalogRow"
+          },
+          "locationCodeAtPutaway": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "backedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "unbackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "freeToBackQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "placementId",
+          "purchaseId",
+          "purchaseReference",
+          "deliveryId",
+          "deliveryReference",
+          "receiptCommandId",
+          "receiptCorrelationId",
+          "receiptQuantity",
+          "receiptItemCostMinor",
+          "currency",
+          "catalogId",
+          "catalogRevision",
+          "currentCatalog",
+          "locationCodeAtPutaway",
+          "quantity",
+          "backedQuantity",
+          "unbackedQuantity",
+          "freeToBackQuantity"
+        ],
+        "additionalProperties": false
+      },
+      "PositionMovement": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sourcePlacementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "destinationPlacementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sourceLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "destinationLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "sourcePlacementId",
+          "destinationPlacementId",
+          "sourceLocationCode",
+          "destinationLocationCode",
+          "quantity",
+          "reason",
+          "occurredAt"
+        ]
+      },
+      "PositionMovementPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "position-movements"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PositionMovement"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "scope",
+          "positionId",
+          "asOf",
+          "complete",
+          "nextAfter",
+          "rows"
+        ]
       }
     },
     "securitySchemes": {

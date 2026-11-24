@@ -124,7 +124,7 @@ Phase 0 recorded the architecture review. The owner accepted M0 and M1. M2 is in
 
 ## M3 receiving checkpoint
 
-The first workflow connects a purchase and its split deliveries to confirmed bin placements, documented and unknown costs, and an unpublished offer backed by specific units. The Locations inspector shows stock by receipt layer. Confirmed bin transfers preserve source costs and existing offer commitments across locations. Remaining M3 work includes counted adjustments, holds, transformations and inventory-wide search. [Transfer checkpoint](https://github.com/abrianbaker80/BrickVault-V2/issues/18) [Receiving qualification](../verification/m3-receiving.md) · [M3 issue #13](https://github.com/abrianbaker80/BrickVault-V2/issues/13)
+The first workflow connects a purchase and its split deliveries to confirmed bin placements, documented and unknown costs, and an unpublished offer backed by specific units. The Locations inspector shows stock by receipt layer. Confirmed bin transfers preserve source costs and existing offer commitments across locations. The Inventory register searches confirmed positions across bins and opens an individual position by its stable ID. Remaining M3 work includes counted adjustments, holds, transformations and bulk operations. [Inventory register](https://github.com/abrianbaker80/BrickVault-V2/issues/19) [Transfer checkpoint](https://github.com/abrianbaker80/BrickVault-V2/issues/18) [Receiving qualification](../verification/m3-receiving.md) · [M3 issue #13](https://github.com/abrianbaker80/BrickVault-V2/issues/13)
 
 ## M2 execution checkpoint
 

@@ -1,4 +1,4 @@
-import type { components } from './schema'
+import type { components, operations } from './schema'
 import * as valid from './validators.cjs'
 
 type Schema = components['schemas']
@@ -9,6 +9,10 @@ export type Location = Schema['LocationRow']
 export type Diagnostic = Schema['Diagnostic']
 export type CatalogInput = Omit<Schema['CatalogCommand'], 'commandId' | 'id' | 'expectedRevision'>
 export type LocationInput = Pick<Schema['LocationCommand'], 'code' | 'name'>
+export type StockPage = Schema['StockRegisterPage']
+export type PositionMovementPage = Schema['PositionMovementPage']
+export type StockPosition = Schema['StockRegisterRow']
+export type StockQuery = NonNullable<operations['searchStockPositions']['parameters']['query']>
 export type BinTransferSnapshot = Schema['BinTransferSnapshot']
 export type TransferPosition = BinTransferSnapshot['positions'][number]
 export type TransferCommand = Schema['TransferCommand']
@@ -92,6 +96,17 @@ export const api = {
     await request('session', { method: 'DELETE', headers: { 'X-CSRF-Token': csrf } })
   },
   workspace: (allAudit = false) => read(allAudit ? 'workspace?audit=all' : 'workspace', valid.Workspace),
+  positions(query: StockQuery) {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query))
+      if (value !== undefined && value !== '') params.set(key, String(value))
+    return read('inventory/positions?' + params, valid.StockRegisterPage)
+  },
+  positionMovements(id: string, after: string) {
+    const query = new URLSearchParams({ limit: '25' })
+    if (after) query.set('after', after)
+    return read('inventory/positions/' + encodeURIComponent(id) + '/movements?' + query, valid.PositionMovementPage)
+  },
   binTransfers: (id: string) => read('receiving/bins/' + encodeURIComponent(id) + '/movements', valid.BinTransferSnapshot),
   receiving: () => read('receiving/current', valid.CurrentReceivingWorkspace),
   diagnostic: (id: string) => read('diagnostics/' + encodeURIComponent(id), valid.Diagnostic),

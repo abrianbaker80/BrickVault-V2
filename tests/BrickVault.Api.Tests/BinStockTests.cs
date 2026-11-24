@@ -141,5 +141,48 @@ public sealed class BinStockTests
         });
         Assert.Equal(offerReceipt, await receiving.Save(offer, Guid.NewGuid(), token));
         Assert.Equal(offerReceipt.CorrelationId, (await references.Diagnostic(offerReceipt.CorrelationId, token)).CorrelationId);
+        // Identical catalog numbers in different item types must resolve to their actual physical positions.
+        var set = await references.Save(catalog with
+        {
+            CommandId = Guid.NewGuid(), ItemType = "set", Name = "Fixture set", Variant = null,
+            ColorId = null, ColorState = "not-applicable"
+        }, Guid.NewGuid(), token);
+        var setOrder = await receiving.Save(new PurchaseCommand
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = 0, Reference = "SET-" + prefix,
+            Source = "Fictional supplier", Currency = "USD", OrderedQuantity = 1, PendingChargeMinor = null
+        }, Guid.NewGuid(), token);
+        var setReceipt = await receiving.Save(new DeliveryCommand
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = setOrder.Revision, PurchaseId = setOrder.EntityId,
+            Reference = "Set delivery", Quantity = 1, CatalogId = set.EntityId, ItemCostMinor = null
+        }, Guid.NewGuid(), token);
+        var setPosition = await receiving.Save(new PutawayCommand
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = setReceipt.Revision, PurchaseId = setOrder.EntityId,
+            DeliveryId = setReceipt.EntityId, CatalogId = set.EntityId, LocationId = selected.Id,
+            ConfirmedLocationCode = selected.Code, Quantity = 1
+        }, Guid.NewGuid(), token);
+        var register = new StockRegister(db);
+        Task<StockRegisterPage> Search(string? type, Guid? position = null) =>
+            register.Search(prefix.ToLowerInvariant(), type, selected.Id, position, null, 25, token);
+        var combined = await Search(null);
+        Assert.Equal((4L, 9L), (combined.MatchingPositions, combined.MatchingUnits));
+        var parts = await Search("part");
+        Assert.Equal((3L, 8L), (parts.MatchingPositions, parts.MatchingUnits));
+        Assert.All(parts.Rows, row =>
+        {
+            Assert.Equal(item.Revision, row.Layer.CatalogRevision);
+            Assert.Equal(edit.Revision, row.Layer.CurrentCatalog.Revision);
+            Assert.Equal(selected.Id, row.Location.Id);
+        });
+        var sets = await Search("set");
+        var exact = Assert.Single(sets.Rows);
+        Assert.Equal(setPosition.EntityId, exact.Layer.PlacementId);
+        Assert.Equal(setPosition.EntityId, exact.OriginPlacementId);
+        Assert.Null(exact.Layer.ReceiptItemCostMinor);
+        Assert.Equal(exact, Assert.Single((await Search(null, setPosition.EntityId)).Rows));
+        Assert.Empty((await Search("part", setPosition.EntityId)).Rows);
+
     }
 }

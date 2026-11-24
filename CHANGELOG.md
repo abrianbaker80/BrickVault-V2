@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Added the Inventory register for finding physical stock across bins, checking its receipt cost and following a selected position’s movement history. [Inventory register](https://github.com/abrianbaker80/BrickVault-V2/issues/19)
+
 - Added confirmed transfers of receipt-layer stock with per-offer backing and per-bin movement history. [Transfer checkpoint](https://github.com/abrianbaker80/BrickVault-V2/issues/18)
 
 - Added a read-only stock breakdown to the location inspector. Each bin shows its receipt layers, original delivery costs and offer backing. [Bin inspection](https://github.com/abrianbaker80/BrickVault-V2/issues/15)
