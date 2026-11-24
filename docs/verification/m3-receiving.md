@@ -25,6 +25,12 @@ Open **Inventory** and search for an item number, catalog name, purchase or deli
 
 A receipt cost applies to the entire delivery in its recorded currency. Two positions can show the same receipt cost when that delivery was split. An explicit zero and an unknown cost have different meanings. A bookmarked position remains addressable by ID after every unit moves out of its bin. [Inventory register qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/19)
 
+### Read the position timeline
+
+Open the position in **Inventory**. **All activity** lists events for that position from newest to oldest. The earliest stock entry identifies the original putaway or the transfer that brought the pieces into this bin. A transfer identifies the other position. Draft-offer backing and build reservations affect how many pieces are committed. A witnessed count records what the operator saw. A posted loss reduces the physical balance. Open its receipt to see the exact offer reductions and the reason for the posting. Choose **Transfers only** to trace the route between bins.
+
+For example, a putaway of ten pieces followed by a count of five still represents ten on hand until the loss is posted. A five-piece loss then takes the position to five on hand. The count and the posting link to separate receipts. The position remains available by exact ID if its balance later reaches zero. [Position timeline qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/29)
+
 ## Witness a stock count and review a shortage
 
 Use a fictional identified position in a registered bin. In the signed-in count workflow, choose the position, confirm its bin code and enter the counted quantity and reason. The count records the operator's observation and the ledger facts at the compared revision. A lower count opens a physical shortage for that position and blocks new offer backing and outbound transfers from it. Existing offers retain their original backing. A surplus has unidentified source and remains observation evidence. A later count does not close an open case. [Owner policy and qualification case](https://github.com/abrianbaker80/BrickVault-V2/issues/22)

@@ -872,6 +872,7 @@ def verify(port):
             from verify_counts import qualify_counts, verify_restored_counts
             from verify_holds import qualify_holds, verify_restored_holds
             from verify_losses import qualify_loss, verify_restored_loss
+            from verify_timeline import verify_timeline
 
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
@@ -879,6 +880,7 @@ def verify(port):
             counts = qualify_counts(first, rec["entityId"])
             holds = qualify_holds(first, rec["entityId"])
             loss = qualify_loss(first, rec["entityId"])
+            timeline = verify_timeline(first, loss)
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -1034,6 +1036,8 @@ def verify(port):
                 verify_restored_counts(recovered, counts)
                 verify_restored_holds(recovered, holds)
                 verify_restored_loss(recovered, loss)
+                require(verify_timeline(recovered, loss) == timeline,
+                        "Restored timeline differed from the original count, stock loss or offer and hold history.")
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]

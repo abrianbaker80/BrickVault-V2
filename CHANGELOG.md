@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Added a stock timeline to the Inventory position inspector. Follow transfers, witnessed counts, build holds, offer backing and posted losses to see how a position reached its current quantity. [Position timeline](https://github.com/abrianbaker80/BrickVault-V2/issues/29)
+
 - Added stock-loss posting with operator-selected reductions per unpublished offer. A single receipt records the witnessed loss, the change in backing at that position and the receipt cost assigned to the loss. [Stock count and loss decisions](https://github.com/abrianbaker80/BrickVault-V2/issues/22)
 
 - Added a stock adjustment review to open shortages. Operators can compare the latest count, recorded receipt cost, protected build units and each unpublished offer before posting a loss. [Stock counts and adjustments](https://github.com/abrianbaker80/BrickVault-V2/issues/22)
