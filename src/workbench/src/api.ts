@@ -9,6 +9,7 @@ export type Location = Schema['LocationRow']
 export type Diagnostic = Schema['Diagnostic']
 export type CatalogInput = Omit<Schema['CatalogCommand'], 'commandId' | 'id' | 'expectedRevision'>
 export type LocationInput = Pick<Schema['LocationCommand'], 'code' | 'name'>
+export type BinStockSnapshot = Schema['BinStockSnapshot']
 export type ReceivingWorkspace = Schema['ReceivingWorkspace']
 export type Purchase = Schema['PurchaseRow']
 export type ReceivingCommand = { workspaceId: string } & (
@@ -85,6 +86,7 @@ export const api = {
     await request('session', { method: 'DELETE', headers: { 'X-CSRF-Token': csrf } })
   },
   workspace: (allAudit = false) => read(allAudit ? 'workspace?audit=all' : 'workspace', valid.Workspace),
+  binStock: (id: string) => read('receiving/bins/' + encodeURIComponent(id), valid.BinStockSnapshot),
   receiving: () => read('receiving', valid.ReceivingWorkspace),
   diagnostic: (id: string) => read('diagnostics/' + encodeURIComponent(id), valid.Diagnostic),
   async save(command: Command, csrf: string) {

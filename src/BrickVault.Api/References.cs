@@ -80,14 +80,17 @@ internal sealed class References(NpgsqlDataSource db)
         // Reference exports omit material with unresolved or restricted rights. They contain no session or audit data.
         var sql = fields + (exported ? " WHERE license IN ('operator-owned','permitted')" : "") +
             " ORDER BY item_type,item_number,id";
-        var catalog = await Rows(connection, tx, sql, r => new CatalogRow(r.GetGuid(0), r.GetInt32(1),
-            r.GetString(2), r.GetString(3), r.IsDBNull(4) ? null : r.GetString(4), r.GetString(5),
-            Optional<int>(r, 6), r.GetString(7), r.GetString(8), r.GetString(9), r.GetString(10),
-            r.GetString(11), r.GetString(12), r.GetBoolean(13)), token);
+        var catalog = await Rows(connection, tx, sql, r => ReadCatalog(r, 0), token);
         var locations = await Rows(connection, tx, "SELECT id,revision,code,name FROM brickvault.locations ORDER BY code,id",
             r => new LocationRow(r.GetGuid(0), r.GetInt32(1), r.GetString(2), r.GetString(3)), token);
         return new ReferenceExport("foundation-reference", asOf, true, catalog, locations);
     }
+
+    internal static CatalogRow ReadCatalog(NpgsqlDataReader r, int offset) =>
+        new(r.GetGuid(offset), r.GetInt32(offset + 1), r.GetString(offset + 2), r.GetString(offset + 3),
+            r.IsDBNull(offset + 4) ? null : r.GetString(offset + 4), r.GetString(offset + 5),
+            Optional<int>(r, offset + 6), r.GetString(offset + 7), r.GetString(offset + 8), r.GetString(offset + 9),
+            r.GetString(offset + 10), r.GetString(offset + 11), r.GetString(offset + 12), r.GetBoolean(offset + 13));
 
     public async Task<ReferenceExport> Export(CancellationToken token)
     {

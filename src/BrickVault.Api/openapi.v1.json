@@ -620,6 +620,55 @@
           }
         }
       }
+    },
+    "/api/v1/receiving/bins/{locationId}": {
+      "get": {
+        "operationId": "getBinStock",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BinStockSnapshot"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Location is not registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Read all placements in one registered location, across purchases. Current reference fields may differ from the catalog revision recorded at putaway.",
+        "parameters": [
+          {
+            "name": "locationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -1886,6 +1935,177 @@
           "revision",
           "kind",
           "correlationId"
+        ],
+        "additionalProperties": false
+      },
+      "BinStockSnapshot": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "bin-stock"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Database transaction time for this one-location snapshot."
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "All current placements in the selected location were read."
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          },
+          "physicalOnHand": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "backedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "unbackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "freeToBackQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "layers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BinStockLayer"
+            }
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "location",
+          "physicalOnHand",
+          "backedQuantity",
+          "unbackedQuantity",
+          "freeToBackQuantity",
+          "layers"
+        ],
+        "additionalProperties": false
+      },
+      "BinStockLayer": {
+        "type": "object",
+        "properties": {
+          "placementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deliveryReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "receiptCommandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiptCorrelationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiptQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "The whole delivery's original quantity, including stock outside this bin."
+          },
+          "receiptItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000,
+            "description": "Documented acquisition amount for the whole delivery in its purchase currency. Null represents unknown; zero is a documented zero. This is not a bin allocation or unit cost."
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Revision recorded on the placement."
+          },
+          "currentCatalog": {
+            "$ref": "#/components/schemas/CatalogRow"
+          },
+          "locationCodeAtPutaway": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "backedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "unbackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "freeToBackQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "placementId",
+          "purchaseId",
+          "purchaseReference",
+          "deliveryId",
+          "deliveryReference",
+          "receiptCommandId",
+          "receiptCorrelationId",
+          "receiptQuantity",
+          "receiptItemCostMinor",
+          "currency",
+          "catalogId",
+          "catalogRevision",
+          "currentCatalog",
+          "locationCodeAtPutaway",
+          "quantity",
+          "backedQuantity",
+          "unbackedQuantity",
+          "freeToBackQuantity"
         ],
         "additionalProperties": false
       }

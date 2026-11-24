@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Added a read-only stock breakdown to the location inspector. Each bin shows its receipt layers, original delivery costs and offer backing. [Bin inspection](https://github.com/abrianbaker80/BrickVault-V2/issues/15)
+
 - Added split purchase receiving, bin confirmation, cost coverage and manually priced unpublished offers to Workbench. The staged schema upgrade preserves the original instance. [Receiving and upgrade guide](docs/verification/m3-receiving.md)
 
 ## M2 isolated technical foundation
