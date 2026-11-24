@@ -12,7 +12,7 @@ internal sealed record StockPositionTimelineEvent(string Kind, Guid Id, Guid Com
     Guid? OfferId, int? LedgerQuantityAtWitness);
 internal sealed record StockPositionTimeline(string Scope, DateTime AsOf, bool Complete, bool HasUndatedEvents, Guid PositionId,
     Guid PurchaseId, Guid OriginPlacementId, Guid DeliveryId, LocationRow Location,
-    string? NextAfter, IReadOnlyList<StockPositionTimelineEvent> Events);
+    string? NextAfter, IReadOnlyList<StockPositionTimelineEvent> Events, StockRegisterRow Position);
 
 internal sealed class StockPositionTimelines(NpgsqlDataSource db)
 {
@@ -83,17 +83,13 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
             await readOnly.ExecuteNonQueryAsync(token);
         await Migration.CheckWithin(connection, tx, token);
 
-        var positions = await Rows(connection, tx, ScopedEvents + "\n" + """
-            SELECT transaction_timestamp(),p.purchase_id,p.origin_placement_id,original.delivery_id,
-                loc.id,loc.revision,loc.code,loc.name,EXISTS (SELECT 1 FROM events WHERE occurred_at IS NULL)
-            FROM brickvault.placement_positions p JOIN brickvault.placements original ON original.id=p.origin_placement_id
-            JOIN brickvault.locations loc ON loc.id=p.location_id WHERE p.id=$1
-            """, r => (AsOf: r.GetDateTime(0), Purchase: r.GetGuid(1), Origin: r.GetGuid(2), Delivery: r.GetGuid(3),
-                Location: new LocationRow(r.GetGuid(4),r.GetInt32(5),r.GetString(6),r.GetString(7)),
-                HasUndatedEvents: r.GetBoolean(8)), token, positionId);
-        if (positions.Count == 0)
+        var positions = await Rows(connection, tx, "SELECT " + PositionRows.RegisterSelect + "\n" +
+            PositionRows.RegisterFrom + "\nWHERE p.id=$1", PositionRows.ReadRegister, token, positionId);
+        var position = positions.SingleOrDefault() ??
             throw new Fault(404, "unknown_position", "No stock position has that identifier.");
-        var position = positions.Single();
+        var metadata = (await Rows(connection, tx, ScopedEvents + "\n" + """
+            SELECT transaction_timestamp(),EXISTS (SELECT 1 FROM events WHERE occurred_at IS NULL)
+            """, r => (AsOf: r.GetDateTime(0), HasUndatedEvents: r.GetBoolean(1)), token, positionId)).Single();
 
         var cursor = await Cursor(connection, tx, positionId, after, token);
         var rows = await Rows(connection, tx, ScopedEvents + "\n" + """
@@ -132,8 +128,8 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
             rows.RemoveAt(limit);
             next = $"{positionId:N}.{rows[^1].Kind}.{rows[^1].Id:N}";
         }
-        return new StockPositionTimeline("position-timeline",position.AsOf,true,position.HasUndatedEvents,positionId,position.Purchase,
-            position.Origin,position.Delivery,position.Location,next,rows);
+        return new StockPositionTimeline("position-timeline", metadata.AsOf, true, metadata.HasUndatedEvents, positionId,
+            position.Layer.PurchaseId, position.OriginPlacementId, position.Layer.DeliveryId, position.Location, next, rows, position);
     }
 
     private static string? Text(NpgsqlDataReader reader, int ordinal) =>

@@ -5977,6 +5977,10 @@
           "hasUndatedEvents": {
             "type": "boolean",
             "description": "At least one event in the selected position's full retained history lacks a timestamp."
+          },
+          "position": {
+            "description": "Current position identity and balances from the same database snapshot as this page.",
+            "$ref": "#/components/schemas/StockRegisterRow"
           }
         },
         "required": [
@@ -5990,7 +5994,8 @@
           "location",
           "nextAfter",
           "events",
-          "hasUndatedEvents"
+          "hasUndatedEvents",
+          "position"
         ],
         "additionalProperties": false
       }

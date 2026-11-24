@@ -106,10 +106,16 @@ public sealed class StockPositionTimelineTests
         var earlyPage = await timelines.Read(placed.EntityId, null, 1, token);
         Assert.Equal(afterResolution.EntityId, Assert.Single(earlyPage.Events).Id);
         Assert.NotNull(earlyPage.NextAfter);
+        Assert.Equal((2, 2, 0, 0), (earlyPage.Position.Layer.Quantity, earlyPage.Position.Layer.BackedQuantity,
+            earlyPage.Position.Layer.UnbackedQuantity, earlyPage.Position.Layer.FreeToBackQuantity));
+        var transitionRead = timelines.Read(placed.EntityId, null, 25, token);
         var lastMove = await transfers.Save(move with
         {
             CommandId = Guid.NewGuid(), ExpectedRevision = afterResolution.Revision, MoveAllBacking = true, Backing = []
         }, Guid.NewGuid(), token);
+        var transition = await transitionRead;
+        Assert.Equal(transition.Events.Sum(e => e.PhysicalDelta), transition.Position.Layer.Quantity);
+        Assert.Equal(transition.Events.Sum(e => e.OfferBackedDelta), transition.Position.Layer.BackedQuantity);
         var newCode = aCode + "-R";
         await references.Save(new LocationCommand
         {
@@ -121,6 +127,11 @@ public sealed class StockPositionTimelineTests
         Assert.False(full.HasUndatedEvents);
         Assert.Equal((placed.EntityId, purchase.EntityId, placed.EntityId, delivery.EntityId, newCode),
             (full.PositionId, full.PurchaseId, full.OriginPlacementId, full.DeliveryId, full.Location.Code));
+        Assert.Equal((full.PositionId, full.PurchaseId, full.OriginPlacementId, full.DeliveryId, full.Location),
+            (full.Position.Layer.PlacementId, full.Position.Layer.PurchaseId, full.Position.OriginPlacementId,
+                full.Position.Layer.DeliveryId, full.Position.Location));
+        Assert.Equal((0, 0, 0, 0), (full.Position.Layer.Quantity, full.Position.Layer.BackedQuantity,
+            full.Position.Layer.UnbackedQuantity, full.Position.Layer.FreeToBackQuantity));
         Assert.Null(full.NextAfter);
         var events = full.Events;
         Assert.Equal(new[] { "transfer-out", "count", "stock-loss", "hold-release", "count", "count", "hold", "transfer-out", "offer-backing", "putaway" },
@@ -155,6 +166,7 @@ public sealed class StockPositionTimelineTests
         {
             var page = await timelines.Read(placed.EntityId, cursor, 2, token);
             Assert.InRange(page.Events.Count, 1, 2);
+            Assert.Equal(full.Position, page.Position);
             paged.AddRange(page.Events);
             cursor = page.NextAfter;
         } while (cursor is not null);
@@ -169,11 +181,12 @@ public sealed class StockPositionTimelineTests
             a.EntityId, aCode), (inbound.Id, inbound.CommandId, inbound.OccurredAt, inbound.PhysicalDelta,
             inbound.OfferBackedDelta, inbound.RelatedPositionId, inbound.RelatedLocationId, inbound.RelatedLocationCode));
         Assert.Equal(placed.EntityId, sibling.OriginPlacementId);
+        Assert.Equal((2, 2), (sibling.Position.Layer.Quantity, sibling.Position.Layer.BackedQuantity));
         Assert.Equal(events[0].RelatedPositionId, sibling.PositionId);
         Assert.Equal(b.EntityId, events[0].RelatedLocationId);
         Assert.Equal(bCode, events[0].RelatedLocationCode);
         Assert.Equal(2, (await stock.History(placed.EntityId, null, 25, token)).Rows.Count);
-        Assert.Equal(0, Assert.Single((await stock.Search(null, null, null, placed.EntityId, null, 25, token)).Rows).Layer.Quantity);
+        Assert.Equal(full.Position, Assert.Single((await stock.Search(null, null, null, placed.EntityId, null, 25, token)).Rows));
 
         async Task<string> Reject(Func<Task> read) => (await Assert.ThrowsAsync<Fault>(read)).Code;
         Assert.Equal("invalid_timeline_cursor", await Reject(() => timelines.Read(lastMove.EntityId, one.NextAfter, 25, token)));
