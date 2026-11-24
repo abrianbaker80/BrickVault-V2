@@ -8,12 +8,13 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 from time import monotonic
 from urllib.parse import parse_qs, urlsplit
 
 from cloud_receipt import FIELDS, SIDECAR, load_small, verify_directory, verify_sidecar
-from instance import child_env, write_private
+from instance import NO_WINDOW, child_env, write_private
 from offhost import (
     RecoveryError,
     failure_reason,
@@ -52,6 +53,7 @@ def reader_command(args, timeout, deadline, **options):
             args,
             env=child_env(),
             timeout=remaining_timeout(timeout, deadline),
+            creationflags=NO_WINDOW,
             **options,
         )
     except subprocess.TimeoutExpired:
@@ -79,17 +81,30 @@ def profile_path(path):
     return directory
 
 
-def command(profile, program, config_file=None):
+def password_command(protected_file):
     helper = Path(__file__).with_name("OneDrive-ReaderPassword.ps1").resolve()
-    loader = [
+    return [
         "pwsh",
         "-NoProfile",
         "-NonInteractive",
         "-File",
         helper.as_posix(),
         "-ProtectedFile",
-        (profile / "reader.dpapi").as_posix(),
+        protected_file.as_posix(),
     ]
+
+
+def command(profile, program, config_file=None):
+    secret = profile / "reader.dpapi"
+    loader = password_command(secret)
+    if os.name == "nt":
+        # rclone starts its password command itself. Use a windowless executable
+        # for that hop, then inherit its stdout pipe when starting PowerShell.
+        loader = [
+            Path(sys.executable).with_name("pythonw.exe").as_posix(),
+            "-E", "-s", Path(__file__).resolve().as_posix(),
+            "reader-password", "--protected-file", secret.as_posix(),
+        ]
     return [
         str(program),
         "--config",
@@ -355,6 +370,8 @@ def download(
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     commands = p.add_subparsers(dest="action", required=True)
+    loader = commands.add_parser("reader-password", help="Internal rclone credential pipe")
+    loader.add_argument("--protected-file", type=Path, required=True)
     enroll = commands.add_parser("connect")
     enroll.add_argument("--reauthorize", action="store_true")
     retrieve = commands.add_parser("download")
@@ -364,7 +381,13 @@ def main():
         retrieve.add_argument("--" + name, required=True)
     args = p.parse_args()
     try:
-        if args.action == "connect":
+        if args.action == "reader-password":
+            subprocess.run(
+                password_command(args.protected_file),
+                env=child_env(), stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                check=True, creationflags=NO_WINDOW,
+            )
+        elif args.action == "connect":
             connect(args.profile, reauthorize=args.reauthorize)
         else:
             download(args.profile, args.trust, args.point, args.output)
