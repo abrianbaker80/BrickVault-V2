@@ -625,7 +625,11 @@ def verify(port):
         try:
             qualify_runtime_start(s)
             password = (s.path / "owner-login.txt").read_text().splitlines()[1]
-            original_keys = [s.config["gateway"], s.config["session"], password]
+            original_keys = {
+                "original gateway token": s.config["gateway"],
+                "original session key": s.config["session"],
+                "original owner password": password,
+            }
             s.pg_stop()
             require(
                 not ready(s), "Readiness reported success while PostgreSQL was stopped."
@@ -1057,15 +1061,15 @@ def verify(port):
             finally:
                 stop(rescue)
             qualify_guest(rescue, lab)
-            for host in (s, rescue):
-                sensitive_values = [
-                    *original_keys,
-                    host.config["gateway"],
-                    host.config["session"],
-                    (host.path / "owner-login.txt").read_text().splitlines()[1],
-                    *host.config["roles"].values(),
-                    known["name"],
-                ]
+            for label, host in (("source", s), ("restored", rescue)):
+                sensitive_values = {
+                    **original_keys,
+                    "gateway token": host.config["gateway"],
+                    "session key": host.config["session"],
+                    "owner password": (host.path / "owner-login.txt").read_text().splitlines()[1],
+                    **{f"{role} password": value for role, value in host.config["roles"].items()},
+                    "catalog name": known["name"],
+                }
                 for name in (
                     "api.log",
                     "worker.log",
@@ -1076,10 +1080,9 @@ def verify(port):
                     log = (host.path / name).read_text(
                         encoding="utf-8", errors="replace"
                     )
-                    require(
-                        all(value not in log for value in sensitive_values),
-                        "Private credential or catalog text appeared in service logs.",
-                    )
+                    for category, value in sensitive_values.items():
+                        if value in log:
+                            raise AssertionError(f"Private {category} found in {label} {name}.")
             print(
                 json.dumps(
                     {
