@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
-import { api, ApiFailure, ContractFailure, explain, type Location, type TransferControls } from './api'
+import { api, ApiFailure, ContractFailure, explain, requiresFreshCount, type Location, type TransferControls } from './api'
 import { closureLink, countPositionLink, countReceiptLink, lossReceiptLink, type CountLink } from './countLinks'
 import { money } from './receiving'
 import { time } from './presentation'
@@ -18,6 +18,7 @@ const latestId=ref('')
 const closureId=ref('')
 const lossId=ref('')
 const stale=ref(false)
+const recountRequired=ref(false)
 const error=ref('')
 const loading=ref(false)
 const retry=ref(0)
@@ -66,7 +67,7 @@ watch(()=>[props.asOf,props.connected,props.workspaceReady,props.location.revisi
     }
     openingId.value=current.openingObservationId
     latestId.value=current.latestObservationId
-    if (latestId.value!==route.id) {stale.value=true;return}
+    if (latestId.value!==route.id) {recountRequired.value=false;stale.value=true;return}
     const latest=await api.adjustmentReview(props.location.id,route.position,route.caseId)
     if (!active) return
     if (!latest.complete) {error.value='Incomplete closure review.';return}
@@ -81,9 +82,17 @@ watch(()=>[props.asOf,props.connected,props.workspaceReady,props.location.revisi
       return
     }
     if (latest.quarantinedQuantity===undefined) throw new ContractFailure()
+    recountRequired.value=false
     review.value=latest
   } catch (failure) {
     if (!active) return
+    if (requiresFreshCount(failure)) {
+      review.value=undefined
+      stale.value=false
+      recountRequired.value=true
+      bin.value='';reason.value='';acknowledged.value=false
+      return
+    }
     error.value=failure instanceof ApiFailure && failure.status===404 ? 'No matching closure or open case was found for this bin and position.' : explain(failure)
     emit('failure',failure)
   } finally {if(active) loading.value=false}
@@ -116,6 +125,8 @@ async function submit() {
       <p v-if="error || !connected" role="status" class="warning">{{ error || 'The workspace is offline.' }} {{ review || receipt ? 'Showing the last confirmed read.' : '' }}
         <button v-if="connected" :disabled="loading" @click="retry++">Retry closure read</button></p>
       <p v-else-if="loading || !workspaceReady" role="status">Reading the shortage and recount evidence…</p>
+      <p v-if="recountRequired && !closureId && !lossId" class="warning" role="status">Stock moved after the last witnessed count. Recount this position before closing the shortage.
+        <a :href="countPositionLink(location.id,route.position)">Record a new witnessed count</a></p>
       <p v-if="closureId">An operator has already closed this shortage after an exact recount.
         <a :href="closureLink(location.id,route.position,route.caseId,'receipt',closureId)">View shortage closure receipt</a></p>
       <p v-else-if="lossId">A stock loss was posted for this shortage.

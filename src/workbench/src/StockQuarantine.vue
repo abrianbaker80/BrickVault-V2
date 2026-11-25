@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, shallowRef } from 'vue'
 import { api, ContractFailure, explain } from './api'
 import type { Location, QuarantineEvidence, QuarantineSnapshot, TransferControls } from './api'
-import { draftBackingLink, quarantineLink } from './countLinks'
+import { draftBackingLink, quarantineLink, recoveryLink } from './countLinks'
 import { itemLabel } from './receiving'
 import { time } from './presentation'
 import { usePositionPage } from './usePositionPage'
@@ -124,6 +124,7 @@ async function save() {
         <dl class="details"><dt>Receipt ID</dt><dd>{{ receipt.id }}</dd><dt>Position ID</dt><dd>{{ receipt.positionId }}</dd>
           <dt>Confirmed catalog ID</dt><dd>{{ receipt.catalogId }} · Revision {{ receipt.catalogRevision }}</dd>
           <dt>Command ID</dt><dd>{{ receipt.commandId }}</dd><dt>Correlation ID</dt><dd>{{ receipt.correlationId }}</dd></dl>
+        <a v-if="receipt.recoveryPostingId" :href="recoveryLink(location.id,positionId,receipt.recoveryPostingId,receipt.quarantineId)">Recovery inspection receipt</a>
         <a v-if="receipt.kind === 'quarantine-release'" :href="quarantineLink(location.id,positionId,receipt.quarantineId)">Original quarantine receipt</a>
         <nav aria-label="Quarantine receipt navigation"><a :href="quarantineLink(location.id,positionId)">Current position quarantine</a>
           <a :href="'#inventory/'+positionId">Position timeline</a><a :href="'#inventory/lot/'+receipt.deliveryId">Receipt lot</a></nav>
@@ -153,6 +154,7 @@ async function save() {
               <p>{{ q.remainingQuantity }} still quarantined · {{ q.releasedQuantity }} released<template v-if="q.lostQuantity"> · {{ q.lostQuantity }} lost</template> of {{ q.quantity }}</p>
               <small>Quarantine {{ q.id }} · {{ time(q.recordedAt) }}</small>
               <a :href="quarantineLink(location.id,positionId,q.id)">Original quarantine receipt</a>
+              <a v-if="q.recoveryPostingId" :href="recoveryLink(location.id,positionId,q.recoveryPostingId,q.id)">Recovery inspection receipt</a>
               <button v-if="q.remainingQuantity" :data-inspect="q.id" :disabled="!ready || stock.hasOpenShortage || !layer.currentCatalog.integrationEligible"
                 :aria-label="'Inspect and release from '+q.reason+' · Quarantine '+q.id" @click="edit(q)">Inspect and release</button></li>
           </ul>

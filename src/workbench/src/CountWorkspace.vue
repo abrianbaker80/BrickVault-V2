@@ -13,6 +13,9 @@ const props = defineProps<{ location: Location; positionId?: string; receiptId?:
 const emit = defineEmits<{ failure: [reason: unknown]; fenced: [id: string]; close: []; recover: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const historyHeading = ref<HTMLElement>()
+const heading = ref<HTMLElement>()
+let awaitingFirstCountField = true
+const binConfirmation = ref<HTMLInputElement>()
 const snapshot = shallowRef<CountSnapshot>()
 const baseline = shallowRef<{ position: CountPosition; code: string }>()
 const confirmed = shallowRef<string[]>([''])
@@ -34,6 +37,12 @@ const stale = computed(() => !!baseline.value && (!position.value || baseline.va
   baseline.value.code !== props.location.code || snapshot.value?.location.code !== props.location.code))
 const writable = computed(() => !!position.value && !props.receiptId && !stale.value && !loading.value && !error.value &&
   !partial.value && props.connected && props.controls.enabled && !sending.value)
+watch(writable, ready => {
+  if (ready && awaitingFirstCountField) {
+    awaitingFirstCountField = false
+    if (document.activeElement === heading.value) binConfirmation.value?.focus()
+  }
+}, { flush: 'post' })
 const receipt = computed(() => props.receiptId ? snapshot.value?.observations[0] : undefined)
 watch([typedCode, counted, reason], () => { warning.value = ''; attempted.value = false })
 onMounted(() => {
@@ -70,6 +79,21 @@ watch(() => [props.asOf, props.location.revision, props.connected, requested.val
       emit('failure', failure)
     } finally { if (active) loading.value = false }
   }, { immediate: true })
+async function beginCount(id: string) {
+  if (props.positionId !== id) {
+    window.location.hash = countPositionLink(props.location.id, id)
+    return
+  }
+  if (!props.connected || loading.value || partial.value || error.value || !snapshot.value?.complete || !position.value) return
+  if (stale.value) {
+    baseline.value = { position: position.value, code: snapshot.value.location.code }
+    typedCode.value = ''
+    counted.value = ''
+    reason.value = ''
+  }
+  await nextTick()
+  binConfirmation.value?.focus()
+}
 async function submit() {
   if (!writable.value || !baseline.value) return
   warning.value = ''
@@ -93,7 +117,7 @@ async function submit() {
 </script>
 <template>
   <dialog ref="dialog" aria-labelledby="count-title" @cancel.prevent="!sending && emit('close')" @keydown.esc.stop>
-    <header class="panel-head"><h2 id="count-title">{{ receiptId ? 'Count receipt' : 'Count stock' }}</h2>
+    <header class="panel-head"><h2 ref="heading" id="count-title" tabindex="-1" autofocus>{{ receiptId ? 'Count receipt' : 'Count stock' }}</h2>
       <button class="close" aria-label="Close count details" :disabled="sending" @click="emit('close')">×</button></header>
     <div class="count-body">
       <p><strong>{{ location.code }} · {{ location.name }}</strong></p>
@@ -113,7 +137,8 @@ async function submit() {
           <p>Transfers and new offer backing are blocked for this position. Existing holds keep their priority until the owner selects a hold and quantity to release.</p>
           <a :href="holdPositionLink(location.id, c.positionId)">Review build holds for this shortage</a>
           <a :href="countReceiptLink(location.id, c.openingObservationId)">Opening count receipt</a>
-          <p v-if="c.latestObservedMissingQuantity">Record a later witnessed count to check the shortage. An exact recount can support closure without posting a loss.</p>
+          <p v-if="position && witnessed.has(c.latestObservationId) && witnessed.get(c.latestObservationId)?.ledgerQuantity !== position.ledgerQuantity">Stock moved after the last witnessed count. Recount this position before deciding the shortage.</p>
+          <p v-else-if="c.latestObservedMissingQuantity">Record a later witnessed count to check the shortage. An exact recount can support closure without posting a loss.</p>
           <template v-else-if="c.latestObservationId!==c.openingObservationId && witnessed.get(c.latestObservationId)?.unidentifiedSurplusQuantity">
             <p>The latest recount found a surplus. An exact count matching the current ledger is required to close this shortage.</p>
           </template>
@@ -123,7 +148,7 @@ async function submit() {
           </template>
           <a v-else-if="c.latestObservationId!==c.openingObservationId && !witnessed.has(c.latestObservationId)" :href="countReceiptLink(location.id,c.latestObservationId)">View latest witnessed count</a>
           <AdjustmentReview :key="c.id" :bin="location.id" :position="c.positionId" :case-id="c.id" :witness-id="c.latestObservationId"
-            :as-of="snapshot.asOf" :connected="connected" @refresh-count="attempt++" @failure="emit('failure', $event)" />
+            :as-of="snapshot.asOf" :connected="connected" :count-ready="snapshot.complete && !partial && !loading && !error" @refresh-count="attempt++" @begin-count="beginCount(c.positionId)" @failure="emit('failure', $event)" />
         </section>
         <section v-if="snapshot.closures?.length" aria-label="Shortage closures">
           <h3>Shortage closed after exact recount</h3>
@@ -147,10 +172,11 @@ async function submit() {
         <template v-else-if="positionId">
           <form v-if="position && baseline" class="form-body" @submit.prevent="submit">
             <p>{{ baseline.position.ledgerQuantity }} in the ledger · {{ baseline.position.offerBackedQuantity }} backed by offers</p>
-            <p v-if="stale" class="warning" role="status">The position changed. Close and reopen this count to review current stock before recording a new observation.</p>
+            <p v-if="stale" class="warning" role="status">The position changed. Review current stock before recording a new observation.
+              <button type="button" :disabled="loading || partial || !!error || !connected" @click="beginCount(position.positionId)">Review current count position</button></p>
             <p v-else-if="!controls.enabled" role="status">{{ sending ? 'Recording observation…' : 'Waiting for a complete, connected register read.' }}</p>
             <fieldset class="fields" :disabled="!writable">
-              <label>Confirm physical bin code<input v-model="typedCode" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
+              <label>Confirm physical bin code<input ref="binConfirmation" v-model="typedCode" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
               <label>Witnessed quantity<input v-model="counted" required type="number" inputmode="numeric" min="0" max="1000000" step="1" /></label>
               <label class="span">Reason for count<input v-model="reason" required maxlength="200" /></label></fieldset>
             <p class="field-hint">Recording a count preserves the observation and opens a case for missing units. Ledger quantities stay in place.</p>

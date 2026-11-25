@@ -125,7 +125,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
 
     public async Task<ReceivingWorkspace> CurrentSnapshot(bool acceptHolds, CancellationToken token)
     {
-        var snapshot = await LossSnapshot(token);
+        var snapshot = await LossSnapshot(token, recoveries: true);
         if (!acceptHolds && snapshot.Purchases.Any(p => p.Balances.Reserved > 0))
             throw new Fault(426, "receiving_client_upgrade_required",
                 "Active build holds require a newer Workbench. Update Workbench to read the reserved stock and receiving balances.");
@@ -135,6 +135,8 @@ internal sealed class Receiving(NpgsqlDataSource db)
         if (snapshot.Purchases.SelectMany(p => p.Offers).Any(o => o.Backing.Count == 0))
             throw new Fault(426, "receiving_client_upgrade_required",
                 "An offer has no remaining backing. Update Workbench to see the offer and its current allocation.");
+        if (snapshot.Purchases.SelectMany(p => p.Deliveries).Any(d => d.RecoveryTotals?.RecoveredQuantity > 0))
+            throw StockLossRecoveries.Upgrade();
         return BeforeLossContract(snapshot);
     }
 
@@ -146,7 +148,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
                 p.Deliveries.Select(d => new DeliveryRow(d.Id, d.Reference, d.Quantity, d.CatalogId, d.CatalogRevision,
                     d.ItemCostMinor, d.IntakeQuantity, d.Placements)).ToList(), p.Offers, p.Balances)).ToList());
 
-    public async Task<LossReceivingWorkspace> LossSnapshot(CancellationToken token, bool quarantine = false)
+    public async Task<LossReceivingWorkspace> LossSnapshot(CancellationToken token, bool quarantine = false, bool recoveries = false)
     {
         await using var connection = await db.OpenConnectionAsync(token);
         await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
@@ -182,14 +184,11 @@ internal sealed class Receiving(NpgsqlDataSource db)
         }, token)).ToLookup(r => r.DeliveryId);
         var deliveries = (await Rows(connection, tx, """
             SELECT d.purchase_id,d.id,d.reference,d.quantity,d.catalog_id,d.catalog_revision,d.item_cost_minor,
-                losses.quantity,losses.basis, d.item_cost_minor-losses.basis
-            FROM brickvault.deliveries d
-            CROSS JOIN LATERAL (
-                SELECT COALESCE(sum(l.lost_quantity),0)::integer AS quantity,
-                    CASE WHEN d.item_cost_minor IS NOT NULL
-                        THEN COALESCE(sum(l.allocated_item_cost_minor),0)::integer END AS basis
-                FROM brickvault.stock_loss_postings l WHERE l.delivery_id=d.id
-            ) losses
+                losses.active_lost_quantity::integer,losses.active_allocated_item_cost_minor::integer,
+                d.item_cost_minor-losses.active_allocated_item_cost_minor::integer,
+                losses.gross_lost_quantity::bigint,losses.recovered_quantity::bigint,
+                losses.gross_allocated_item_cost_minor::text,losses.restored_item_cost_minor::text
+            FROM brickvault.deliveries d JOIN brickvault.delivery_loss_balances losses ON losses.delivery_id=d.id
             ORDER BY d.reference,d.id
             """, r =>
         {
@@ -200,7 +199,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
             return (PurchaseId: r.GetGuid(0), Reserved: positions.Sum(p => p.Reserved), Quarantined: positions.Sum(p => p.Quarantined),
                 Value: new LossDeliveryRow(r.GetGuid(1), r.GetString(2), quantity, Optional<Guid>(r,4), Optional<int>(r,5),
                     Optional<int>(r,6), quantity - lost - values.Sum(p => p.Quantity), values, lost,
-                    Optional<int>(r,8), Optional<int>(r,9)));
+                    Optional<int>(r,8), Optional<int>(r,9), RecoveryTotals: DeliveryRecoveryTotals.Read(r, 10, recoveries)));
         }, token)).ToLookup(r => r.PurchaseId);
         var backing = (await Rows(connection, tx, """
             SELECT offer_id,placement_id,quantity FROM brickvault.current_offer_backing ORDER BY offer_id,placement_id

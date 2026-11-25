@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
-import { api, ApiFailure, explain } from './api'
+import { api, ApiFailure, explain, requiresFreshCount } from './api'
 import { countReceiptLink, lossCaseLink } from './countLinks'
 import { time } from './presentation'
 import { money } from './receiving'
 
-const props = defineProps<{ bin: string; position: string; caseId: string; witnessId: string; asOf: string; connected: boolean }>()
-const emit = defineEmits<{ failure: [reason: unknown]; refreshCount: [] }>()
+const props = defineProps<{ bin: string; position: string; caseId: string; witnessId: string; asOf: string; connected: boolean; countReady: boolean }>()
+const emit = defineEmits<{ failure: [reason: unknown]; refreshCount: []; beginCount: [] }>()
 const expanded = ref(false)
 const page = shallowRef<Awaited<ReturnType<typeof api.adjustmentReview>>>()
 const displayed = shallowRef<string[]>([''])
@@ -15,6 +15,7 @@ const retry = ref(0)
 const loading = ref(false)
 const error = ref('')
 const partial = ref(false)
+const recountRequired = ref(false)
 const stalePage = ref(false)
 const awaitingWitness = ref('')
 const offersHeading = ref<HTMLElement>()
@@ -47,11 +48,21 @@ watch(() => [expanded.value, props.bin, props.position, props.caseId, props.witn
       }
       awaitingWitness.value = ''
       const moved = displayed.value.length !== cursors.length
+      recountRequired.value = false
       page.value = result
       displayed.value = cursors
       if (moved) { await nextTick(); if (current) offersHeading.value?.focus() }
     } catch (reason) {
       if (!current) return
+      if (requiresFreshCount(reason)) {
+        recountRequired.value = true
+        partial.value = false
+        awaitingWitness.value = ''
+        page.value = undefined
+        displayed.value = ['']
+        if (requested.value.length > 1) requested.value = ['']
+        return
+      }
       stalePage.value = reason instanceof ApiFailure && reason.status === 409
       error.value = explain(reason)
       emit('failure', reason)
@@ -72,6 +83,8 @@ function retryRead() {
       <p v-else-if="partial" class="warning" role="status">Incomplete adjustment review. {{ showingConfirmed ? 'Showing the last confirmed review.' : 'Quantities are awaiting confirmation.' }}</p>
       <p v-else-if="loading" role="status">Reading the latest count and commitments…</p>
       <button v-if="connected && (partial || error || awaitingWitness)" :disabled="loading" @click="retryRead">{{ stalePage ? 'Read current review' : 'Retry adjustment review' }}</button>
+      <p v-if="recountRequired" class="warning" role="status">Stock moved after the last witnessed count. Recount this position before reviewing an adjustment.
+        <button v-if="connected" type="button" :disabled="!countReady || loading || partial || !!error" @click="emit('beginCount')">Record a new witnessed count</button></p>
       <template v-if="page && showingConfirmed">
         <p><strong>{{ page.receipt.deliveryReference }} · {{ page.location.code }}</strong><small>Review read {{ time(page.asOf) }} · purchase revision {{ page.purchaseRevision }}</small></p>
         <a :href="countReceiptLink(bin, page.latestObservation.id)">Latest witnessed count</a>
@@ -90,7 +103,7 @@ function retryRead() {
         <p v-if="page.protectedProjectShortfall" class="warning">Build reservations exceed the proposed stock by {{ page.protectedProjectShortfall }}. Review the named holds.</p>
         <p v-if="page.minimumOfferBackingReduction" class="warning">At least {{ page.minimumOfferBackingReduction }} units of offer backing need review.</p>
         <p v-if="!page.candidateLossQuantity">The latest count supports no stock loss.</p>
-        <a v-if="page.candidateLossQuantity && (page.quarantineBlocksLoss || !page.protectedProjectShortfall) && connected && !loading && !error && !partial"
+        <a v-if="page.candidateLossQuantity && (page.quarantineBlocksLoss || !page.protectedProjectShortfall) && countReady && connected && !loading && !error && !partial"
           :href="lossCaseLink(bin, position, caseId)">{{ page.quarantineBlocksLoss ? 'Identify missing pieces and review stock loss' : 'Choose reductions and post stock loss' }}</a>
         <h3 ref="offersHeading" tabindex="-1">Unpublished offers ({{ page.offerCount }})</h3>
         <ul v-if="page.offers.length" class="receipt-lines">

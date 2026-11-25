@@ -7,7 +7,7 @@ const props = defineProps<{ purchase: Purchase; catalog: Catalog[] }>()
 const balances = computed(() => props.purchase.balances)
 const positions = computed(() => new Map(props.purchase.deliveries.flatMap(d => d.placements.map(p =>
   [p.id, { bin:p.locationId, label:p.locationCode + ' · ' + d.reference }] as const))))
-const amount = (value: number | null) => money(value, props.purchase.currency)
+const amount = (value: number | string | null) => money(value, props.purchase.currency)
 </script>
 <template>
   <aside class="side-panels receiving-balances" aria-label="Purchase readback">
@@ -24,7 +24,9 @@ const amount = (value: number | null) => money(value, props.purchase.currency)
           <div class="receipt-line-head"><strong>{{ d.reference }}</strong><span>{{ d.quantity }} received</span></div>
           <small>{{ d.catalogId ? itemLabel(catalog, d.catalogId, d.catalogRevision) : 'Mixed delivery' }} · Item cost {{ amount(d.itemCostMinor) }}</small>
           <small v-if="d.quarantinedQuantity">{{ d.quarantinedQuantity }} quarantined in bin positions</small>
-          <small v-if="d.lostQuantity">{{ d.lostQuantity }} lost · Allocated item cost {{ amount(d.allocatedLostItemCostMinor) }} · Remaining delivery cost {{ amount(d.remainingItemCostMinor) }}</small>
+          <template v-if="d.recoveryTotals?.recoveredQuantity"><small>{{ d.recoveryTotals.grossLostQuantity }} originally lost · {{ d.recoveryTotals.recoveredQuantity }} recovered · {{ d.lostQuantity }} still missing</small>
+            <small>Gross loss cost {{ amount(d.recoveryTotals.grossAllocatedItemCostMinor) }} · Restored {{ amount(d.recoveryTotals.restoredItemCostMinor) }} · Remaining loss {{ amount(d.allocatedLostItemCostMinor) }} · Remaining delivery cost {{ amount(d.remainingItemCostMinor) }}</small></template>
+          <small v-else-if="d.lostQuantity">{{ d.lostQuantity }} lost · Allocated item cost {{ amount(d.allocatedLostItemCostMinor) }} · Remaining delivery cost {{ amount(d.remainingItemCostMinor) }}</small>
           <ul class="bin-rows">
             <li v-if="d.intakeQuantity"><span>{{ d.catalogId ? 'Intake' : 'Quarantine' }}</span><strong>{{ d.intakeQuantity }}</strong></li>
             <li v-for="p in d.placements" :key="p.id"><span>Bin {{ p.locationCode }}<small>{{ itemLabel(catalog, p.catalogId, p.catalogRevision) }}</small></span><strong>{{ p.quantity }}</strong></li>

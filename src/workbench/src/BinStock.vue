@@ -25,7 +25,7 @@ function closeCount() {
   window.location.hash = 'locations/' + props.location.id
 }
 watch(() => props.countLink, async (link, previous) => {
-  if (link?.binId === props.location.id && !link.positionId && !link.receiptId && !link.holdPositionId && !link.draftPositionId && !link.quarantinePositionId && !link.closure && (previous?.closure || previous?.positionId || previous?.receiptId || previous?.holdPositionId || previous?.draftPositionId || previous?.quarantinePositionId)) {
+  if (link?.binId === props.location.id && !link.positionId && !link.receiptId && !link.holdPositionId && !link.draftPositionId && !link.quarantinePositionId && !link.recovery && !link.closure && (previous?.recovery || previous?.closure || previous?.positionId || previous?.receiptId || previous?.holdPositionId || previous?.draftPositionId || previous?.quarantinePositionId)) {
     await nextTick()
     heading.value?.focus()
   }
@@ -73,7 +73,7 @@ async function closeTransfer() {
 const arrivals = computed(() => new Map(stock.value?.movements.map(move => [move.destinationPlacementId, move])))
 
 const binScope = () => [props.location.id, props.location.revision, props.asOf, props.connected,
-  inspectingCount.value || Boolean(props.countLink?.closure || props.countLink?.holdPositionId || props.countLink?.lossPositionId || props.countLink?.quarantinePositionId || props.countLink?.draftPositionId)] as const
+  inspectingCount.value || Boolean(props.countLink?.recovery || props.countLink?.closure || props.countLink?.holdPositionId || props.countLink?.lossPositionId || props.countLink?.quarantinePositionId || props.countLink?.draftPositionId)] as const
 
 watch([binScope, retryShortages], async ([[id, revision, , connected, inspecting]], _, onCleanup) => {
   let current = true

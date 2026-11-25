@@ -138,7 +138,7 @@ internal sealed class Recounts(NpgsqlDataSource db)
               LEFT JOIN brickvault.purchases buy ON buy.id=p.purchase_id
               LEFT JOIN brickvault.catalog c ON c.id=p.catalog_id
               LEFT JOIN brickvault.locations loc ON loc.id=p.location_id
-              LEFT JOIN brickvault.recount_tasks q ON q.position_id=t.position_id AND q.observation_id IS NULL
+              LEFT JOIN brickvault.recount_task_states q ON q.position_id=t.position_id AND q.observation_id IS NULL AND NOT q.depleted
               WHERE t.preview_id=$1
             ) decisions
             """, ct, id);
@@ -169,10 +169,9 @@ internal sealed class Recounts(NpgsqlDataSource db)
         if (!h.Cursor) throw BadCursor();
         var rows = await Rows(c, tx, "SELECT " + TargetColumns + ",r.outcome,r.queue_batch_id,q.observation_id, " + """
             CASE WHEN q.batch_id IS NULL THEN NULL WHEN q.observation_id IS NOT NULL THEN 'witnessed'
-                 WHEN stock.quantity>0 THEN 'pending' ELSE 'depleted' END
+                 WHEN q.depleted THEN 'depleted' ELSE 'pending' END
             FROM brickvault.recount_results r JOIN brickvault.recount_preview_targets t ON t.preview_id=r.batch_id AND t.position_id=r.position_id
-            LEFT JOIN brickvault.recount_tasks q ON q.batch_id=r.queue_batch_id AND q.position_id=r.position_id
-            LEFT JOIN brickvault.current_placement_stock stock ON stock.id=q.position_id
+            LEFT JOIN brickvault.recount_task_states q ON q.batch_id=r.queue_batch_id AND q.position_id=r.position_id
             WHERE r.batch_id=$1 AND ($2::uuid IS NULL OR r.position_id>$2) ORDER BY r.position_id LIMIT $3
             """, r => new RecountResult(Target(r), r.GetString(11), Optional<Guid>(r, 12), Optional<Guid>(r, 13), Text(r, 14)), ct, id, Nullable(NpgsqlDbType.Uuid, after), limit + 1);
         return new("recount-batch", id, h.Command, h.Correlation, h.Time, true, h.Total, h.Queued, h.Changed, h.Already, h.Unavailable, TrimPage(rows, limit, r => r.Target.PositionId), rows);
@@ -185,10 +184,10 @@ internal sealed class Recounts(NpgsqlDataSource db)
         await using var tx = await c.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
         await Migration.CheckWithin(c, tx, ct);
         const string actionable = """
-            FROM brickvault.recount_tasks q
+            FROM brickvault.recount_task_states q
             JOIN brickvault.current_placement_stock p ON p.id=q.position_id AND p.quantity>0
             JOIN brickvault.recount_preview_targets t ON t.preview_id=q.batch_id AND t.position_id=q.position_id
-            WHERE q.observation_id IS NULL
+            WHERE q.observation_id IS NULL AND NOT q.depleted
             """;
         var rows = await Rows(c, tx, "SELECT " + TargetColumns + ",q.batch_id " + actionable +
             " AND ($1::uuid IS NULL OR q.position_id>$1) ORDER BY q.position_id LIMIT $2",

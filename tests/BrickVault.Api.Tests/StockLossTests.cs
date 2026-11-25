@@ -141,7 +141,7 @@ public sealed class StockLossTests
         Assert.Equal("unknown_stock_loss", await Reject(() => Read(a.Id, origin.EntityId, commandId: command.CommandId)));
         Assert.Single((await counts.Snapshot(a.Id, token, origin.EntityId)).Shortages);
         Assert.Equal(7, (await bins.Snapshot(a.Id, token)).PhysicalOnHand);
-        Assert.Equal(release.Revision, Assert.Single((await receiving.LossSnapshot(token)).Purchases,
+        Assert.Equal(release.Revision, Assert.Single((await receiving.LossSnapshot(token, recoveries: true)).Purchases,
             p => p.Id == purchase.EntityId).Revision);
 
         async Task<(StockLossCommand Request, Receipt? Result)> TryPost(StockLossCommand candidate)
@@ -220,7 +220,7 @@ public sealed class StockLossTests
         Assert.Empty(zeroBasis.Reductions);
 
         async Task<LossPurchaseRow> ReadPurchase() =>
-            Assert.Single((await receiving.LossSnapshot(token)).Purchases, p => p.Id == purchase.EntityId);
+            Assert.Single((await receiving.LossSnapshot(token, recoveries: true)).Purchases, p => p.Id == purchase.EntityId);
         var now = await ReadPurchase();
         Assert.Equal((5, 1, 1, 3, 3, 0, 3, 0, 103, 110), (now.Balances.PhysicalOnHand, now.Balances.Unavailable,
             now.Balances.Reserved, now.Balances.Free, now.Balances.BackedQuantity, now.Balances.WithheldQuantity,

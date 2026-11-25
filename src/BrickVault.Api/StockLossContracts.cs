@@ -86,4 +86,5 @@ internal sealed record StockLossSnapshot(string Scope, DateTime AsOf, bool Compl
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantityAfter = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<StockLossQuarantineAttribution>? QuarantineAttributions = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? NextQuarantineAfter = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? NextQuarantineAfter = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PriorDeliveryLossQuantityMode = null);

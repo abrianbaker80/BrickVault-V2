@@ -49,6 +49,9 @@ SCHEMA_FACTS = {
     10: FACTS + RECEIVING_FACTS + TRANSFER_FACTS + COUNT_FACTS + HOLD_FACTS + LOSS_FACTS + RECOUNT_FACTS + WITHDRAWAL_FACTS + QUARANTINE_FACTS,
 }
 SCHEMA_FACTS[11] = SCHEMA_FACTS[10] + ("stock_shortage_closures",)
+SCHEMA_FACTS[12] = SCHEMA_FACTS[11] + (
+    "stock_loss_basis_assignments", "stock_loss_recoveries", "stock_loss_recovery_allocations",
+)
 
 
 def digest(path):
