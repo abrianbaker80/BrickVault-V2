@@ -2,6 +2,10 @@
 
 ## M3 receiving
 
+- Added receipt-lot history across bins. A transfer shows the units and offer backing moved, and a delivery's cost appears once. [Inventory workflow](https://github.com/abrianbaker80/BrickVault-V2/issues/31)
+
+- Added recount previews, a shared count queue and a receipt for each batch. Operators can freeze selected positions or every match to a filter, then see which targets were queued, changed, already queued or unavailable.
+
 - Added a stock timeline to the Inventory position inspector. Follow transfers, witnessed counts, build holds, offer backing and posted losses to see how a position reached its current quantity. [Position timeline](https://github.com/abrianbaker80/BrickVault-V2/issues/29)
 
 - Added stock-loss posting with operator-selected reductions per unpublished offer. A single receipt records the witnessed loss, the change in backing at that position and the receipt cost assigned to the loss. [Stock count and loss decisions](https://github.com/abrianbaker80/BrickVault-V2/issues/22)

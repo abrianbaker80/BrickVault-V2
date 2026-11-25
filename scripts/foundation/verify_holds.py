@@ -1,6 +1,7 @@
 """Qualify an explicit release against a witnessed shortage and restored command receipts."""
 
 import uuid
+from urllib.parse import urlencode
 
 from verify_receiving import post, purchase_row
 
@@ -61,6 +62,10 @@ def qualify_holds(client, catalog_id):
     assert balances["knownCostFreeQuantity"] == 5 and balances["unknownCostFreeQuantity"] == 0
     assert purchase["deliveries"][0]["itemCostMinor"] == 790 and purchase["offers"][0]["backedQuantity"] == 2
     assert amounts(retained) == {a["entityId"]: 3, b["entityId"]: 2}
+    for term in (a["entityId"], "training BRIDGE"):
+        filtered = client.call("inventory/positions?" + urlencode({"q": term, "locationId": bin_id}))
+        assert filtered["complete"] and filtered["matchingPositions"] == 1
+        assert filtered["rows"][0]["layer"]["placementId"] == position_id
     count_again = client.call(f"receiving/bins/{bin_id}/counts?observationId={count['entityId']}")
     assert count_again["shortages"][0]["id"] == case["id"] and count_again["shortages"][0]["state"] == "open"
     commands = [(path, first, a), (path, second, b), (path + "/release", chosen, receipt)]

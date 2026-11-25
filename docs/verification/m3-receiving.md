@@ -31,6 +31,18 @@ Open the position in **Inventory**. **All activity** lists events for that posit
 
 Each event carries the purchase revision that recorded it. This orders entries even when an older record has no timestamp. For example, a putaway of ten pieces followed by a count of five still represents ten on hand until the loss is posted. A five-piece loss then takes the position to five on hand. The count and the posting link to separate receipts. The position remains available by exact ID if its balance later reaches zero. [Position timeline qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/29)
 
+### Follow a receipt lot across bins
+
+From an Inventory position, open **Inspect receipt lot**. A lot follows one delivery, including every original putaway and subsequent transfer from it. Compare the quantity still awaiting putaway, the quantity in positions and any posted loss against the delivery receipt. The lot shows its acquisition cost once, with the original currency and any cost allocated to a posted loss. An unknown cost stays unknown.
+
+Use the positions list to inspect a bin, including a position that has reached zero. A transfer appears once in lot activity and identifies its source, destination and moved backing. It keeps the lot-wide physical balance constant. If the purchase changes while you are paging through the lot, reload the first pages to see the new revision.
+
+### Queue and complete a recount
+
+In Inventory, select individual positions or use all matches for the active filters. Review the preview before confirming. The preview freezes the position IDs and revisions across pages. Positions that start matching after the preview belong to a new preview. The batch receipt shows which targets entered the queue, which changed, which already had a pending recount and which were unavailable.
+
+Open the recount queue to locate a position, verify its bin and record the witnessed quantity through the existing stock-count workflow. The receipt links the queued position to that observation. If all units move out before the count, the queue identifies the depleted position and its history. Queuing a task preserves physical stock, offer backing and build holds. [Recount and lot qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/31)
+
 ## Witness a stock count and review a shortage
 
 Use a fictional identified position in a registered bin. In the signed-in count workflow, choose the position, confirm its bin code and enter the counted quantity and reason. The count records the operator's observation and the ledger facts at the compared revision. A lower count opens a physical shortage for that position and blocks new offer backing and outbound transfers from it. Existing offers retain their original backing. A surplus has unidentified source and remains observation evidence. A later count does not close an open case. [Owner policy and qualification case](https://github.com/abrianbaker80/BrickVault-V2/issues/22)
@@ -85,4 +97,4 @@ For a systemd-managed guest, stop its Workbench unit before staging. An explicit
 
 ## Repeat verification
 
-Run `python scripts/foundation/manage.py verify` after a clean build. The qualification uses the normal private HTTPS API, PostgreSQL and Workbench. The restore check compares the purchase and both deliveries, their placements, offer backing, reference audit and original command receipts. A schema-2 backup still requires its archived release. Schema-3 backups also fingerprint the five receiving tables. Schema-4 backups add position identities, transfer events and transferred offer backing. Schema 5 adds count observations and shortage cases. Schema 6 adds named build holds and their release history. Schema 7 adds posted stock losses and the chosen offer reductions. Each archive requires its matching release. [Setup and recovery](m2-foundation.md)
+Run `python scripts/foundation/manage.py verify` after a clean build. The qualification uses the normal private HTTPS API, PostgreSQL and Workbench. The restore check compares the purchase and both deliveries, their placements, offer backing, reference audit and original command receipts. A schema-2 backup still requires its archived release. Schema-3 backups also fingerprint the five receiving tables. Schema-4 backups add position identities, transfer events and transferred offer backing. Schema 5 adds count observations and shortage cases. Schema 6 adds named build holds and their release history. Schema 7 adds posted stock losses and the chosen offer reductions. Schema 8 adds frozen recount previews, their target positions, queued batches and per-target receipts. Each archive requires its matching release. [Setup and recovery](m2-foundation.md)
