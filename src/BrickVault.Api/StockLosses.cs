@@ -46,7 +46,7 @@ internal sealed class StockLosses(NpgsqlDataSource db)
         catch (PostgresException ex) when (ex.ConstraintName is
             "stock_loss_revision" or "stock_loss_position_mismatch" or "stock_loss_bin_confirmation_mismatch" or
             "stock_loss_case_conflict" or "stock_loss_observation_conflict" or "stock_loss_no_loss" or
-            "stock_loss_protected_shortfall" or "stock_loss_offer_reduction_mismatch" or
+            "stock_loss_protected_shortfall" or "stock_loss_offer_reduction_mismatch" or "stock_loss_quarantine_unresolved" or
             "stock_loss_offer_reductions_offer_id_fkey")
         {
             throw ex.ConstraintName switch
@@ -58,6 +58,7 @@ internal sealed class StockLosses(NpgsqlDataSource db)
                 "stock_loss_observation_conflict" => Conflict(ex.ConstraintName, "Reload the shortage and review the latest witness at the current ledger quantity."),
                 "stock_loss_no_loss" => Conflict(ex.ConstraintName, "The latest witnessed quantity does not support posting a loss."),
                 "stock_loss_protected_shortfall" => Conflict(ex.ConstraintName, "The counted units cannot cover the protected holds. Review those holds before posting."),
+                "stock_loss_quarantine_unresolved" => Conflict(ex.ConstraintName, "An aggregate count cannot locate the loss among quarantined and ordinary units. Preserve the quarantine until itemized witness is recorded."),
                 _ => Conflict("stock_loss_offer_reduction_mismatch", "Choose exact reductions for offers backed at this position up to the required total.")
             };
         }

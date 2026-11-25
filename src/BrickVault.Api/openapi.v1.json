@@ -676,6 +676,14 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "quarantine",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include quarantine quantities or recorded quarantine events for this scope."
           }
         ]
       }
@@ -713,6 +721,16 @@
                 }
               }
             }
+          },
+          "426": {
+            "description": "The retained client contract cannot represent quarantine in this scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "description": "Read current physical positions and the historical incoming and outgoing transfer events for one registered bin.",
@@ -725,6 +743,14 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "quarantine",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include quarantine quantities or recorded quarantine events for this scope."
           }
         ]
       }
@@ -860,6 +886,14 @@
               "default": false
             },
             "description": "Opt in to the loss-aware snapshot. Older snapshot shapes return 426 when a loss is present."
+          },
+          {
+            "name": "quarantine",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include per-delivery quarantine quantities. Requires losses=true and holds=true."
           }
         ]
       }
@@ -933,6 +967,14 @@
               "maximum": 100,
               "default": 25
             }
+          },
+          {
+            "name": "quarantine",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include quarantine quantities or recorded quarantine events for this scope."
           }
         ],
         "responses": {
@@ -1349,6 +1391,14 @@
               "format": "uuid"
             },
             "description": "Read one exact command in this scope without a cursor. Returns 404 if absent."
+          },
+          {
+            "name": "quarantine",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include quarantine quantities or recorded quarantine events for this scope."
           }
         ],
         "description": "Read a selected position's reservations, shortage frontier and paged hold history as of one consistent snapshot.",
@@ -1516,6 +1566,14 @@
               "maximum": 100,
               "default": 25
             }
+          },
+          {
+            "name": "quarantine",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include quarantine quantities or recorded quarantine events for this scope."
           }
         ],
         "description": "Review an open witnessed shortage and the minimum offer backing reduction a confirmed loss would need. Whole-position totals are independent of page size. This authenticated read changes no stock or allocation.",
@@ -1542,6 +1600,16 @@
           },
           "default": {
             "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "The retained client contract cannot represent quarantine in this scope.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1770,6 +1838,14 @@
               "maximum": 100,
               "default": 25
             }
+          },
+          {
+            "name": "quarantine",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include quarantine quantities or recorded quarantine events for this scope."
           }
         ],
         "responses": {
@@ -1795,6 +1871,16 @@
           },
           "default": {
             "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "The retained client contract cannot represent quarantine in this scope.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2177,6 +2263,14 @@
               "maximum": 100,
               "default": 25
             }
+          },
+          {
+            "name": "quarantine",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include quarantine quantities or recorded quarantine events for this scope."
           }
         ],
         "responses": {
@@ -2219,8 +2313,246 @@
                 }
               }
             }
+          },
+          "426": {
+            "description": "The retained client contract cannot represent quarantine in this scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
+      }
+    },
+    "/api/v1/inventory/positions/{positionId}/quarantine": {
+      "get": {
+        "operationId": "getStockQuarantineSnapshot",
+        "description": "Read scoped quarantine totals and receipt history. Continue using the supplied receipt identifier.",
+        "parameters": [
+          {
+            "name": "positionId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockQuarantineSnapshot"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/positions/{positionId}/quarantine/receipts": {
+      "get": {
+        "operationId": "getStockQuarantineEvidence",
+        "description": "Read exact evidence using one receipt or command identifier.",
+        "parameters": [
+          {
+            "name": "positionId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "receiptId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "commandId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockQuarantineEvidence"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/quarantines": {
+      "post": {
+        "operationId": "recordStockQuarantine",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "description": "The authenticated workspaceId captured when the operator prepared the command. Use that same value for every retry. A missing or mismatched workspace returns 409 workspace_mismatch.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockQuarantineCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockQuarantineReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Quarantine uncommitted stock in its confirmed bin."
+      }
+    },
+    "/api/v1/inventory/quarantine-releases": {
+      "post": {
+        "operationId": "releaseStockQuarantine",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "description": "The authenticated workspaceId captured when the operator prepared the command. Use that same value for every retry. A missing or mismatched workspace returns 409 workspace_mismatch.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockQuarantineReleaseCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockQuarantineReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Release from a named receipt with a passed inspection."
       }
     }
   },
@@ -2752,7 +3084,9 @@
               "hold",
               "hold-release",
               "stock-loss",
-              "recount"
+              "recount",
+              "quarantine",
+              "quarantine-release"
             ]
           },
           "correlationId": {
@@ -4281,6 +4615,11 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 1000000
+          },
+          "quarantinedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
           }
         },
         "required": [
@@ -5150,6 +5489,11 @@
           },
           "currentCatalog": {
             "$ref": "#/components/schemas/CatalogRow"
+          },
+          "quarantinedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
           }
         },
         "required": [
@@ -5557,6 +5901,14 @@
             ],
             "maxLength": 112,
             "pattern": "^v1\\.[0-9a-f]{32}\\.[0-9a-f]{32}\\.[1-9][0-9]{0,9}\\.[0-9a-f]{32}$"
+          },
+          "quarantinedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "quarantineBlocksLoss": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -6043,6 +6395,11 @@
             ],
             "minimum": 0,
             "maximum": 1000000000
+          },
+          "quarantinedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
           }
         },
         "required": [
@@ -6172,7 +6529,9 @@
               "hold",
               "hold-release",
               "stock-loss",
-              "offer-backing"
+              "offer-backing",
+              "quarantine",
+              "quarantine-release"
             ]
           },
           "id": {
@@ -6382,8 +6741,8 @@
               "string",
               "null"
             ],
-            "maxLength": 79,
-            "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing)\\.[0-9a-f]{32}$"
+            "maxLength": 84,
+            "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release)\\.[0-9a-f]{32}$"
           },
           "events": {
             "type": "array",
@@ -7168,7 +7527,12 @@
               "string",
               "null"
             ],
-            "maxLength": 123
+            "maxLength": 128
+          },
+          "quarantinedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
           }
         },
         "required": [
@@ -7205,6 +7569,443 @@
           "events",
           "nextPositionAfter",
           "nextEventAfter"
+        ],
+        "additionalProperties": false
+      },
+      "StockQuarantineCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "commandId",
+          "purchaseId",
+          "expectedRevision",
+          "positionId",
+          "locationId",
+          "confirmedLocationCode",
+          "catalogId",
+          "catalogRevision",
+          "quantity",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "StockQuarantineReleaseCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "quarantineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "inspectionResult": {
+            "type": "string",
+            "const": "passed"
+          }
+        },
+        "required": [
+          "commandId",
+          "purchaseId",
+          "expectedRevision",
+          "positionId",
+          "locationId",
+          "confirmedLocationCode",
+          "catalogId",
+          "catalogRevision",
+          "quantity",
+          "reason",
+          "quarantineId",
+          "inspectionResult"
+        ],
+        "additionalProperties": false
+      },
+      "StockQuarantineReceipt": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "quarantine",
+              "quarantine-release"
+            ]
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "commandId",
+          "entityId",
+          "revision",
+          "kind",
+          "correlationId"
+        ],
+        "additionalProperties": false
+      },
+      "StockQuarantineRow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "releasedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "remainingQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "quantity",
+          "releasedQuantity",
+          "remainingQuantity",
+          "reason",
+          "commandId",
+          "correlationId",
+          "recordedAt"
+        ],
+        "additionalProperties": false
+      },
+      "StockQuarantineSnapshot": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "position-quarantine"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "position": {
+            "$ref": "#/components/schemas/StockRegisterRow"
+          },
+          "purchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "hasOpenShortage": {
+            "type": "boolean"
+          },
+          "onHandQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "quarantinedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "heldQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "offerBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "sellableQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "availableToQuarantineQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "quarantines": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/StockQuarantineRow"
+            }
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "position",
+          "purchaseRevision",
+          "hasOpenShortage",
+          "onHandQuantity",
+          "quarantinedQuantity",
+          "heldQuantity",
+          "offerBackedQuantity",
+          "sellableQuantity",
+          "availableToQuarantineQuantity",
+          "quarantines",
+          "nextAfter"
+        ],
+        "additionalProperties": false
+      },
+      "StockQuarantineEvidence": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "quarantine-receipt"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "recordedCatalog": {
+            "$ref": "#/components/schemas/CatalogRow"
+          },
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "quarantine",
+              "quarantine-release"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "quarantineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "inspectionResult": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "passed",
+              null
+            ]
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "positionId",
+          "location",
+          "confirmedLocationCode",
+          "catalogId",
+          "catalogRevision",
+          "recordedCatalog",
+          "deliveryId",
+          "purchaseId",
+          "kind",
+          "id",
+          "commandId",
+          "correlationId",
+          "revision",
+          "quarantineId",
+          "inspectionResult",
+          "quantity",
+          "reason",
+          "recordedAt"
         ],
         "additionalProperties": false
       }

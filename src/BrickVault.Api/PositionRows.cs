@@ -13,7 +13,8 @@ internal static class PositionRows
                 c.completeness,c.source,c.license,c.mapping,c.integration_eligible,
                 buy.revision,p.location_code,
                 EXISTS(SELECT 1 FROM brickvault.stock_shortage_cases sc WHERE sc.position_id=p.id AND sc.resolved_by_command_id IS NULL),
-                COALESCE((SELECT sum(h.remaining_quantity) FROM brickvault.current_build_holds h WHERE h.position_id=p.id),0)::integer
+                COALESCE((SELECT sum(h.remaining_quantity) FROM brickvault.current_build_holds h WHERE h.position_id=p.id),0)::integer,
+                COALESCE((SELECT q.quantity FROM brickvault.current_position_quarantine q WHERE q.position_id=p.id),0)
             """;
     internal const string From = """
             FROM brickvault.current_placement_stock p
@@ -28,19 +29,24 @@ internal static class PositionRows
     internal const string RegisterFrom = From + "\nJOIN brickvault.locations loc ON loc.id=p.location_id";
 
     internal static StockRegisterRow ReadRegister(NpgsqlDataReader r) =>
-        new(ReadLayer(r), r.GetGuid(33),
-            new LocationRow(r.GetGuid(34), r.GetInt32(35), r.GetString(36), r.GetString(37)));
+        ReadRegister(r, false);
 
-    internal static BinStockLayer ReadLayer(NpgsqlDataReader r)
+    internal static StockRegisterRow ReadRegister(NpgsqlDataReader r, bool quarantine) =>
+        new(ReadLayer(r, quarantine), r.GetGuid(34),
+            new LocationRow(r.GetGuid(35), r.GetInt32(36), r.GetString(37), r.GetString(38)));
+
+    internal static BinStockLayer ReadLayer(NpgsqlDataReader r, bool quarantine = false)
     {
         var recordedRevision = r.GetInt32(11);
         var quantity = r.GetInt32(13);
         var backed = r.GetInt32(14);
         var unbacked = quantity - backed;
         var current = References.ReadCatalog(r, 15);
+        var unavailable = r.GetInt32(33);
         return new BinStockLayer(r.GetGuid(0), r.GetGuid(1), r.GetString(2), r.GetGuid(3), r.GetString(4),
             r.GetGuid(5), r.GetGuid(6), r.GetInt32(7), Optional<int>(r, 8), r.GetString(9), r.GetGuid(10),
             recordedRevision, current, r.GetString(12), quantity, backed, unbacked,
-            current.IntegrationEligible && current.Revision == recordedRevision && !r.GetBoolean(31) ? unbacked - r.GetInt32(32) : 0);
+            current.IntegrationEligible && current.Revision == recordedRevision && !r.GetBoolean(31)
+                ? unbacked - r.GetInt32(32) - unavailable : 0, quarantine ? unavailable : null);
     }
 }

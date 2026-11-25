@@ -62,6 +62,16 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
             JOIN scope_positions s ON s.id=h.position_id
 
             UNION ALL
+            SELECT q.position_id,'quarantine',q.id,q.command_id,NULL,q.quantity,0,0,0,
+                q.location_id,q.location_code,q.reason,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL
+            FROM brickvault.stock_quarantines q JOIN scope_positions s ON s.id=q.position_id
+
+            UNION ALL
+            SELECT r.position_id,'quarantine-release',r.id,r.command_id,NULL,r.quantity,0,0,0,
+                r.location_id,r.location_code,r.reason,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL
+            FROM brickvault.stock_quarantine_releases r JOIN scope_positions s ON s.id=r.position_id
+
+            UNION ALL
             SELECT l.position_id,'stock-loss',l.id,l.command_id,NULL,l.lost_quantity,-l.lost_quantity,0,0,
                 l.location_id,l.location_code,l.reason,NULL,NULL,NULL,l.observation_id,l.case_id,l.id,NULL,NULL,NULL,NULL
             FROM brickvault.stock_loss_postings l JOIN scope_positions s ON s.id=l.position_id
@@ -79,7 +89,7 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
         )
         """;
 
-    public async Task<StockPositionTimeline> Read(Guid positionId, string? after, int limit, CancellationToken token)
+    public async Task<StockPositionTimeline> Read(Guid positionId, string? after, int limit, CancellationToken token, bool quarantine = false)
     {
         if (limit is < 1 or > 100)
             throw new Fault(400, "invalid_timeline_page", "Choose a timeline page size between 1 and 100.");
@@ -90,12 +100,14 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
         await Migration.CheckWithin(connection, tx, token);
 
         var positions = await Rows(connection, tx, "SELECT " + PositionRows.RegisterSelect + "\n" +
-            PositionRows.RegisterFrom + "\nWHERE p.id=$1", PositionRows.ReadRegister, token, positionId);
+            PositionRows.RegisterFrom + "\nWHERE p.id=$1", r => PositionRows.ReadRegister(r, quarantine), token, positionId);
         var position = positions.SingleOrDefault() ??
             throw new Fault(404, "unknown_position", "No stock position has that identifier.");
         var metadata = (await Rows(connection, tx, ScopedEvents(false) + "\n" + """
-            SELECT transaction_timestamp(),EXISTS (SELECT 1 FROM events WHERE occurred_at IS NULL)
-            """, r => (AsOf: r.GetDateTime(0), HasUndatedEvents: r.GetBoolean(1)), token, positionId)).Single();
+            SELECT transaction_timestamp(),EXISTS (SELECT 1 FROM events WHERE occurred_at IS NULL),
+                EXISTS (SELECT 1 FROM events WHERE kind IN ('quarantine','quarantine-release'))
+            """, r => (AsOf: r.GetDateTime(0), HasUndatedEvents: r.GetBoolean(1), HasQuarantine: r.GetBoolean(2)), token, positionId)).Single();
+        if (!quarantine && metadata.HasQuarantine) throw StockQuarantines.Upgrade();
 
         var cursor = await Cursor(connection, tx, positionId, after, token);
         var rows = await ReadEvents(connection, tx, positionId, false, cursor?.Revision, cursor?.Kind, cursor?.Id,
@@ -150,11 +162,12 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
         Guid positionId, string? after, CancellationToken token)
     {
         if (after is null) return null;
-        if (after.Length > 79) throw InvalidCursor();
+        if (after.Length > 84) throw InvalidCursor();
         var parts = after.Split('.');
         if (parts.Length != 3 || !Guid.TryParseExact(parts[0],"N",out var scope) || scope != positionId ||
             parts[1] is not ("putaway" or "transfer-in" or "transfer-out" or "count" or "hold" or "hold-release" or
-            "stock-loss" or "offer-backing") || !Guid.TryParseExact(parts[2],"N",out var id)) throw InvalidCursor();
+            "stock-loss" or "offer-backing" or "quarantine" or "quarantine-release") ||
+            !Guid.TryParseExact(parts[2],"N",out var id)) throw InvalidCursor();
         await using var anchor = Query(connection, tx, ScopedEvents(false) + "\n" + """
             SELECT purchase_revision FROM events WHERE kind=$2 AND id=$3
             """,positionId,parts[1],id);

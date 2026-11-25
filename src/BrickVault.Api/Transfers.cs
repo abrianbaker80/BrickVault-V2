@@ -66,11 +66,12 @@ internal sealed class Transfers(NpgsqlDataSource db)
         }
         catch (PostgresException ex) when (ex.ConstraintName is
             "transfer_source" or "transfer_quantity" or "transfer_bin" or "transfer_backing" or "stock_shortage_open" or
-            "reserved_stock_unavailable")
+            "reserved_stock_unavailable" or "quarantine_capacity_unavailable")
         {
             throw ex.ConstraintName switch
             {
                 "stock_shortage_open" => Fault.StockShortageOpen(),
+                "quarantine_capacity_unavailable" => StockQuarantines.ProtectedCapacity(),
                 "reserved_stock_unavailable" => new Fault(409, "reserved_stock_unavailable",
                     "Reduce the movement so all remaining backing and build holds stay at the source position."),
                 "transfer_source" => new Fault(409, "transfer_source_mismatch", "The selected placement does not belong to this purchase and source bin."),

@@ -44,7 +44,7 @@ internal sealed class StockRegister(NpgsqlDataSource db)
     }
 
     public async Task<StockRegisterPage> Search(string? query, string? itemType, Guid? locationId,
-        Guid? positionId, Guid? after, int limit, CancellationToken ct)
+        Guid? positionId, Guid? after, int limit, CancellationToken ct, bool quarantine = false)
     {
         if (limit is < 1 or > 100) throw new Fault(400, "invalid_stock_search", "Choose a page size from 1 to 100.");
         object[] Parameters() => Filters(query, itemType, locationId, positionId);
@@ -57,7 +57,7 @@ internal sealed class StockRegister(NpgsqlDataSource db)
         var totals = await Rows(connection, tx, "SELECT transaction_timestamp(),count(*),coalesce(sum(p.quantity),0) " + Filtered,
             r => (AsOf: r.GetDateTime(0), Count: r.GetInt64(1), Units: r.GetInt64(2)), ct, Parameters());
         var rows = await Rows(connection, tx, "SELECT " + PositionRows.RegisterSelect + " " + Filtered +
-            " AND ($6::uuid IS NULL OR p.id>$6) ORDER BY p.id LIMIT $7", PositionRows.ReadRegister,
+            " AND ($6::uuid IS NULL OR p.id>$6) ORDER BY p.id LIMIT $7", r => PositionRows.ReadRegister(r, quarantine),
             ct, [.. Parameters(), Nullable(NpgsqlDbType.Uuid, after), limit + 1]);
         Guid? next = null;
         if (rows.Count > limit)
