@@ -9,6 +9,12 @@ export type Location = Schema['LocationRow']
 export type Diagnostic = Schema['Diagnostic']
 export type CatalogInput = Omit<Schema['CatalogCommand'], 'commandId' | 'id' | 'expectedRevision'>
 export type LocationInput = Pick<Schema['LocationCommand'], 'code' | 'name'>
+export type RecountPreviewRequest = Schema['RecountPreviewRequest']
+export type RecountTarget = Schema['RecountTarget']
+export type RecountPreviewPage = Schema['RecountPreviewPage']
+export type RecountBatchPage = Schema['RecountBatchPage']
+export type RecountQueuePage = Schema['RecountQueuePage']
+export type RecountBatchList = Schema['RecountBatchList']
 export type StockPage = Schema['StockRegisterPage']
 export type PositionMovementPage = Schema['PositionMovementPage']
 export type PositionTimelinePage = Schema['StockPositionTimeline']
@@ -27,6 +33,7 @@ export type Purchase = ReceivingWorkspace['purchases'][number]
 export type StockLoss = Schema['StockLossSnapshot']
 export type StockLossCommand = Schema['StockLossCommand']
 export type ReceivingCommand = { workspaceId: string } & (
+  | { kind: 'recount'; body: Schema['RecountCommand'] }
   | { kind: 'purchase'; body: Schema['PurchaseCommand'] }
   | { kind: 'delivery'; body: Schema['DeliveryCommand'] }
   | { kind: 'putaway'; body: Schema['PutawayCommand'] }
@@ -40,11 +47,12 @@ export type Command = ReceivingCommand | { workspaceId: string } & (
   | { kind: 'catalog'; body: Schema['CatalogCommand'] }
   | { kind: 'location'; body: Schema['LocationCommand'] })
 export type Held = { workspaceId: string | null; commandId: string }
-export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | undefined>
+export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | Schema['RecountReceipt'] | undefined>
 
 export function commandLabel(command: Command) {
   switch (command.kind) {
     case 'catalog': case 'location': return command.body.name
+    case 'recount': return 'Recount batch'
     case 'purchase': return 'Purchase ' + command.body.reference
     case 'delivery': return 'Delivery ' + command.body.reference
     case 'putaway': return 'Putaway to ' + command.body.confirmedLocationCode
@@ -58,6 +66,7 @@ export function commandLabel(command: Command) {
 }
 
 const commands = {
+  recount: { path: 'inventory/recounts/batches', valid: valid.RecountCommand },
   catalog: { path: 'catalog', valid: valid.CatalogCommand },
   location: { path: 'locations', valid: valid.LocationCommand },
   purchase: { path: 'receiving/purchases', valid: valid.PurchaseCommand },
@@ -102,6 +111,21 @@ async function read<T>(path: string, guard: (value: unknown) => value is T, opti
   const data: unknown = await response.json().catch(() => null)
   if (!guard(data)) throw new ContractFailure()
   return data
+}
+
+function recountCursor(after: string) {
+  const params = new URLSearchParams({limit: '25'})
+  if (after) params.set('after', after)
+  return '?' + params
+}
+function checkedPreview(page: RecountPreviewPage, input: RecountPreviewRequest) {
+  if (page.previewId !== input.previewId || page.mode !== input.scope || page.locationId !== input.locationId ||
+      page.q !== input.q || page.itemType !== input.itemType) throw new ContractFailure()
+  if (input.scope === 'selected') {
+    const ids = new Set(input.positionIds)
+    if ((page.complete && page.total !== ids.size) || page.rows.some(row => !ids.has(row.positionId))) throw new ContractFailure()
+  }
+  return page
 }
 
 export const api = {
@@ -152,6 +176,29 @@ export const api = {
     }
     return page
   },
+  async freezeRecount(input: RecountPreviewRequest, workspaceId: string, csrf: string) {
+    const page = await read('inventory/recounts/previews', valid.RecountPreviewPage, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Workspace-Id': workspaceId },
+      body: JSON.stringify(input)
+    })
+    return checkedPreview(page, input)
+  },
+  async recountPreview(input: RecountPreviewRequest, after: string) {
+    const page = await read('inventory/recounts/previews/' + encodeURIComponent(input.previewId) + recountCursor(after), valid.RecountPreviewPage)
+    return checkedPreview(page, input)
+  },
+  async recountBatch(id: string, after = '') {
+    const page = await read('inventory/recounts/batches/' + encodeURIComponent(id) + recountCursor(after), valid.RecountBatchPage)
+    if (page.batchId !== id || page.total !== page.queued + page.changed + page.alreadyQueued + page.unavailable ||
+        page.rows.some(r => (r.outcome === 'queued' && r.queueBatchId !== id) ||
+          (r.outcome === 'already-queued' && (!r.queueBatchId || r.queueBatchId === id)) ||
+          (Boolean(r.queueBatchId) !== Boolean(r.taskState)) ||
+          ((r.outcome === 'changed' || r.outcome === 'unavailable') && r.taskState !== null) ||
+          (Boolean(r.observationId) !== (r.taskState === 'witnessed')))) throw new ContractFailure()
+    return page
+  },
+  recountQueue: (after: string) => read('inventory/recounts/queue' + recountCursor(after), valid.RecountQueuePage),
+  recountBatches: (after: string) => read('inventory/recounts/batches' + recountCursor(after), valid.RecountBatchList),
   async adjustmentReview(binId: string, positionId: string, caseId: string, after = '') {
     const params = new URLSearchParams({ limit: '25' })
     if (after) params.set('after', after)
@@ -215,10 +262,12 @@ export const api = {
     const receipt = command.kind === 'catalog' || command.kind === 'location'
       ? await read(path, valid.Receipt, options)
       : command.kind === 'hold' || command.kind === 'hold-release' ? await read(path, valid.StockHoldReceipt, options)
+      : command.kind === 'recount' ? await read(path, valid.RecountReceipt, options)
       : command.kind === 'stock-loss' ? await read(path, valid.StockLossReceipt, options)
       : command.kind === 'count' ? await read(path, valid.StockCountReceipt, options)
       : command.kind === 'transfer' ? await read(path, valid.TransferReceipt, options) : await read(path, valid.ReceivingReceipt, options)
-    if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind) throw new ContractFailure()
+    if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind ||
+        (command.kind === 'recount' && (receipt.entityId !== command.body.previewId || receipt.revision !== 1))) throw new ContractFailure()
     return receipt
   }
 }

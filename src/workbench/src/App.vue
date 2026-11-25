@@ -135,6 +135,7 @@ function openForm() {
           <p v-if="journalError" class="warning" role="alert">{{ journalError }}</p>
           <div v-if="notice" class="success" role="status"><strong>{{ notice.message }}</strong>
             <div>Correlation ID {{ notice.correlationId }}</div>
+            <a v-if="notice.recountLink" :href="notice.recountLink">View recount receipt</a>
             <a v-if="notice.lossLink" :href="notice.lossLink">View posted stock loss</a>
             <a v-if="notice.countLink" :href="notice.countLink">View count receipt</a></div>
           <p v-if="readState === 'partial'" class="warning" role="status">The service returned a partial register. Refresh to verify the complete workspace before making a change.</p>
@@ -161,7 +162,8 @@ function openForm() {
               <div><span>Integration blocked</span><strong>{{ workspace.catalog.filter(row => !row.integrationEligible).length }}</strong></div>
             </div>
             <Activity v-if="page === 'activity'" :workspace="workspace" :connected="readState === 'ready'" @failure="expired" />
-            <Inventory v-else-if="page === 'inventory'" :key="session.workspaceId" :workspace="workspace" :connected="readState !== 'disconnected'" @failure="expired" />
+            <Inventory v-else-if="page === 'inventory'" :key="session.workspaceId" :workspace="workspace" :connected="readState !== 'disconnected'"
+              :csrf="session.csrfToken" :controls="{ enabled: canCreate, pending: pending.length > 0, feedback: error || journalError, workspaceId: session.workspaceId, dispatch: record }" @failure="expired" />
             <template v-else-if="page === 'receiving'">
               <Receiving v-if="receiving" :key="session.workspaceId" :stock="receiving" :workspace="workspace" :workspace-id="session.workspaceId" :enabled="canCreate" :uncertain="pending.length > 0 && !submitting" :dispatch="record" />
               <p v-else role="status">{{ readState === 'loading' ? 'Loading receiving records…' : 'Receiving records are unavailable.' }}</p>

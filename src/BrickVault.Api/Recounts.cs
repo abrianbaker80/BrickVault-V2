@@ -167,11 +167,14 @@ internal sealed class Recounts(NpgsqlDataSource db)
         if (heads.Count == 0) throw new Fault(404, "unknown_recount_batch", "The requested recount receipt was not found.");
         var h = heads[0];
         if (!h.Cursor) throw BadCursor();
-        var rows = await Rows(c, tx, "SELECT " + TargetColumns + ",r.outcome,r.queue_batch_id,q.observation_id " + """
+        var rows = await Rows(c, tx, "SELECT " + TargetColumns + ",r.outcome,r.queue_batch_id,q.observation_id, " + """
+            CASE WHEN q.batch_id IS NULL THEN NULL WHEN q.observation_id IS NOT NULL THEN 'witnessed'
+                 WHEN stock.quantity>0 THEN 'pending' ELSE 'depleted' END
             FROM brickvault.recount_results r JOIN brickvault.recount_preview_targets t ON t.preview_id=r.batch_id AND t.position_id=r.position_id
             LEFT JOIN brickvault.recount_tasks q ON q.batch_id=r.queue_batch_id AND q.position_id=r.position_id
+            LEFT JOIN brickvault.current_placement_stock stock ON stock.id=q.position_id
             WHERE r.batch_id=$1 AND ($2::uuid IS NULL OR r.position_id>$2) ORDER BY r.position_id LIMIT $3
-            """, r => new RecountResult(Target(r), r.GetString(11), Optional<Guid>(r, 12), Optional<Guid>(r, 13)), ct, id, Nullable(NpgsqlDbType.Uuid, after), limit + 1);
+            """, r => new RecountResult(Target(r), r.GetString(11), Optional<Guid>(r, 12), Optional<Guid>(r, 13), Text(r, 14)), ct, id, Nullable(NpgsqlDbType.Uuid, after), limit + 1);
         return new("recount-batch", id, h.Command, h.Correlation, h.Time, true, h.Total, h.Queued, h.Changed, h.Already, h.Unavailable, TrimPage(rows, limit, r => r.Target.PositionId), rows);
     }
 
@@ -181,12 +184,16 @@ internal sealed class Recounts(NpgsqlDataSource db)
         await using var c = await db.OpenConnectionAsync(ct);
         await using var tx = await c.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
         await Migration.CheckWithin(c, tx, ct);
-        var rows = await Rows(c, tx, "SELECT " + TargetColumns + ",q.batch_id,p.quantity>0 " + """
-            FROM brickvault.recount_tasks q JOIN brickvault.recount_preview_targets t ON t.preview_id=q.batch_id AND t.position_id=q.position_id
-            JOIN brickvault.current_placement_stock p ON p.id=q.position_id
-            WHERE q.observation_id IS NULL AND ($1::uuid IS NULL OR q.position_id>$1) ORDER BY q.position_id LIMIT $2
-            """, r => new RecountQueueEntry(r.GetGuid(11), Target(r), r.GetBoolean(12)), ct, Nullable(NpgsqlDbType.Uuid, after), limit + 1);
-        var total = (await Rows(c, tx, "SELECT transaction_timestamp(),count(*) FROM brickvault.recount_tasks WHERE observation_id IS NULL",
+        const string actionable = """
+            FROM brickvault.recount_tasks q
+            JOIN brickvault.current_placement_stock p ON p.id=q.position_id AND p.quantity>0
+            JOIN brickvault.recount_preview_targets t ON t.preview_id=q.batch_id AND t.position_id=q.position_id
+            WHERE q.observation_id IS NULL
+            """;
+        var rows = await Rows(c, tx, "SELECT " + TargetColumns + ",q.batch_id " + actionable +
+            " AND ($1::uuid IS NULL OR q.position_id>$1) ORDER BY q.position_id LIMIT $2",
+            r => new RecountQueueEntry(r.GetGuid(11), Target(r), true), ct, Nullable(NpgsqlDbType.Uuid, after), limit + 1);
+        var total = (await Rows(c, tx, "SELECT transaction_timestamp(),count(*) " + actionable,
             r => (Time: r.GetDateTime(0), Count: r.GetInt64(1)), ct)).Single();
         return new("recount-queue", total.Time, true, total.Count, TrimPage(rows, limit, r => r.Target.PositionId), rows);
     }

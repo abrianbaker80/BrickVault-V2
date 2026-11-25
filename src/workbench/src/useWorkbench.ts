@@ -12,7 +12,7 @@ export function useWorkbench(page: Ref<string>) {
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
   const error = ref('')
-  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string } | null>(null)
+  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string; recountLink?: string } | null>(null)
   const pending = shallowRef<Command[]>([])
   const held = shallowRef<Held[]>([])
   const journalError = ref('')
@@ -150,7 +150,17 @@ export function useWorkbench(page: Ref<string>) {
         let committed: { correlationId: string } | undefined
         let countLink: string | undefined
         let lossLink: string | undefined
-        if (command.kind === 'stock-loss') {
+        let recountLink: string | undefined
+        if (command.kind === 'recount') {
+          try {
+            const result = await api.recountBatch(command.body.previewId)
+            if (!result.complete || result.commandId !== command.body.commandId) throw new Error('Recount receipt mismatch')
+            committed = result
+            recountLink = '#inventory/recounts/' + result.batchId
+          } catch (failure) {
+            if (!(failure instanceof ApiFailure && failure.status === 404 && failure.detail?.code === 'unknown_recount_batch')) throw failure
+          }
+        } else if (command.kind === 'stock-loss') {
           const recovered = await recoverStockLoss(command.body)
           if (recovered) {
             committed = recovered
@@ -202,7 +212,7 @@ export function useWorkbench(page: Ref<string>) {
           forget(command)
           loadPending()
           notice.value = { message: 'Confirmed the original ' + commandLabel(command) + '.',
-            correlationId: committed.correlationId, countLink, lossLink, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
+            correlationId: committed.correlationId, countLink, lossLink, recountLink, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
           await refresh()
           return
         }
@@ -229,6 +239,7 @@ export function useWorkbench(page: Ref<string>) {
       forget(command)
       loadPending()
       notice.value = { message: 'Saved ' + commandLabel(command) + ' · revision ' + receipt.revision + '.',
+        recountLink: command.kind === 'recount' ? '#inventory/recounts/' + receipt.entityId : undefined,
         correlationId: receipt.correlationId, lossLink: command.kind === 'stock-loss' ? lossReceiptLink(command.body.locationId,command.body.positionId,receipt.entityId) : undefined,
         countLink: command.kind === 'count' ? countReceiptLink(command.body.locationId, receipt.entityId) : undefined,
         sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
@@ -242,7 +253,8 @@ export function useWorkbench(page: Ref<string>) {
         await refresh()
         error.value = 'The workspace changed. The original command is held for its issuing workspace.'
       } else if (reason instanceof ApiFailure && reason.detail &&
-          ['invalid_reference', 'duplicate_reference', 'invalid_receiving', 'duplicate_receiving_reference',
+          ['invalid_recount', 'empty_recount_preview', 'recount_preview_used', 'unknown_recount_preview',
+            'invalid_reference', 'duplicate_reference', 'invalid_receiving', 'duplicate_receiving_reference',
             'revision_conflict', 'command_mismatch', 'catalog_ineligible', 'catalog_reconfirmation_required', 'bin_confirmation_mismatch',
             'quantity_unavailable', 'delivery_mismatch', 'backing_mismatch', 'invalid_transfer', 'transfer_source_mismatch',
             'transfer_bin_confirmation_mismatch', 'transfer_quantity_unavailable', 'transfer_backing_unavailable', 'transfer_all_backing_requires_full', 'unknown_location',
