@@ -188,6 +188,9 @@ public sealed class StockPositionTimelineTests
         Assert.Equal(bCode, events[0].RelatedLocationCode);
         Assert.Equal(2, (await stock.History(placed.EntityId, null, 25, token)).Rows.Count);
         Assert.Equal(full.Position, Assert.Single((await stock.Search(null, null, null, placed.EntityId, null, 25, token)).Rows));
+        var heldPosition = await stock.Search(held.EntityId.ToString(), null, a.EntityId, null, null, 25, token);
+        Assert.Equal(full.Position, Assert.Single(heldPosition.Rows));
+        Assert.Equal(0, heldPosition.MatchingUnits);
 
         async Task<string> Reject(Func<Task> read) => (await Assert.ThrowsAsync<Fault>(read)).Code;
         Assert.Equal("invalid_timeline_cursor", await Reject(() => timelines.Read(lastMove.EntityId, one.NextAfter, 25, token)));
