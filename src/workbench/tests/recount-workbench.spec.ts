@@ -172,11 +172,26 @@ test('partial or foreign preview and an offline connection keep the frozen selec
   await context.setOffline(true)
   await expect(save).toBeDisabled()
   await expect(dialog).toContainText('workspace is disconnected')
+  let finishRegister!: () => void
+  const registerGate = new Promise<void>(resolve => { finishRegister = resolve })
+  await page.route('**/api/v1/inventory/positions?*', async route => {
+    await registerGate
+    await route.continue()
+  })
   await context.setOffline(false)
   await expect(save).toBeEnabled()
   await dialog.getByRole('button',{name:'Cancel'}).click()
-  await expect(go(page)).toBeFocused()
+  const field = page.getByRole('searchbox',{name:'Search stock positions'})
+  await expect(field).toBeFocused()
+  await expect(go(page)).toBeDisabled()
+  finishRegister()
+  await expect(go(page)).toBeEnabled()
+  await expect(field).toBeFocused()
   expect([...ids]).toHaveLength(1)
+  await go(page).click()
+  await expect(save).toBeEnabled()
+  await page.keyboard.press('Escape')
+  await expect(go(page)).toBeFocused()
   expect(writes).toBe(0)
 })
 

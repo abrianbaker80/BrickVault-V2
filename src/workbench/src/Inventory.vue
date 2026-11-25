@@ -33,16 +33,20 @@ const recountRoute = () => {
 const recountView = ref(recountRoute())
 const checked = ref(new Set<string>())
 const outsidePage = computed(() => checked.value.size - (result.value?.rows.filter(r => checked.value.has(r.layer.placementId)).length ?? 0))
-const preview = shallowRef<{ selected: string[]; filter: StockQuery }>()
+const preview = shallowRef<{ selected: string[]; filter: StockQuery; route: string }>()
 const previewButton = ref<HTMLButtonElement>()
 function openPreview() {
   if (!props.controls.enabled || !result.value?.complete || lastRead.value) return
-  preview.value = { selected:[...checked.value], filter:{...criteria.value} }
+  preview.value = { selected:[...checked.value], filter:{...criteria.value}, route:location.hash }
 }
 async function closePreview() {
+  const issuingRoute = preview.value?.route
   preview.value = undefined
   await nextTick()
-  previewButton.value?.focus()
+  if (location.hash !== issuingRoute || document.querySelector('dialog[open]')) return
+  const opener = previewButton.value
+  if (opener && !opener.disabled) opener.focus()
+  else search.value?.focus()
 }
 const routeId = () => !recountRoute() && !location.hash.startsWith('#inventory/lot/') && location.hash.startsWith('#inventory/')
   ? location.hash.slice('#inventory/'.length).toLowerCase() : ''

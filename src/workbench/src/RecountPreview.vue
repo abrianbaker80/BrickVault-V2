@@ -67,6 +67,10 @@ watch(() => [input.value, requested.value, attempt.value, props.connected] as co
   }
 }, { immediate:true })
 onMounted(() => dialog.value?.showModal())
+function dismiss() {
+  dialog.value?.close()
+  emit('close')
+}
 async function confirm() {
   if (!writable.value || !page.value) return
   const issuingDialog = dialog.value
@@ -79,15 +83,15 @@ async function confirm() {
     if (!issuingDialog?.isConnected || !issuingDialog.open || window.location.hash !== issuingRoute) return
     if (saved) {
       window.location.hash='inventory/recounts/'+saved.entityId
-      emit('close')
-    } else if (props.controls.pending) emit('close')
+      dismiss()
+    } else if (props.controls.pending) dismiss()
     else feedback.value=props.controls.feedback
   } finally { submitting.value=false }
 }
 </script>
 <template>
-  <dialog ref="dialog" aria-labelledby="preview-title" @cancel.prevent="!submitting && emit('close')">
-    <header class="panel-head"><h2 id="preview-title">Preview recount</h2><button class="close" aria-label="Close recount preview" :disabled="submitting" @click="emit('close')">×</button></header>
+  <dialog ref="dialog" aria-labelledby="preview-title" @cancel.prevent="!submitting && dismiss()">
+    <header class="panel-head"><h2 id="preview-title">Preview recount</h2><button class="close" aria-label="Close recount preview" :disabled="submitting" @click="dismiss">×</button></header>
     <div class="form-body">
       <label>Action scope<select v-model="mode" :disabled="submitting"><option value="selected" :disabled="!selected.length">Selected positions</option>
         <option value="matching">{{ hasFilters ? 'All matching positions' : 'Entire active inventory' }}</option></select></label>
@@ -107,7 +111,7 @@ async function confirm() {
         </div>
       </template>
       <p v-if="feedback" role="alert" class="warning">{{ feedback }}</p>
-      <div class="actions"><button :disabled="submitting" @click="emit('close')">Cancel</button><button class="primary" :disabled="!writable" @click="confirm">Queue recount</button></div>
+      <div class="actions"><button :disabled="submitting" @click="dismiss">Cancel</button><button class="primary" :disabled="!writable" @click="confirm">Queue recount</button></div>
     </div>
   </dialog>
 </template>
