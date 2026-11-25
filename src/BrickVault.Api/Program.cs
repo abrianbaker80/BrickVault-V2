@@ -138,8 +138,9 @@ try
         Save<StockLossCommand>(c, stockLosses.Save, ct, TransferCommand.MaxRequestBodyBytes));
     api.MapGet("/receiving/bins/{locationId:guid}/positions/{positionId:guid}/posted-loss",
         (Guid locationId, Guid positionId, Guid? caseId, Guid? observationId, Guid? postingId, Guid? commandId,
-            string? after, int? limit, CancellationToken ct) =>
-            stockLosses.Read(locationId, positionId, caseId, observationId, postingId, commandId, after, limit ?? 25, ct));
+            string? after, int? limit, bool? quarantine, string? quarantineAfter, int? quarantineLimit, CancellationToken ct) =>
+            stockLosses.Read(locationId, positionId, caseId, observationId, postingId, commandId, after, limit ?? 25, ct,
+                quarantine == true, quarantineAfter, quarantineLimit ?? 25));
     api.MapGet("/inventory/positions", (string? q, string? itemType, Guid? locationId, Guid? positionId, Guid? after, int? limit,
         bool? quarantine, CancellationToken ct) =>
         inventory.Search(q, itemType, locationId, positionId, after, limit ?? 25, ct, quarantine == true));
@@ -150,8 +151,9 @@ try
     api.MapGet("/inventory/receipt-lots/{deliveryId:guid}",
         (Guid deliveryId, string? positionAfter, string? eventAfter, int? positionLimit, int? eventLimit, bool? withdrawals, bool? quarantine, CancellationToken ct) =>
             receiptLots.Read(deliveryId, positionAfter, eventAfter, positionLimit ?? 25, eventLimit ?? 25, ct, withdrawals == true, quarantine == true));
-    api.MapGet("/inventory/positions/{positionId:guid}/quarantine", (Guid positionId, Guid? after, int? limit, CancellationToken ct) =>
-        quarantines.Snapshot(positionId, after, limit ?? 25, ct));
+    api.MapGet("/inventory/positions/{positionId:guid}/quarantine",
+        (Guid positionId, Guid? after, int? limit, bool? lossAttribution, CancellationToken ct) =>
+            quarantines.Snapshot(positionId, after, limit ?? 25, ct, lossAttribution == true));
     api.MapGet("/inventory/positions/{positionId:guid}/quarantine/receipts",
         (Guid positionId, Guid? receiptId, Guid? commandId, CancellationToken ct) =>
             quarantines.Evidence(positionId, receiptId, commandId, ct));

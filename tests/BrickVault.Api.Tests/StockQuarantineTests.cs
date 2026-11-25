@@ -277,10 +277,15 @@ public sealed class StockQuarantineTests
         Assert.Equal("used", nextEvidence.RecordedCatalog.Condition);
         Assert.Equal(item.Revision, (await Snapshot()).Position.Layer.CatalogRevision);
 
+        var foreignQuarantine = await Save(add with
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = inspected.Revision, PositionId = sibling.EntityId,
+            LocationId = b.Id, ConfirmedLocationCode = b.Code, CatalogRevision = edited.Revision, Quantity = 2
+        });
         var counts = new StockCounts(db);
         var observation = new StockCountCommand
         {
-            CommandId = Guid.NewGuid(), PurchaseId = purchase.EntityId, ExpectedRevision = inspected.Revision,
+            CommandId = Guid.NewGuid(), PurchaseId = purchase.EntityId, ExpectedRevision = foreignQuarantine.Revision,
             PositionId = origin.EntityId, LocationId = a.Id, ConfirmedLocationCode = a.Code, CountedQuantity = 6,
             Reason = "Aggregate witness does not identify quarantine pieces"
         };
@@ -326,5 +331,142 @@ public sealed class StockQuarantineTests
             Assert.Equal((quantity, 0, 4, 0), (noLoss.LatestObservation.CountedQuantity, noLoss.CandidateLossQuantity,
                 noLoss.OfferCapacityAfterLoss, noLoss.MinimumOfferBackingReduction));
         }
+
+        Task<Receipt> Witness(int expectedRevision, int quantity) => counts.Save(observation with
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = expectedRevision, CountedQuantity = quantity
+        }, Guid.NewGuid(), token);
+        var losses = new StockLosses(db);
+        StockLossCommand PrepareLoss(Receipt witness, Guid caseId) => new()
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = witness.Revision, PurchaseId = purchase.EntityId,
+            PositionId = origin.EntityId, LocationId = a.Id, ConfirmedLocationCode = a.Code, CaseId = caseId,
+            ExpectedObservationId = witness.EntityId, Reason = "Post witnessed fictional loss with explicit attribution",
+            OfferReductions = [], QuarantineAttributions = []
+        };
+        Task<Receipt> PostLoss(StockLossCommand request) => losses.Save(request, Guid.NewGuid(), token);
+        Task<StockLossSnapshot> ReadLoss(Receipt posting, bool quarantine = true, string? after = null, int limit = 25) =>
+            losses.Read(a.Id, origin.EntityId, null, null, posting.EntityId, null, null, 25, token, quarantine, after, limit);
+
+        var heldWitness = await Witness(revision, 3);
+        Assert.Equal("stock_loss_protected_shortfall",
+            await Reject(() => PostLoss(PrepareLoss(heldWitness, count.EntityId))));
+        var ordinaryWitness = await Witness(heldWitness.Revision, 6);
+        var ordinary = PrepareLoss(ordinaryWitness, count.EntityId);
+        Assert.Equal("stock_loss_offer_reduction_mismatch", await Reject(() => PostLoss(ordinary)));
+        Assert.Equal("stock_loss_quarantine_attribution_mismatch", await Reject(() => PostLoss(ordinary with
+        {
+            QuarantineAttributions = [new(foreignQuarantine.EntityId, 1)]
+        })));
+        var ordinaryPost = await PostLoss(ordinary with { OfferReductions = [new(offer.EntityId, 1)] });
+        var zeroAttributions = await ReadLoss(ordinaryPost);
+        Assert.True(zeroAttributions.QuarantineAttributionRecorded);
+        Assert.Equal((2, 2, 2, 3, 2), (zeroAttributions.QuarantinedQuantityBefore, zeroAttributions.QuarantinedQuantityAfter,
+            zeroAttributions.LostQuantity, zeroAttributions.OfferBackedQuantityBefore, zeroAttributions.OfferBackedQuantityAfter));
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<StockLossQuarantineAttribution>>(zeroAttributions.QuarantineAttributions));
+        Assert.Equal("quarantine_client_upgrade_required", await Reject(() => ReadLoss(ordinaryPost, false)));
+        Assert.All((await Snapshot()).Quarantines, row => Assert.Null(row.LostQuantity));
+
+        var attributedWitness = await Witness(ordinaryPost.Revision, 4);
+        var named = PrepareLoss(attributedWitness, attributedWitness.EntityId) with
+        {
+            QuarantineAttributions = [new(receipt.EntityId, 1), new(seized.EntityId, 1)]
+        };
+        Assert.Equal("invalid_stock_loss", await Reject(() => PostLoss(named with
+        {
+            QuarantineAttributions = [new(receipt.EntityId, 1), new(receipt.EntityId, 1)]
+        })));
+        Assert.Equal("stock_loss_quarantine_attribution_mismatch", await Reject(() => PostLoss(named with
+        {
+            QuarantineAttributions = [new(receipt.EntityId, 2)]
+        })));
+        Assert.Equal("stock_loss_offer_reduction_mismatch", await Reject(() => PostLoss(named with
+        {
+            OfferReductions = [new(additionalOffer.EntityId, 1)]
+        })));
+        var attributedReplays = await Task.WhenAll(PostLoss(named), PostLoss(named with
+        {
+            QuarantineAttributions = [new(seized.EntityId, 1), new(receipt.EntityId, 1)]
+        }));
+        var attributedPost = attributedReplays[0];
+        Assert.Equal(attributedPost, attributedReplays[1]);
+        Assert.Equal("command_mismatch", await Reject(() => PostLoss(named with { QuarantineAttributions = [] })));
+        var postedFirst = await ReadLoss(attributedPost, limit: 1);
+        Assert.True(postedFirst.QuarantineAttributionRecorded);
+        Assert.Equal((6, 4, 2, 2, 0, 2, 2, 2, 0), (postedFirst.LedgerQuantityBefore, postedFirst.LedgerQuantityAfter,
+            postedFirst.LostQuantity, postedFirst.QuarantinedQuantityBefore, postedFirst.QuarantinedQuantityAfter,
+            postedFirst.ProtectedProjectQuantity, postedFirst.OfferBackedQuantityBefore, postedFirst.OfferBackedQuantityAfter,
+            postedFirst.AllocatedItemCostMinor));
+        Assert.NotNull(postedFirst.NextQuarantineAfter);
+        var postedSecond = await ReadLoss(attributedPost, after: postedFirst.NextQuarantineAfter, limit: 1);
+        Assert.Null(postedSecond.NextQuarantineAfter);
+        var itemized = postedFirst.QuarantineAttributions!.Concat(postedSecond.QuarantineAttributions!)
+            .ToDictionary(line => line.QuarantineId);
+        foreach (var id in new[] { receipt.EntityId, seized.EntityId })
+            Assert.Equal(new StockLossQuarantineAttribution(id, 1, 1, 0), itemized[id]);
+        Assert.Equal("invalid_stock_loss_quarantine_cursor",
+            await Reject(() => ReadLoss(ordinaryPost, after: postedFirst.NextQuarantineAfter, limit: 1)));
+
+        Assert.Equal("quarantine_client_upgrade_required", await Reject(() => Snapshot()));
+        var exhausted = await quarantines.Snapshot(origin.EntityId, null, 25, token, lossAttribution: true);
+        Assert.Equal((4, 0, 2, 2), (exhausted.OnHandQuantity, exhausted.QuarantinedQuantity,
+            exhausted.HeldQuantity, exhausted.OfferBackedQuantity));
+        Assert.All(exhausted.Quarantines, row =>
+            Assert.Equal((2, 1, 1, 0), (row.Quantity, row.ReleasedQuantity, row.LostQuantity, row.RemainingQuantity)));
+        var unrelated = await quarantines.Snapshot(sibling.EntityId, null, 25, token, lossAttribution: true);
+        Assert.Equal((2, 0, 0), (unrelated.QuarantinedQuantity, Assert.Single(unrelated.Quarantines).LostQuantity,
+            unrelated.Quarantines[0].ReleasedQuantity));
+        var reread = await quarantines.Evidence(origin.EntityId, released.EntityId, null, token);
+        Assert.Equal(evidence with { AsOf = reread.AsOf }, reread);
+        Assert.Equal("quarantine_quantity_unavailable", await Reject(() => Save(release with
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = attributedPost.Revision, CatalogRevision = edited.Revision
+        })));
+        var postedTimeline = await timelines.Read(origin.EntityId, null, 100, token, withdrawals: true, quarantine: true);
+        var lossEvent = Assert.Single(postedTimeline.Events, row => row.Id == attributedPost.EntityId);
+        Assert.Equal(("stock-loss", -2, 0, 0), (lossEvent.Kind, lossEvent.PhysicalDelta, lossEvent.ReservedDelta, lossEvent.OfferBackedDelta));
+        Assert.Equal(2, postedTimeline.Events.Count(row => row.Kind == "quarantine-release"));
+        var lot = await lots.Read(zero.EntityId, null, null, 25, 25, token, withdrawals: true, quarantine: true);
+        Assert.Equal((4, 4, 0, 2, 2, 0), (lot.CurrentOnHandQuantity, lot.LostQuantity, lot.QuarantinedQuantity,
+            lot.HeldQuantity, lot.OfferBackedQuantity, lot.RemainingItemCostMinor));
+
+        var foreignWitness = await counts.Save(observation with
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = attributedPost.Revision, CountedQuantity = 1,
+            PositionId = sibling.EntityId, LocationId = b.Id, ConfirmedLocationCode = b.Code
+        }, Guid.NewGuid(), token);
+        var foreignLoss = PrepareLoss(foreignWitness, foreignWitness.EntityId) with
+        {
+            PositionId = sibling.EntityId, LocationId = b.Id, ConfirmedLocationCode = b.Code
+        };
+        // All stock in this position was quarantined, so there cannot be a one-unit ordinary loss.
+        Assert.Equal("stock_loss_quarantine_attribution_mismatch", await Reject(() => PostLoss(foreignLoss)));
+        var postedForeign = await PostLoss(foreignLoss with { QuarantineAttributions = [new(foreignQuarantine.EntityId, 1)] });
+        var foreignCountAgain = await counts.Save(observation with
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = postedForeign.Revision, CountedQuantity = 0,
+            PositionId = sibling.EntityId, LocationId = b.Id, ConfirmedLocationCode = b.Code
+        }, Guid.NewGuid(), token);
+        var postedForeignAgain = await PostLoss(PrepareLoss(foreignCountAgain, foreignCountAgain.EntityId) with
+        {
+            PositionId = sibling.EntityId, LocationId = b.Id, ConfirmedLocationCode = b.Code,
+            QuarantineAttributions = [new(foreignQuarantine.EntityId, 1)]
+        });
+        Task<StockLossSnapshot> ReadForeignLoss(Receipt posting, string? after = null) =>
+            losses.Read(b.Id, sibling.EntityId, null, null, posting.EntityId, null, null, 25, token, quarantine: true, quarantineAfter: after);
+        var firstForeign = await ReadForeignLoss(postedForeign);
+        var thenForeign = await ReadForeignLoss(postedForeignAgain);
+        Assert.Null(firstForeign.AllocatedItemCostMinor);
+        Assert.Null(thenForeign.RemainingDeliveryItemCostMinor);
+        Assert.Equal(new StockLossQuarantineAttribution(foreignQuarantine.EntityId, 1, 2, 1),
+            Assert.Single(firstForeign.QuarantineAttributions!));
+        Assert.Equal(new StockLossQuarantineAttribution(foreignQuarantine.EntityId, 1, 1, 0),
+            Assert.Single(thenForeign.QuarantineAttributions!));
+        var firstPostingAnchor = $"{postedForeign.EntityId:N}.{foreignQuarantine.EntityId:N}";
+        Assert.Empty((await ReadForeignLoss(postedForeign, firstPostingAnchor)).QuarantineAttributions!);
+        Assert.Equal("invalid_stock_loss_quarantine_cursor",
+            await Reject(() => ReadForeignLoss(postedForeignAgain, firstPostingAnchor)));
+        var depleted = await quarantines.Snapshot(sibling.EntityId, null, 25, token, lossAttribution: true);
+        Assert.Equal((0, 0, 2), (depleted.OnHandQuantity, depleted.QuarantinedQuantity, Assert.Single(depleted.Quarantines).LostQuantity));
     }
 }

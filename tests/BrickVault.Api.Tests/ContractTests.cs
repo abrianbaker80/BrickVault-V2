@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Npgsql;
@@ -18,6 +20,29 @@ public sealed class ContractTests
         Assert.Equal(first.Digest("location"), reordered.Digest("location"));
         Assert.NotEqual(first.Digest("location"), (first with { Name = "Other" }).Digest("location"));
         Assert.NotEqual(first.Digest("location"), first.Digest("catalog"));
+    }
+
+    [Fact]
+    public void StockLossUnknownAttributionRetainsLegacyDigestAndZeroIsAffirmative()
+    {
+        var stable = Guid.Parse(StableId);
+        var prior = new
+        {
+            CommandId = stable, PurchaseId = stable, ExpectedRevision = 7, PositionId = stable, LocationId = stable,
+            ConfirmedLocationCode = "A1", CaseId = stable, ExpectedObservationId = stable, Reason = "Witnessed fixture",
+            OfferReductions = new[] { new TransferBacking(stable, 1) }
+        };
+        var body = JsonSerializer.Serialize(prior, Wire.Json);
+        var legacyDigest = SHA256.HashData(Encoding.UTF8.GetBytes("stock-loss\n" + body));
+        var omitted = JsonSerializer.Deserialize<StockLossCommand>(body, Wire.Json)!;
+        var explicitNull = JsonSerializer.Deserialize<StockLossCommand>(body[..^1] + ",\"quarantineAttributions\":null}", Wire.Json)!;
+        var affirmativeZero = JsonSerializer.Deserialize<StockLossCommand>(body[..^1] + ",\"quarantineAttributions\":[]}", Wire.Json)!;
+        Assert.Equal(legacyDigest, omitted.Digest());
+        Assert.Equal(legacyDigest, explicitNull.Digest());
+        Assert.NotEqual(legacyDigest, affirmativeZero.Digest());
+        Assert.Empty(affirmativeZero.QuarantineAttributions!);
+        var tooMany = affirmativeZero with { QuarantineAttributions = [new(stable, 1_000_000)] };
+        Assert.Equal("invalid_stock_loss", Assert.Throws<Fault>(tooMany.Validate).Code);
     }
 
     [Theory]
@@ -54,7 +79,7 @@ public sealed class ContractTests
     {
         using var db = NpgsqlDataSource.Create("Host=127.0.0.1");
         var origin = "https://localhost:443";
-        var gateway = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var gateway = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var sessions = new Sessions(db, new GatewaySettings(origin, gateway, new byte[32],
             new IPEndPoint(IPAddress.Loopback, 0), Guid.NewGuid()));
         var ctx = new DefaultHttpContext();

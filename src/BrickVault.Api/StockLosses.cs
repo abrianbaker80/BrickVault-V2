@@ -28,6 +28,21 @@ internal sealed class StockLosses(NpgsqlDataSource db)
                 command.Reason))
                 await posting.ExecuteNonQueryAsync(token);
 
+            if (command.QuarantineAttributions is { } selected)
+            {
+                await using var review = Query(connection, tx,
+                    "INSERT INTO brickvault.stock_loss_quarantine_reviews(loss_id) VALUES ($1)", id);
+                await review.ExecuteNonQueryAsync(token);
+                if (selected.Length > 0)
+                {
+                    await using var attribution = Query(connection, tx, """
+                        INSERT INTO brickvault.stock_loss_quarantine_attributions(loss_id,quarantine_id,quantity)
+                        SELECT $1,quarantine_id,quantity FROM unnest($2::uuid[],$3::integer[]) AS chosen(quarantine_id,quantity)
+                        """, id, selected.Select(line => line.QuarantineId).ToArray(), selected.Select(line => line.Quantity).ToArray());
+                    await attribution.ExecuteNonQueryAsync(token);
+                }
+            }
+
             if (command.OfferReductions.Length != 0)
             {
                 await using var reductions = Query(connection, tx, """
@@ -47,7 +62,7 @@ internal sealed class StockLosses(NpgsqlDataSource db)
             "stock_loss_revision" or "stock_loss_position_mismatch" or "stock_loss_bin_confirmation_mismatch" or
             "stock_loss_case_conflict" or "stock_loss_observation_conflict" or "stock_loss_no_loss" or
             "stock_loss_protected_shortfall" or "stock_loss_offer_reduction_mismatch" or "stock_loss_quarantine_unresolved" or
-            "stock_loss_offer_reductions_offer_id_fkey")
+            "stock_loss_offer_reductions_offer_id_fkey" or "stock_loss_quarantine_attribution_mismatch")
         {
             throw ex.ConstraintName switch
             {
@@ -57,8 +72,10 @@ internal sealed class StockLosses(NpgsqlDataSource db)
                 "stock_loss_case_conflict" => Conflict(ex.ConstraintName, "This shortage is no longer open for the selected position."),
                 "stock_loss_observation_conflict" => Conflict(ex.ConstraintName, "Reload the shortage and review the latest witness at the current ledger quantity."),
                 "stock_loss_no_loss" => Conflict(ex.ConstraintName, "The latest witnessed quantity does not support posting a loss."),
-                "stock_loss_protected_shortfall" => Conflict(ex.ConstraintName, "The counted units cannot cover the protected holds. Review those holds before posting."),
-                "stock_loss_quarantine_unresolved" => Conflict(ex.ConstraintName, "An aggregate count cannot locate the loss among quarantined and ordinary units. Preserve the quarantine until itemized witness is recorded."),
+                "stock_loss_protected_shortfall" => Conflict(ex.ConstraintName, "The counted units outside remaining quarantine cannot cover the protected holds. Review the attribution and those holds before posting."),
+                "stock_loss_quarantine_unresolved" => Conflict(ex.ConstraintName, "Confirm zero quarantined units missing or identify the missing quantity on each affected quarantine receipt."),
+                "stock_loss_quarantine_attribution_mismatch" => Conflict(ex.ConstraintName,
+                    "Attribute only witnessed missing units on active quarantine receipts at this position. Reconcile the ordinary and quarantined quantities."),
                 _ => Conflict("stock_loss_offer_reduction_mismatch", "Choose exact reductions for offers backed at this position up to the required total.")
             };
         }
@@ -67,12 +84,14 @@ internal sealed class StockLosses(NpgsqlDataSource db)
     private static Fault Conflict(string code, string message) => new(409, code, message);
 
     public async Task<StockLossSnapshot> Read(Guid locationId, Guid positionId, Guid? caseId, Guid? observationId,
-        Guid? postingId, Guid? commandId, string? after, int limit, CancellationToken token)
+        Guid? postingId, Guid? commandId, string? after, int limit, CancellationToken token,
+        bool quarantine = false, string? quarantineAfter = null, int quarantineLimit = 25)
     {
         var selectors = new[] { caseId, observationId, postingId, commandId }.Count(id => id.HasValue);
-        if (selectors != 1 || limit is < 1 or > 100)
+        if (selectors != 1 || limit is < 1 or > 100 || quarantineLimit is < 1 or > 100 ||
+            (!quarantine && quarantineAfter is not null))
             throw new Fault(400, "invalid_stock_loss_lookup",
-                "Select exactly one case, observation, posting or command and an offer page size from 1 to 100.");
+                "Select exactly one case, observation, posting or command and use page sizes from 1 to 100.");
 
         await using var connection = await db.OpenConnectionAsync(token);
         await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
@@ -97,8 +116,11 @@ internal sealed class StockLosses(NpgsqlDataSource db)
                 l.ledger_quantity_before,l.lost_quantity,l.protected_project_quantity,l.offer_backed_quantity_before,
                 l.prior_delivery_loss_quantity,l.allocated_item_cost_minor,l.remaining_delivery_item_cost_minor,
                 d.id,d.reference,d.quantity,d.item_cost_minor,buy.currency,p.origin_placement_id,p.catalog_id,p.catalog_revision,
-                COALESCE((SELECT sum(r.quantity) FROM brickvault.stock_loss_offer_reductions r WHERE r.loss_id=l.id),0)::integer
+                COALESCE((SELECT sum(r.quantity) FROM brickvault.stock_loss_offer_reductions r WHERE r.loss_id=l.id),0)::integer,
+                q.quarantined_quantity_before,
+                COALESCE((SELECT sum(qa.quantity) FROM brickvault.stock_loss_quarantine_attributions qa WHERE qa.loss_id=l.id),0)::integer
             FROM brickvault.stock_loss_postings l JOIN brickvault.commands c ON c.command_id=l.command_id
+            LEFT JOIN brickvault.stock_loss_quarantine_reviews q ON q.loss_id=l.id
             JOIN brickvault.audit a ON a.command_id=l.command_id
             JOIN brickvault.locations loc ON loc.id=l.location_id
             JOIN brickvault.deliveries d ON d.id=l.delivery_id
@@ -112,11 +134,12 @@ internal sealed class StockLosses(NpgsqlDataSource db)
                 Loss: r.GetInt32(15), Protected: r.GetInt32(16), BackedBefore: r.GetInt32(17), PriorLoss: r.GetInt32(18),
                 AllocatedCost: Optional<int>(r,19), RemainingCost: Optional<int>(r,20),
                 Receipt: new AdjustmentReceiptEvidence(r.GetGuid(21), r.GetString(22), r.GetInt32(23), Optional<int>(r,24),
-                    r.GetString(25), r.GetGuid(26), r.GetGuid(27), r.GetInt32(28)), Reduction: r.GetInt32(29)),
+                    r.GetString(25), r.GetGuid(26), r.GetGuid(27), r.GetInt32(28)), Reduction: r.GetInt32(29), QuarantineBefore: Optional<int>(r,30), QuarantineLoss: r.GetInt32(31)),
             token, locationId, positionId, selector);
         if (postings.Count == 0)
             throw new Fault(404, "unknown_stock_loss", "No matching posted stock loss belongs to this receipt position and bin.");
         var row = postings.Single();
+        if (!quarantine && row.QuarantineBefore > 0) throw StockQuarantines.Upgrade();
         var reviewed = (await Rows(connection, tx, StockCounts.ObservationProjection + " WHERE n.id=$1",
             StockCounts.ReadObservation, token, row.Observation)).Single();
 
@@ -133,24 +156,63 @@ internal sealed class StockLosses(NpgsqlDataSource db)
             reductions.RemoveAt(limit);
             next = $"{row.Id:N}.{reductions[^1].OfferId:N}";
         }
+        IReadOnlyList<StockLossQuarantineAttribution>? attributions = null;
+        string? nextQuarantine = null;
+        if (quarantine)
+        {
+            Guid? attributionAnchor = null;
+            if (quarantineAfter is not null)
+            {
+                if (!TryScopedCursor(quarantineAfter, row.Id, out var anchorId)) throw InvalidQuarantineCursor();
+                await using var anchor = Query(connection, tx, """
+                    SELECT 1 FROM brickvault.stock_loss_quarantine_attributions WHERE loss_id=$1 AND quarantine_id=$2
+                    """, row.Id, anchorId);
+                if (await anchor.ExecuteScalarAsync(token) is null) throw InvalidQuarantineCursor();
+                attributionAnchor = anchorId;
+            }
+            var page = await Rows(connection, tx, """
+                SELECT quarantine_id,quantity,prior_remaining_quantity
+                FROM brickvault.stock_loss_quarantine_attributions
+                WHERE loss_id=$1 AND ($2::uuid IS NULL OR quarantine_id>$2)
+                ORDER BY quarantine_id LIMIT $3
+                """, r => new StockLossQuarantineAttribution(r.GetGuid(0),r.GetInt32(1),r.GetInt32(2),r.GetInt32(2)-r.GetInt32(1)),
+                token, row.Id, Nullable(NpgsqlDbType.Uuid, attributionAnchor), quarantineLimit + 1);
+            if (page.Count > quarantineLimit)
+            {
+                page.RemoveAt(quarantineLimit);
+                nextQuarantine = $"{row.Id:N}.{page[^1].QuarantineId:N}";
+            }
+            attributions = page;
+        }
         return new StockLossSnapshot("stock-loss-posting", row.AsOf, true, row.Location, positionId, row.Case,
             row.Purchase, row.Id, row.Command, row.Correlation, row.Revision, reviewed, row.Receipt, row.LocationCode,
             row.Reason, row.At, row.LedgerBefore, row.LedgerBefore-row.Loss, row.Loss, row.Protected, row.BackedBefore,
-            row.BackedBefore-row.Reduction, row.PriorLoss, row.AllocatedCost, row.RemainingCost, reductions, next);
+            row.BackedBefore-row.Reduction, row.PriorLoss, row.AllocatedCost, row.RemainingCost, reductions, next,
+            quarantine ? row.QuarantineBefore.HasValue : null, quarantine ? row.QuarantineBefore ?? 0 : null,
+            quarantine ? (row.QuarantineBefore ?? 0)-row.QuarantineLoss : null, attributions, nextQuarantine);
     }
 
     private static async Task<Guid?> CheckCursor(NpgsqlConnection connection, NpgsqlTransaction tx,
         Guid id, string? after, CancellationToken token)
     {
         if (after is null) return null;
-        if (after.Length != 65 || after[32] != '.' || !Guid.TryParseExact(after.AsSpan(0,32), "N", out var posting) ||
-            posting != id || !Guid.TryParseExact(after.AsSpan(33), "N", out var offer)) throw InvalidCursor();
+        if (!TryScopedCursor(after, id, out var offer)) throw InvalidCursor();
         await using var match = Query(connection, tx, """
             SELECT 1 FROM brickvault.stock_loss_offer_reductions WHERE loss_id=$1 AND offer_id=$2
             """, id, offer);
         if (await match.ExecuteScalarAsync(token) is null) throw InvalidCursor();
         return offer;
     }
+
+    private static bool TryScopedCursor(string cursor, Guid id, out Guid anchor)
+    {
+        anchor = default;
+        return cursor.Length == 65 && cursor[32] == '.' && Guid.TryParseExact(cursor.AsSpan(0,32), "N", out var posting) &&
+            posting == id && Guid.TryParseExact(cursor.AsSpan(33), "N", out anchor);
+    }
+
+    private static Fault InvalidQuarantineCursor() =>
+        new(400, "invalid_stock_loss_quarantine_cursor", "Use the next attribution cursor from this posted loss.");
 
     private static Fault InvalidCursor() =>
         new(400, "invalid_stock_loss_cursor", "Use the next reduction cursor from this posted stock loss.");
