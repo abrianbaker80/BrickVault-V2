@@ -208,6 +208,16 @@ def migration_test(s):
         "An interrupted stock loss upgrade changed the previous build-hold database.",
     )
     s.sql("DROP TABLE brickvault.stock_loss_offer_reductions;", db, "bv_migrator")
+    s.migrate(db, to=7)
+    s.sql("CREATE TABLE brickvault.recount_results(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "7"
+        and s.sql("SELECT to_regclass('brickvault.recount_previews') IS NULL", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted recount upgrade changed the stock-loss database.",
+    )
+    s.sql("DROP TABLE brickvault.recount_results;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -221,11 +231,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "7",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "8",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v7, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v8, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -269,7 +279,7 @@ def qualify_staged_upgrade(lab, port, source_version):
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "7"), (original, str(source_version))):
+    for inst, schema in ((candidate, "8"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -600,7 +610,7 @@ def verify(port):
     qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in (2, 3, 4, 5, 6):
+        for source_version in (2, 3, 4, 5, 6, 7):
             qualify_staged_upgrade(lab, port, source_version)
         runtime_dir = lab / "runtime"
         runtime_dir.mkdir()
@@ -877,6 +887,7 @@ def verify(port):
             from verify_holds import qualify_holds, verify_restored_holds
             from verify_losses import qualify_loss, verify_restored_loss
             from verify_timeline import verify_timeline
+            from verify_receipt_lots import verify_receipt_lots
 
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
@@ -885,6 +896,7 @@ def verify(port):
             holds = qualify_holds(first, rec["entityId"])
             loss = qualify_loss(first, rec["entityId"])
             timeline = verify_timeline(first, loss)
+            lots = verify_receipt_lots(first, receiving, transfer, loss)
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -1045,6 +1057,8 @@ def verify(port):
                 verify_restored_loss(recovered, loss)
                 require(verify_timeline(recovered, loss) == timeline,
                         "Restored timeline differed from the original count, stock loss or offer and hold history.")
+                require(verify_receipt_lots(recovered, receiving, transfer, loss) == lots,
+                        "Restored receipt-lot history, costs or positions differed.")
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]
