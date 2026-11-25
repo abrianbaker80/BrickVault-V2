@@ -41,7 +41,7 @@ Use the positions list to inspect a bin, including a position that has reached z
 
 In Inventory, select individual positions or use all matches for the active filters. Review the preview before confirming. The preview freezes the position IDs and revisions across pages. Positions that start matching after the preview belong to a new preview. The batch receipt shows which targets entered the queue, which changed, which already had a pending recount and which were unavailable.
 
-Open the recount queue to locate a position, verify its bin and record the witnessed quantity through the existing stock-count workflow. The receipt links the queued position to that observation. If all units move out before the count, the queue identifies the depleted position and its history. Queuing a task preserves physical stock, offer backing and build holds. [Recount and lot qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/31)
+Open the recount queue to locate a position, verify its bin and record the witnessed quantity through the existing stock-count workflow. The receipt links the queued position to that observation. If all units move out before anyone counts them, the task leaves the pending queue. Its batch receipt identifies the depleted position and links to its history. Queuing a task preserves physical stock, offer backing and build holds. [Recount and lot qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/31)
 
 ## Witness a stock count and review a shortage
 

@@ -12,6 +12,7 @@ test('a position opens its whole receipt lot and transfer ends remain inspectabl
     backing: [{offerId:f.firstOffer,quantity:1}]
   })
   await page.setViewportSize({width:420,height:820})
+  await f.revise()
   await page.goto('/#inventory/' + f.position)
   await page.getByRole('link', {name:'Inspect receipt lot'}).click()
   const lot = page.getByRole('dialog', {name:'Receipt lot inspector'})
@@ -19,6 +20,9 @@ test('a position opens its whole receipt lot and transfer ends remain inspectabl
   await expect(lot.getByText('USD 12.34', {exact:true})).toHaveCount(1)
   await expect(lot.getByText('In positions', {exact:true}).locator('+ dd')).toHaveText('8')
   await expect(lot.getByRole('region', {name:'Receipt lot positions'}).getByRole('listitem')).toHaveCount(3)
+  const positions = lot.getByRole('region', {name:'Receipt lot positions'})
+  await expect(positions.getByText('Recorded at catalog revision 1. Item details show current revision 2.')).toHaveCount(3)
+  await expect(positions.getByText(/Reidentified plate/)).toHaveCount(3)
   await expect(lot.getByText('Transfer within lot', {exact:true})).toHaveCount(1)
   await expect(lot.getByText('2 moved from ' + f.a.code + ' to ' + f.empty.code + ' · 1 backed')).toBeVisible()
   await expect(lot.getByRole('link', {name:'Inspect source position'})).toHaveAttribute('href', '#inventory/' + f.position)

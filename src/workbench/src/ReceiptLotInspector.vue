@@ -104,6 +104,9 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
           <li v-for="{ layer, location } in page.positions" :key="layer.placementId">
             <strong>{{ location.code }} · {{ location.name }}</strong>
             <p>{{ layer.currentCatalog.name }} · {{ layer.quantity }} positioned · {{ layer.backedQuantity }} backed</p>
+            <p v-if="layer.catalogRevision !== layer.currentCatalog.revision" class="warning">
+              Recorded at catalog revision {{ layer.catalogRevision }}. Item details show current revision {{ layer.currentCatalog.revision }}.
+            </p>
             <a :href="'#inventory/' + layer.placementId" @click.exact.prevent="emit('inspect', layer.placementId)">Inspect position in {{ location.code }}</a>
           </li>
         </ul>
