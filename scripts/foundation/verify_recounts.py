@@ -9,6 +9,30 @@ from verify_receiving import post, purchase_row
 ROOT = "inventory/recounts"
 
 
+def seed_prior_recount(instance, position):
+    """Queue a version-8 target before the upgrade fixture records its witnessed count."""
+    preview, command = uuid4(), uuid4()
+    instance.sql(f"""
+        BEGIN;
+        INSERT INTO brickvault.recount_previews(id,mode,digest)
+            VALUES ('{preview}','selected',decode(repeat('00',32),'hex'));
+        INSERT INTO brickvault.recount_preview_targets(preview_id,position_id,purchase_id,catalog_id,location_id,
+            purchase_reference,delivery_reference,item_name,location_code,purchase_revision,catalog_revision,location_revision,quantity)
+        SELECT '{preview}',p.id,p.purchase_id,p.catalog_id,p.location_id,
+               buy.reference,d.reference,c.name,l.code,buy.revision,c.revision,l.revision,p.quantity
+        FROM brickvault.current_placement_stock p JOIN brickvault.purchases buy ON buy.id=p.purchase_id
+        JOIN brickvault.deliveries d ON d.id=p.delivery_id JOIN brickvault.catalog c ON c.id=p.catalog_id
+        JOIN brickvault.locations l ON l.id=p.location_id WHERE p.id='{position}';
+        INSERT INTO brickvault.commands(command_id,kind,digest,entity_id,revision,correlation_id)
+            VALUES ('{command}','recount',decode(repeat('00',32),'hex'),'{preview}',1,gen_random_uuid());
+        INSERT INTO brickvault.audit(command_id,actor) VALUES ('{command}','operator');
+        INSERT INTO brickvault.recount_batches(id,command_id) VALUES ('{preview}','{command}');
+        INSERT INTO brickvault.recount_results(batch_id,position_id,outcome,queue_batch_id)
+            VALUES ('{preview}','{position}','queued','{preview}');
+        COMMIT;
+    """, role="bv_migrator")
+
+
 def read_rows(client, path):
     query = {"limit": 1}
     rows, seen = [], set()

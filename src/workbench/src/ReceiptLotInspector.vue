@@ -2,7 +2,7 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, explain } from './api'
 import type { ReceiptLot, TimelineEvent } from './api'
-import { countReceiptLink, lossReceiptLink } from './countLinks'
+import { countReceiptLink, draftBackingLink, lossReceiptLink } from './countLinks'
 import { time } from './presentation'
 import { money } from './receiving'
 
@@ -52,7 +52,7 @@ function pageBy(list: keyof Cursors, cursor?: string) {
 const titles: Record<TimelineEvent['kind'], string> = {
   'putaway': 'Put away', 'transfer-in': 'Transfer within lot', 'transfer-out': 'Transfer within lot',
   'count': 'Count witnessed', 'hold': 'Build hold placed', 'hold-release': 'Build hold released',
-  'stock-loss': 'Stock loss posted', 'offer-backing': 'Offer backing added',
+  'offer-withdrawal': 'Draft offer backing withdrawn', 'stock-loss': 'Stock loss posted', 'offer-backing': 'Offer backing added',
 }
 function signed(value: number) { return value > 0 ? '+' + value : String(value) }
 </script>
@@ -135,7 +135,8 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
               <p v-if="event.offerBackedDelta">{{ signed(event.offerBackedDelta) }} backed</p>
               <p v-if="event.kind === 'count'">{{ event.quantity }} observed · {{ event.ledgerQuantityAtWitness }} recorded at count</p>
               <p v-if="event.locationCodeAtEvent">Recorded bin {{ event.locationCodeAtEvent }}</p>
-              <a v-if="event.kind === 'count' && event.observationId" :href="countReceiptLink(event.locationId, event.observationId)">View count receipt</a>
+              <a v-if="event.kind === 'offer-withdrawal'" :href="draftBackingLink(event.locationId,positionId,'receipts',event.id)">View withdrawal receipt</a>
+          <a v-if="event.kind === 'count' && event.observationId" :href="countReceiptLink(event.locationId, event.observationId)">View count receipt</a>
               <a v-if="event.kind === 'stock-loss' && event.postingId" :href="lossReceiptLink(event.locationId, positionId, event.postingId)">View posted loss receipt</a>
               <a :href="'#inventory/' + positionId" @click.exact.prevent="emit('inspect', positionId)">Inspect event position</a>
             </template>

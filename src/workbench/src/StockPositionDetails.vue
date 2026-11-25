@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { StockPosition } from './api'
-import { countPositionLink } from './countLinks'
+import { countPositionLink, draftBackingLink } from './countLinks'
 import { money } from './receiving'
 import { label, time } from './presentation'
 
@@ -22,6 +22,7 @@ const layer = computed(() => props.record.layer)
       <dt>Unbacked</dt><dd>{{ layer.unbackedQuantity }}</dd><dt>Available to back</dt><dd>{{ layer.freeToBackQuantity }}</dd>
     </dl>
     <p><a :href="countPositionLink(record.location.id, layer.placementId)">Inspect counts and stock-loss receipts</a></p>
+    <p><a :href="draftBackingLink(record.location.id,layer.placementId)">Review draft offer backing at this position</a></p>
     <h3>Receipt provenance</h3><dl class="details">
       <dt>Purchase</dt><dd>{{ layer.purchaseReference }}</dd><dt>Delivery</dt><dd>{{ layer.deliveryReference }}</dd>
       <dt>Whole delivery</dt><dd>{{ layer.receiptQuantity }} units</dd><dt>Whole-delivery item cost</dt>

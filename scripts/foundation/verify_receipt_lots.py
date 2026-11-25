@@ -3,9 +3,11 @@
 from urllib.parse import urlencode
 
 
-def read_lot(client, delivery_id):
+def read_lot(client, delivery_id, *, withdrawals=False):
     path = f"inventory/receipt-lots/{delivery_id}"
     limits = {"positionLimit": 1, "eventLimit": 2}
+    if withdrawals:
+        limits["withdrawals"] = "true"
     first = client.call(path + "?" + urlencode(limits))
     assert first["complete"] and first["scope"] == "receipt-lot" and first["deliveryId"] == delivery_id
     variable = {"asOf", "positions", "events", "nextPositionAfter", "nextEventAfter"}

@@ -135,6 +135,7 @@ function openForm() {
           <p v-if="journalError" class="warning" role="alert">{{ journalError }}</p>
           <div v-if="notice" class="success" role="status"><strong>{{ notice.message }}</strong>
             <div>Correlation ID {{ notice.correlationId }}</div>
+            <a v-if="notice.withdrawalLink" :href="notice.withdrawalLink">View withdrawal receipt</a>
             <a v-if="notice.recountLink" :href="notice.recountLink">View recount receipt</a>
             <a v-if="notice.lossLink" :href="notice.lossLink">View posted stock loss</a>
             <a v-if="notice.countLink" :href="notice.countLink">View count receipt</a></div>
@@ -168,7 +169,7 @@ function openForm() {
               <Receiving v-if="receiving" :key="session.workspaceId" :stock="receiving" :workspace="workspace" :workspace-id="session.workspaceId" :enabled="canCreate" :uncertain="pending.length > 0 && !submitting" :dispatch="record" />
               <p v-else role="status">{{ readState === 'loading' ? 'Loading receiving records…' : 'Receiving records are unavailable.' }}</p>
             </template>
-            <Register v-else :key="session.workspaceId + page" :page="page" :workspace="workspace" :connected="readState !== 'disconnected'"
+            <Register v-else :key="session.workspaceId + page" :page="page" :workspace="workspace" :connected="readState !== 'disconnected'" :workspace-ready="readState === 'ready'"
               :transfers="{ enabled: canCreate, pending: pending.length > 0, feedback: error || journalError, workspaceId: session.workspaceId, dispatch: record }"
               :count-link="countLink" :confirmed-source-id="notice?.sourceLocationId" @failure="expired" />
           </div>
