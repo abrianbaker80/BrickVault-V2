@@ -2,7 +2,7 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, explain } from './api'
 import type { ReceiptLot, TimelineEvent } from './api'
-import { closureLink, countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink } from './countLinks'
+import { closureLink, countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink, recoveryLink } from './countLinks'
 import { time } from './presentation'
 import { money } from './receiving'
 
@@ -53,7 +53,7 @@ const titles: Record<TimelineEvent['kind'], string> = {
   'putaway': 'Put away', 'transfer-in': 'Transfer within lot', 'transfer-out': 'Transfer within lot',
   'count': 'Count witnessed', 'hold': 'Build hold placed', 'hold-release': 'Build hold released',
   'quarantine': 'Quarantined in bin', 'quarantine-release': 'Released after inspection',
-  'offer-withdrawal': 'Draft offer backing withdrawn',
+  'offer-withdrawal': 'Draft offer backing withdrawn', 'stock-loss-recovery': 'Recovered after inspection',
   'shortage-closure': 'Shortage closed after exact recount', 'stock-loss': 'Stock loss posted', 'offer-backing': 'Offer backing added',
 }
 function signed(value: number) { return value > 0 ? '+' + value : String(value) }
@@ -79,14 +79,16 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
         <dt>Originally received</dt><dd>{{ page.receivedQuantity }}</dd>
         <dt>Received but unplaced</dt><dd>{{ page.unplacedQuantity }}</dd>
         <dt>In positions</dt><dd>{{ page.positionedQuantity }}</dd>
-        <dt>Posted loss</dt><dd>{{ page.lostQuantity }}</dd>
+        <template v-if="page.recoveryTotals?.recoveredQuantity"><dt>Gross posted loss</dt><dd>{{ page.recoveryTotals.grossLostQuantity }}</dd><dt>Recovered after inspection</dt><dd>{{ page.recoveryTotals.recoveredQuantity }}</dd>
+          <dt>Net still missing</dt><dd>{{ page.lostQuantity }}</dd><dt>Gross loss cost</dt><dd>{{ money(page.recoveryTotals.grossAllocatedItemCostMinor,page.currency) }}</dd><dt>Restored item cost</dt><dd>{{ money(page.recoveryTotals.restoredItemCostMinor,page.currency) }}</dd></template>
+        <template v-else><dt>Posted loss</dt><dd>{{ page.lostQuantity }}</dd></template>
         <dt>Current on hand</dt><dd>{{ page.currentOnHandQuantity }}</dd>
         <template v-if="page.quarantinedQuantity"><dt>Quarantined in bins</dt><dd>{{ page.quarantinedQuantity }}</dd></template>
         <dt>Held for builds</dt><dd>{{ page.heldQuantity }}</dd>
         <dt>Backed by offers</dt><dd>{{ page.offerBackedQuantity }}</dd>
         <dt>Available to back</dt><dd>{{ page.freeToBackQuantity }}</dd>
         <dt>Whole-delivery item cost</dt><dd>{{ money(page.itemCostMinor, page.currency) }}<template v-if="page.itemCostMinor === null"> ({{ page.currency }})</template></dd>
-        <template v-if="page.lostQuantity && page.itemCostMinor !== null">
+        <template v-if="(page.lostQuantity || page.recoveryTotals?.recoveredQuantity) && page.itemCostMinor !== null">
           <dt>Item cost allocated to loss</dt><dd>{{ money(page.allocatedLostItemCostMinor, page.currency) }}</dd>
           <dt>Remaining item basis</dt><dd>{{ money(page.remainingItemCostMinor, page.currency) }}</dd>
         </template>
@@ -145,7 +147,8 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
               <a v-if="event.kind === 'offer-withdrawal'" :href="draftBackingLink(event.locationId,positionId,'receipts',event.id)">View withdrawal receipt</a>
               <a v-if="event.kind === 'count' && event.observationId" :href="countReceiptLink(event.locationId, event.observationId)">View count receipt</a>
               <a v-if="event.kind==='shortage-closure' && event.caseId" :href="closureLink(event.locationId,positionId,event.caseId,'receipt',event.id)">View shortage closure receipt</a>
-          <a v-if="event.kind === 'stock-loss' && event.postingId" :href="lossReceiptLink(event.locationId, positionId, event.postingId)">View posted loss receipt</a>
+              <template v-if="event.kind === 'stock-loss-recovery' && event.postingId"><a :href="recoveryLink(event.locationId, positionId, event.postingId, event.id)">View stock recovery receipt</a><small v-if="event.quarantineDelta">{{ event.quarantineDelta }} returned to quarantine</small></template>
+              <a v-if="event.kind === 'stock-loss' && event.postingId" :href="lossReceiptLink(event.locationId, positionId, event.postingId)">View posted loss receipt</a>
               <a :href="'#inventory/' + positionId" @click.exact.prevent="emit('inspect', positionId)">Inspect event position</a>
             </template>
             <p v-if="event.reason">{{ event.reason }}</p>

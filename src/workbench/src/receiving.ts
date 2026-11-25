@@ -17,8 +17,14 @@ function currencyFormat(currency: string) {
 function fractionDigits(currency: string) {
   return currencyFormat(currency).resolvedOptions().maximumFractionDigits ?? 2
 }
-export function money(minor: number | null, currency: string) {
-  return minor === null ? 'Unknown' : currencyFormat(currency).format(minor / 10 ** fractionDigits(currency))
+export function money(minor: number | string | null, currency: string) {
+  if (minor === null) return 'Unknown'
+  const digits = fractionDigits(currency)
+  const format = currencyFormat(currency)
+  if (typeof minor === 'number') return format.format(minor / 10 ** digits)
+  const amount = minor.padStart(digits+1, '0')
+  const whole = digits ? amount.slice(0,-digits) : amount
+  return format.formatToParts(BigInt(whole)).map(part=>part.type==='fraction' ? amount.slice(-digits) : part.value).join('')
 }
 export function parseMoney(text: string, currency: string) {
   const digits = fractionDigits(currency)

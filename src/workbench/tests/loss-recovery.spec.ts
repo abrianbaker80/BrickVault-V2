@@ -1,0 +1,211 @@
+import { expect, type Page } from '@playwright/test'
+import { test } from './trusted'
+import { audit, fixture, purchases } from './bin-fixture'
+import { lossReceiptLink, recoveryLink } from '../src/countLinks'
+import { money } from '../src/receiving'
+import type { RecoveryCommand, RecoveryEvidence } from '../src/api'
+
+async function posted(page: Page, quantity: number, cost: number|null, named: number) {
+  const f=await fixture(page)
+  const purchaseId=await f.write('receiving/purchases',0,{reference:'FOUND-'+f.a.code,source:'Fictional supplier',currency:'USD',orderedQuantity:quantity,pendingChargeMinor:null})
+  const deliveryId=await f.write('receiving/deliveries',1,{purchaseId,reference:'Inspection tray',quantity,itemCostMinor:cost,catalogId:f.catalogId})
+  const positionId=await f.write('receiving/putaway',2,{purchaseId,deliveryId,catalogId:f.catalogId,locationId:f.a.id,confirmedLocationCode:f.a.code,quantity})
+  const base={purchaseId,locationId:f.a.id,confirmedLocationCode:f.a.code,positionId}
+  const attributions:{quarantineId:string;quantity:number}[]=[]
+  let revision=3
+  for(let i=0;i<named;i++){
+    const id=await f.write('inventory/quarantines',revision++,{...base,catalogId:f.catalogId,catalogRevision:1,reason:'Chipped edge '+(i+1),quantity:1})
+    attributions.push({quarantineId:id,quantity:1})
+  }
+  const observation=await f.write('receiving/counts',revision++,{...base,countedQuantity:0,reason:'Empty position witnessed'})
+  const posting=await f.write('receiving/stock-losses',revision++,{...base,caseId:observation,expectedObservationId:observation,
+    reason:'Position empty after inspection',offerReductions:[],quarantineAttributions:attributions})
+  return {f,positionId,purchaseId,deliveryId,posting,revision,attributions,base,link:(id?:string)=>recoveryLink(f.a.id,positionId,posting,id)}
+}
+const inspect=(page:Page)=>page.getByRole('dialog',{name:'Inspect recovered pieces',exact:true})
+const receipt=(page:Page)=>page.getByRole('dialog',{name:'Stock recovery receipt',exact:true})
+const record=(page:Page)=>inspect(page).getByRole('button',{name:'Record inspected recovery'})
+const source=(page:Page,id?:string)=>inspect(page).getByRole('group',{name:'Inspection of '+(id ?? 'ordinary stock'),exact:true})
+const writeRoute='**/api/v1/receiving/stock-loss-recoveries'
+async function confirm(page:Page,bin:string,reason:string) {
+  await inspect(page).getByLabel('Confirm physical bin code').fill(bin)
+  await inspect(page).getByLabel('Inspection findings and reason').fill(reason)
+  await inspect(page).getByRole('checkbox',{name:/I inspected these pieces/}).check()
+}
+
+test('inspect physically found ordinary and damaged pieces from a depleted position and release only the new quarantine',async ({page},info)=>{
+  const x=await posted(page,4,7,1), q=x.attributions[0].quarantineId
+  await page.goto('/'+lossReceiptLink(x.f.a.id,x.positionId,x.posting))
+  const entry=page.getByRole('link',{name:'Inspect recovered pieces and review prior recoveries'})
+  await entry.focus(); await page.keyboard.press('Enter')
+  const form=inspect(page)
+  await expect(form.locator('dl').first().locator('dd')).toHaveText(['4','0','4','0','USD 0.07','USD 0.00','USD 0.07'])
+  await expect(form.getByRole('checkbox')).not.toBeChecked()
+  await expect(source(page).getByLabel('Saleable quantity')).toHaveValue('')
+  await expect(source(page,q).getByLabel('Quarantine quantity')).toHaveValue('')
+  await source(page).getByLabel('Quarantine quantity').fill('1')
+  await source(page,q).getByLabel('Saleable quantity').fill('1')
+  await confirm(page,x.f.b.code,'Clean surface on the former quarantine piece; ordinary piece has a crack')
+  await expect(record(page)).toBeDisabled()
+  await form.getByLabel('Confirm physical bin code').fill(x.f.a.code)
+  await expect(record(page)).toBeEnabled()
+  await page.setViewportSize({width:1440,height:900})
+  await form.locator('h2').scrollIntoViewIfNeeded()
+  await page.screenshot({path:info.outputPath('recovery-inspection-desktop.png')})
+  await page.setViewportSize({width:320,height:740})
+  await source(page).getByLabel('Quarantine quantity').scrollIntoViewIfNeeded()
+  expect(await form.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true)
+  await page.screenshot({path:info.outputPath('recovery-inspection-narrow.png')})
+  await audit(page)
+  let bytes='',id=''
+  await page.route(writeRoute,async route=>{
+    bytes=route.request().postData()!
+    const command:RecoveryCommand=JSON.parse(bytes)
+    expect(command.allocations).toEqual([{quarantineId:null,saleableQuantity:0,quarantineQuantity:1},{quarantineId:q,saleableQuantity:1,quarantineQuantity:0}])
+    const ack=await route.fetch(); expect(ack.status()).toBe(200)
+    id=(await ack.json()).entityId; await ack.dispose(); await route.abort('connectionreset')
+  },{times:1})
+  await record(page).press('Enter')
+  const retry=page.getByRole('button',{name:'Retry command'})
+  await expect(retry).toBeVisible(); await page.reload()
+  const request=page.waitForRequest(r=>r.method()==='POST' && r.url().endsWith('/stock-loss-recoveries'))
+  await retry.press('Enter')
+  expect((await request).postData()).toBe(bytes)
+  await page.getByRole('link',{name:'View recovery receipt'}).click()
+  await expect(page).toHaveURL(url=>url.hash===x.link(id)); await page.reload()
+  await expect(receipt(page)).toContainText('Clean surface on the former quarantine piece')
+  const exactPath='/api/v1/receiving/bins/'+x.f.a.id+'/positions/'+x.positionId+'/posted-loss/'+x.posting+'/recovery-receipt?recoveryId='+id
+  const response=await page.request.get(exactPath); expect(response.status()).toBe(200)
+  const proof:RecoveryEvidence=await response.json()
+  expect(proof.allocations.map(a=>a.restoredItemCostMinor).reduce<number>((a,b)=>a+b!,0)).toBe(proof.restoredItemCostMinor)
+  expect(proof.restoredItemCostMinor).toBeGreaterThan(0)
+  await expect(receipt(page).locator('dd')).toHaveText(['1','1',money(proof.restoredItemCostMinor,'USD')])
+  expect(await receipt(page).evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true)
+  await page.screenshot({path:info.outputPath('recovery-receipt-narrow.png')})
+  await page.setViewportSize({width:1440,height:900}); await audit(page)
+  await page.screenshot({path:info.outputPath('recovery-receipt-desktop.png')})
+  await receipt(page).getByRole('link',{name:'Recovered pieces in quarantine'}).click()
+  await expect(page.getByRole('link',{name:'Recovery inspection receipt'})).toHaveAttribute('href',x.link(id))
+  await page.getByRole('link',{name:'Current position quarantine'}).click()
+  await page.getByRole('button',{name:new RegExp('Inspect and release from .*'+id)}).click()
+  const release=page.getByRole('dialog')
+  await release.getByLabel('Confirm physical bin code').fill(x.f.a.code)
+  await release.getByLabel('Quantity inspected and approved').fill('1')
+  await release.getByLabel('Inspection evidence and reason').fill('Magnified inspection confirmed the mark was on the bag')
+  await release.getByRole('checkbox',{name:/I confirmed/}).check()
+  await release.getByRole('checkbox',{name:/I inspected these pieces/}).check()
+  await release.getByRole('button',{name:'Confirm inspected release'}).click()
+  await expect(page.getByRole('heading',{name:'Released after inspection'})).toBeVisible()
+  const [purchase]=await purchases(page,[x.purchaseId])
+  expect(purchase.balances).toMatchObject({physicalOnHand:2,unavailable:0,reserved:0,backedQuantity:0})
+  expect(purchase.deliveries[0]).toMatchObject({quantity:4,lostQuantity:2,recoveryTotals:{grossLostQuantity:4,recoveredQuantity:2,grossAllocatedItemCostMinor:'7',restoredItemCostMinor:String(proof.restoredItemCostMinor)}})
+  await page.goto('/#inventory/lot/'+x.deliveryId)
+  await expect(page.getByText('Gross posted loss',{exact:true})).toBeVisible()
+  await page.getByRole('link',{name:'View stock recovery receipt'}).click()
+  await expect(page).toHaveURL(url=>url.hash===x.link(id))
+  await receipt(page).getByRole('link',{name:'Position timeline'}).click()
+  await expect(page.getByRole('link',{name:'View stock recovery receipt'})).toHaveAttribute('href',x.link(id))
+})
+
+test('cross-page sources retain explicit amounts, stale decisions and unconfirmed scoped reads cannot submit',async ({page,context})=>{
+  const x=await posted(page,27,null,25)
+  await page.goto('/'+x.link())
+  const form=inspect(page),save=record(page)
+  await source(page).getByLabel('Saleable quantity').fill('1');await confirm(page,x.f.a.code,'Inspected ordinary and named stock')
+  const next=form.getByRole('button',{name:'Next sources'})
+  const pageTwo=(u:URL)=>u.pathname.endsWith('/recovery-review') && u.searchParams.has('after')
+  await page.route(pageTwo,async route=>{
+    const reply=await route.fetch();await route.fulfill({json:{...await reply.json(),complete:false}});await reply.dispose()
+  },{times:1})
+  await next.press('Enter')
+  await expect(form).toContainText('Incomplete recovery review.')
+  await expect(save).toBeDisabled()
+  await form.getByRole('button',{name:'Retry recovery read'}).click()
+  const named=form.getByRole('group',{name:/Inspection of /}).first()
+  await named.getByLabel('Quarantine quantity').fill('1')
+  await expect(form).toContainText('2 sources selected')
+  await form.getByRole('button',{name:'Previous sources'}).press('Enter')
+  await expect(source(page).getByLabel('Saleable quantity')).toHaveValue('1')
+  await expect(form.getByRole('heading',{name:'Original missing pieces'})).toBeFocused()
+  await context.setOffline(true);await expect(save).toBeDisabled()
+  await context.setOffline(false);await expect(save).toBeEnabled()
+  await x.f.write('receiving/stock-loss-recoveries',x.revision,{...x.base,postingId:x.posting,catalogId:x.f.catalogId,catalogRevision:1,
+    confirmedIdentity:true,reason:'Another inspection restored one piece',allocations:[{quarantineId:null,saleableQuantity:1,quarantineQuantity:0}]})
+  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
+  await expect(form).toContainText('The position, bin or reviewed identity changed.')
+  await expect(save).toBeDisabled()
+  await form.getByRole('button',{name:'Review updated stock'}).click()
+  await expect(source(page).getByLabel('Saleable quantity')).toHaveValue('')
+  await expect(form).toContainText('Unknown')
+  await source(page).getByLabel('Saleable quantity').fill('1')
+  await confirm(page,x.f.a.code,'Checked against the updated bin')
+  await next.click(); await named.getByLabel('Quarantine quantity').fill('1')
+  await save.press('Enter')
+  await expect(receipt(page).locator('dd')).toHaveText(['1','1','Unknown'])
+  const hash=await page.evaluate(()=>location.hash)
+  await page.evaluate(next=>{location.hash=next},hash.replace(x.f.a.id,x.f.b.id))
+  await expect(receipt(page)).not.toContainText('Checked against the updated bin')
+  await expect(receipt(page).locator('dd')).toHaveCount(0)
+})
+
+test('uncertain known-zero recovery reconciles its exact command and both inspection dispositions',async ({page})=>{
+  const x=await posted(page,3,0,0)
+  await page.goto('/'+x.link())
+  await source(page).getByLabel('Quarantine quantity').fill('1')
+  await confirm(page,x.f.a.code,'Keep uncertain surface in quarantine')
+  let bytes=''
+  await page.route(writeRoute,async route=>{
+    bytes=route.request().postData()!
+    const ack=await route.fetch();expect(ack.ok()).toBe(true);await ack.dispose();await route.abort('connectionreset')
+  },{times:1})
+  await record(page).click()
+  const retry=page.getByRole('button',{name:'Retry command'})
+  await expect(retry).toBeVisible(); await page.reload()
+  await page.route(writeRoute,async route=>{
+    expect(route.request().postData()).toBe(bytes)
+    await route.fulfill({status:413,contentType:'application/json',body:JSON.stringify({code:'request_too_large',message:'Command exceeds the request size limit.',correlationId:JSON.parse(bytes).commandId})})
+  },{times:2})
+  const exact=(url:URL)=>url.pathname.endsWith('/'+x.posting+'/recovery-receipt') && url.searchParams.get('commandId')===JSON.parse(bytes).commandId
+  await page.route(exact,async route=>{
+    const response=await route.fetch(); const row:RecoveryEvidence=await response.json()
+    const swapped={...row,saleableQuantity:1,quarantineQuantity:0,recoveredQuarantineId:null,allocations:row.allocations.map(a=>({...a,saleableQuantity:1,quarantineQuantity:0}))}
+    await route.fulfill({json:swapped}); await response.dispose()
+  },{times:1})
+  await retry.click();await expect(page.getByRole('alert')).toContainText('verify the original command')
+  await page.getByRole('button',{name:'Refresh',exact:true}).click()
+  await retry.click();await page.getByRole('link',{name:'View recovery receipt'}).click()
+  await expect(receipt(page).locator('dd')).toHaveText(['0','1','USD 0.00'])
+})
+
+test('recovery preserves a later shortage and existing commitments; repeated loss and recovery show gross and net at the receipt lot',async ({page})=>{
+  const x=await posted(page,4,3,0)
+  const recover=(quantity:number,revision:number)=>x.f.write('receiving/stock-loss-recoveries',revision,{...x.base,postingId:x.posting,catalogId:x.f.catalogId,catalogRevision:1,
+    confirmedIdentity:true,reason:'Inspected original missing pieces',allocations:[{quarantineId:null,saleableQuantity:quantity,quarantineQuantity:0}]})
+  await recover(3,x.revision)
+  await x.f.write('receiving/holds',x.revision+1,{...x.base,quantity:1,purpose:'Fictional model',reason:'For the current build'})
+  await x.f.write('receiving/offers',x.revision+2,{purchaseId:x.purchaseId,catalogId:x.f.catalogId,unitPriceMinor:250,backing:[{placementId:x.positionId,quantity:1}]})
+  const second=await x.f.write('receiving/counts',x.revision+3,{...x.base,countedQuantity:2,reason:'Later physical check'})
+  await page.goto('/'+x.link())
+  await expect(inspect(page)).toContainText('This position has an open shortage.')
+  await source(page).getByLabel('Saleable quantity').fill('1')
+  await confirm(page,x.f.a.code,'One more original piece inspected')
+  await record(page).press('Enter')
+  await expect(receipt(page)).toContainText('One more original piece inspected')
+  const [purchase]=await purchases(page,[x.purchaseId])
+  expect(purchase.balances).toMatchObject({physicalOnHand:4,reserved:1,backedQuantity:1})
+  expect(purchase.deliveries[0]).toMatchObject({lostQuantity:0,allocatedLostItemCostMinor:0,recoveryTotals:{grossLostQuantity:4,recoveredQuantity:4,grossAllocatedItemCostMinor:'3',restoredItemCostMinor:'3'}})
+  const countsPath='/api/v1/receiving/bins/'+x.f.a.id+'/counts?positionId='+x.positionId
+  expect((await (await page.request.get(countsPath)).json()).shortages.map((row:{id:string})=>row.id)).toContain(second)
+  const check=await x.f.write('receiving/counts',x.revision+5,{...x.base,countedQuantity:3,reason:'Confirmed one missing from the four now in the ledger'})
+  const later=await x.f.write('receiving/stock-losses',x.revision+6,{...x.base,caseId:second,expectedObservationId:check,reason:'One still missing',offerReductions:[]})
+  await page.goto('/'+lossReceiptLink(x.f.a.id,x.positionId,later))
+  await expect(page.getByRole('dialog',{name:'Posted stock loss'})).toContainText('Still missing from earlier postings at that time')
+  await page.goto('/#inventory/lot/'+x.deliveryId)
+  await expect(page.getByText('Gross posted loss',{exact:true}).locator('+ dd')).toHaveText('5')
+  await expect(page.getByText('Net still missing',{exact:true}).locator('+ dd')).toHaveText('1')
+  await expect(page.getByText('Recovered after inspection',{exact:true}).first().locator('+ dd')).toHaveText('4')
+  await page.goto('/'+x.link())
+  await expect(inspect(page)).toContainText('All pieces from this loss have been recovered.')
+  await expect(record(page)).toHaveCount(0)
+  await expect(inspect(page).getByRole('link',{name:/Recovery receipt /})).toHaveCount(2)
+})
