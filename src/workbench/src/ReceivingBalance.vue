@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Catalog, Purchase } from './api'
+import { draftBackingLink } from './countLinks'
 import { itemLabel, money } from './receiving'
 const props = defineProps<{ purchase: Purchase; catalog: Catalog[] }>()
 const balances = computed(() => props.purchase.balances)
 const positions = computed(() => new Map(props.purchase.deliveries.flatMap(d => d.placements.map(p =>
-  [p.id, p.locationCode + ' · ' + d.reference] as const))))
+  [p.id, { bin:p.locationId, label:p.locationCode + ' · ' + d.reference }] as const))))
 const amount = (value: number | null) => money(value, props.purchase.currency)
 </script>
 <template>
@@ -50,9 +51,11 @@ const amount = (value: number | null) => money(value, props.purchase.currency)
       <ul v-if="purchase.offers.length" class="receipt-lines" aria-label="Unpublished offers">
         <li v-for="offer in purchase.offers" :key="offer.id">
           <div class="receipt-line-head"><strong>{{ money(offer.unitPriceMinor, offer.currency) }} per unit</strong><span>{{ offer.backedQuantity }} backed</span></div>
-          <small>{{ itemLabel(catalog, offer.catalogId, offer.catalogRevision) }}</small>
+          <small>Offer {{ offer.id }}</small><small>{{ itemLabel(catalog, offer.catalogId, offer.catalogRevision) }}</small>
           <p v-if="offer.backedQuantity && !offer.backingCurrent" class="warning">The backing needs renewed catalog confirmation. Check the item revision before using this offer.</p>
-          <ul class="bin-rows"><li v-for="b in offer.backing" :key="b.placementId"><span>{{ positions.get(b.placementId) }}</span><strong>{{ b.quantity }}</strong></li></ul>
+          <ul class="bin-rows"><li v-for="b in offer.backing" :key="b.placementId"><span>{{ positions.get(b.placementId)?.label }}
+            <a v-if="positions.has(b.placementId)" :href="draftBackingLink(positions.get(b.placementId)!.bin,b.placementId,'offers',offer.id)"
+              :aria-label="'Review draft offer '+offer.id+' at position '+b.placementId">Review backing</a></span><strong>{{ b.quantity }}</strong></li></ul>
         </li>
       </ul>
     </section>
