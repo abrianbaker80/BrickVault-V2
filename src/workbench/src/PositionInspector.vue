@@ -7,7 +7,7 @@ import PositionHistory from './PositionHistory.vue'
 import PositionTimeline from './PositionTimeline.vue'
 
 const props = defineProps<{ id: string; asOf: string; connected: boolean; historyView: 'all' | 'transfers' }>()
-const emit = defineEmits<{ failure: [reason: unknown]; inspect: [id: string]; related: [id: string]; view: [value: 'all' | 'transfers'] }>()
+const emit = defineEmits<{ failure: [reason: unknown]; inspect: [id: string]; related: [id: string]; lot: [id: string]; view: [value: 'all' | 'transfers'] }>()
 const record = shallowRef<StockPosition | null>(null)
 const recordAsOf = ref('')
 const read = shallowRef<StockPage | null>(null)
@@ -50,7 +50,7 @@ watch(() => [props.id, props.asOf, props.connected, props.historyView] as const,
     </div>
     <p v-if="!validId" class="warning" role="status">This position link has an invalid ID.</p>
     <PositionTimeline v-else-if="historyView === 'all'" :id="id" :as-of="asOf" :state="connected ? 'ready' : 'unavailable'"
-      @failure="emit('failure', $event)" @related="emit('related', $event)" @inspect="emit('inspect', $event)" />
+      @failure="emit('failure', $event)" @related="emit('related', $event)" @inspect="emit('inspect', $event)" @lot="emit('lot', $event)" />
     <template v-else>
       <p v-if="rowError || !connected" class="warning" role="status">
         {{ rowError || 'The workspace is disconnected.' }} {{ record ? 'Showing the last position read.' : 'Position details are unavailable.' }}
@@ -59,7 +59,7 @@ watch(() => [props.id, props.asOf, props.connected, props.historyView] as const,
       <p v-else-if="read && !read.complete" class="warning" role="status">Partial position read. {{ !read.rows.length ? 'The selected position was not returned.' : '' }} {{ !read.rows.length && record ? 'Showing the last position read.' : '' }}</p>
       <p v-else-if="read && !record" role="status">No stock position was found for this ID.</p>
       <template v-if="record">
-        <StockPositionDetails :record="record" :as-of="recordAsOf" @inspect="emit('inspect', $event)" />
+        <StockPositionDetails :record="record" :as-of="recordAsOf" @inspect="emit('inspect', $event)" @lot="emit('lot', $event)" />
         <PositionHistory :id="id" :as-of="recordAsOf" :state="historyState" @failure="emit('failure', $event)" @inspect="emit('inspect', $event)" />
       </template>
     </template>
