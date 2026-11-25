@@ -31,9 +31,13 @@ export type TransferCommand = Schema['TransferCommand']
 export type TransferControls = { enabled: boolean; pending: boolean; feedback: string; workspaceId: string; dispatch: Dispatch }
 export type ReceivingWorkspace = Schema['LossReceivingWorkspace']
 export type Purchase = ReceivingWorkspace['purchases'][number]
+export type DraftBackingPage = Schema['DraftBackingSnapshot']
+export type DraftOfferHistory = Schema['DraftBackingHistory']
+export type WithdrawalEvidence = Schema['DraftBackingWithdrawalEvidence']
 export type StockLoss = Schema['StockLossSnapshot']
 export type StockLossCommand = Schema['StockLossCommand']
 export type ReceivingCommand = { workspaceId: string } & (
+  | { kind: 'offer-withdrawal'; body: Schema['DraftBackingWithdrawalCommand'] }
   | { kind: 'recount'; body: Schema['RecountCommand'] }
   | { kind: 'purchase'; body: Schema['PurchaseCommand'] }
   | { kind: 'delivery'; body: Schema['DeliveryCommand'] }
@@ -48,11 +52,12 @@ export type Command = ReceivingCommand | { workspaceId: string } & (
   | { kind: 'catalog'; body: Schema['CatalogCommand'] }
   | { kind: 'location'; body: Schema['LocationCommand'] })
 export type Held = { workspaceId: string | null; commandId: string }
-export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | Schema['RecountReceipt'] | undefined>
+export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | Schema['RecountReceipt'] | Schema['DraftBackingWithdrawalReceipt'] | undefined>
 
 export function commandLabel(command: Command) {
   switch (command.kind) {
     case 'catalog': case 'location': return command.body.name
+    case 'offer-withdrawal': return 'Draft backing withdrawal in ' + command.body.confirmedLocationCode
     case 'recount': return 'Recount batch'
     case 'purchase': return 'Purchase ' + command.body.reference
     case 'delivery': return 'Delivery ' + command.body.reference
@@ -67,6 +72,7 @@ export function commandLabel(command: Command) {
 }
 
 const commands = {
+  'offer-withdrawal': { path: 'inventory/draft-backing-withdrawals', valid: valid.DraftBackingWithdrawalCommand },
   recount: { path: 'inventory/recounts/batches', valid: valid.RecountCommand },
   catalog: { path: 'catalog', valid: valid.CatalogCommand },
   location: { path: 'locations', valid: valid.LocationCommand },
@@ -129,6 +135,23 @@ function checkedPreview(page: RecountPreviewPage, input: RecountPreviewRequest) 
   return page
 }
 
+function invalidWithdrawalEvent(event: TimelineEvent) {
+  return event.kind === 'offer-withdrawal' && (!event.offerId || event.physicalDelta !== 0 || event.reservedDelta !== 0 ||
+    event.offerBackedDelta !== -event.quantity || event.quantity < 1)
+}
+
+function verifyDraftBalance(page: DraftBackingPage | DraftOfferHistory, bin: string, position: string) {
+  const layer = page.position.layer
+  if (page.position.location.id !== bin || layer.placementId !== position || (page.complete &&
+      (page.physicalOnHand !== layer.quantity || page.offerBackedQuantity !== layer.backedQuantity ||
+       page.heldQuantity + page.sellableQuantity !== page.physicalOnHand ||
+       page.withheldQuantity + page.offerBackedQuantity !== page.sellableQuantity ||
+       page.freeToBackQuantity !== layer.freeToBackQuantity || page.freeToBackQuantity > page.withheldQuantity))) throw new ContractFailure()
+  const offers = 'offers' in page ? page.offers : [page.offer]
+  if (offers.some(o => o.totalOfferBackedQuantity < o.backedQuantity || o.backedQuantity > page.offerBackedQuantity ||
+      (o.canWithdraw && (page.hasOpenShortage || o.authority !== 'internal-unpublished' || !o.backedQuantity)))) throw new ContractFailure()
+}
+const draftPath = (position: string) => 'inventory/positions/' + encodeURIComponent(position) + '/draft-backing'
 export const api = {
   session: () => read('session', valid.Session),
   signIn(password: string) {
@@ -152,7 +175,7 @@ export const api = {
     return read('inventory/positions/' + encodeURIComponent(id) + '/movements?' + query, valid.PositionMovementPage)
   },
   async receiptLot(id: string, positionAfter: string, eventAfter: string) {
-    const query = new URLSearchParams({ positionLimit: '25', eventLimit: '25' })
+    const query = new URLSearchParams({ positionLimit: '25', eventLimit: '25', withdrawals: 'true' })
     if (positionAfter) query.set('positionAfter', positionAfter)
     if (eventAfter) query.set('eventAfter', eventAfter)
     const lot = await read('inventory/receipt-lots/' + encodeURIComponent(id) + '?' + query, valid.StockReceiptLot)
@@ -169,7 +192,7 @@ export const api = {
       throw new ContractFailure()
     for (const row of lot.events) {
       const event = row.event
-      if (event.kind === 'transfer-in' ||
+      if (invalidWithdrawalEvent(event) || event.kind === 'transfer-in' ||
           (event.kind === 'transfer-out' && (event.id !== event.relatedPositionId || event.relatedPositionId === row.positionId ||
             !event.relatedLocationId || !event.relatedLocationCode || !event.locationCodeAtEvent ||
             event.physicalDelta !== 0 || event.offerBackedDelta !== 0 || row.transferBackedQuantity > event.quantity)) ||
@@ -180,7 +203,7 @@ export const api = {
     return lot
   },
   async positionTimeline(id: string, after: string, previous?: StockPosition) {
-    const query = new URLSearchParams({ limit: '25' })
+    const query = new URLSearchParams({ limit: '25', withdrawals:'true' })
     if (after) query.set('after', after)
     const page = await read('inventory/positions/' + encodeURIComponent(id) + '/timeline?' + query, valid.StockPositionTimeline)
     const position = page.position
@@ -193,7 +216,7 @@ export const api = {
         position.layer.purchaseId !== previous.layer.purchaseId || position.layer.deliveryId !== previous.layer.deliveryId ||
         position.layer.catalogId !== previous.layer.catalogId || position.location.revision < previous.location.revision)) throw new ContractFailure()
     for (const event of page.events) {
-      if (event.locationId !== page.location.id ||
+      if (invalidWithdrawalEvent(event) || event.locationId !== page.location.id ||
           (event.kind === 'count' && (event.id !== event.observationId || event.ledgerQuantityAtWitness === null)) ||
           (event.kind === 'stock-loss' && event.id !== event.postingId)) throw new ContractFailure()
       if (event.kind === 'transfer-in' || event.kind === 'transfer-out') {
@@ -204,6 +227,26 @@ export const api = {
       } else if (event.relatedPositionId) throw new ContractFailure()
     }
     return page
+  },
+  async draftBacking(bin: string, position: string, after: string) {
+    const result = await read(draftPath(position) + recountCursor(after), valid.DraftBackingSnapshot)
+    verifyDraftBalance(result,bin,position)
+    return result
+  },
+  async draftOfferHistory(bin: string, position: string, offer: string, after: string) {
+    const result = await read(draftPath(position) + '/' + encodeURIComponent(offer) + '/history' + recountCursor(after), valid.DraftBackingHistory)
+    verifyDraftBalance(result,bin,position)
+    if (result.offer.offerId !== offer) throw new ContractFailure()
+    return result
+  },
+  async withdrawalReceipt(bin: string, position: string, selector: { receiptId:string } | { commandId:string }) {
+    const result = await read(draftPath(position) + '/receipts?' + new URLSearchParams(selector), valid.DraftBackingWithdrawalEvidence)
+    if (result.positionId !== position || result.location.id !== bin ||
+        ('receiptId' in selector ? result.id !== selector.receiptId : result.commandId !== selector.commandId) ||
+        result.quantity !== result.priorBackedQuantity - result.remainingBackedQuantity ||
+        result.quantity !== result.priorTotalOfferBackedQuantity - result.remainingTotalOfferBackedQuantity ||
+        result.remainingBackedQuantity > result.remainingTotalOfferBackedQuantity) throw new ContractFailure()
+    return result
   },
   async freezeRecount(input: RecountPreviewRequest, workspaceId: string, csrf: string) {
     const page = await read('inventory/recounts/previews', valid.RecountPreviewPage, {
@@ -291,11 +334,13 @@ export const api = {
     const receipt = command.kind === 'catalog' || command.kind === 'location'
       ? await read(path, valid.Receipt, options)
       : command.kind === 'hold' || command.kind === 'hold-release' ? await read(path, valid.StockHoldReceipt, options)
+      : command.kind === 'offer-withdrawal' ? await read(path, valid.DraftBackingWithdrawalReceipt, options)
       : command.kind === 'recount' ? await read(path, valid.RecountReceipt, options)
       : command.kind === 'stock-loss' ? await read(path, valid.StockLossReceipt, options)
       : command.kind === 'count' ? await read(path, valid.StockCountReceipt, options)
       : command.kind === 'transfer' ? await read(path, valid.TransferReceipt, options) : await read(path, valid.ReceivingReceipt, options)
     if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind ||
+        (command.kind === 'offer-withdrawal' && receipt.revision !== command.body.expectedRevision + 1) ||
         (command.kind === 'recount' && (receipt.entityId !== command.body.previewId || receipt.revision !== 1))) throw new ContractFailure()
     return receipt
   }
