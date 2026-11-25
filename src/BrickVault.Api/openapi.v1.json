@@ -2751,7 +2751,8 @@
               "count",
               "hold",
               "hold-release",
-              "stock-loss"
+              "stock-loss",
+              "recount"
             ]
           },
           "correlationId": {

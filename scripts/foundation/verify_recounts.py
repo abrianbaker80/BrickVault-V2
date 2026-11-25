@@ -86,6 +86,9 @@ def qualify_recounts(client, catalog):
 def verify_recovered_recounts(client, evidence):
     command, receipt, repeated, pending, a, b, c, observed = evidence
     assert client.call(ROOT + "/batches", "POST", command) == receipt
+    diagnostic = client.call("diagnostics/" + receipt["correlationId"])
+    assert (diagnostic["kind"], diagnostic["commandId"], diagnostic["entityId"]) == (
+        "recount", command["commandId"], receipt["entityId"])
     results = {r["target"]["positionId"]: r for r in read_rows(client, f"{ROOT}/batches/{receipt['entityId']}")}
     assert set(results) == {a, b}
     assert (results[a]["outcome"], results[b]["outcome"], results[b]["observationId"]) == ("changed", "queued", observed)
