@@ -151,7 +151,7 @@ internal sealed class StockReceiptLots(NpgsqlDataSource db)
     private static string[]? ScopedCursor(string? cursor, Guid deliveryId, int revision, int size)
     {
         if (cursor is null) return null;
-        if (cursor.Length > 128) throw InvalidCursor();
+        if (cursor.Length > 129) throw InvalidCursor();
         var parts = cursor.Split('.');
         if (parts.Length != size || !Guid.TryParseExact(parts[0], "N", out var scope) || scope != deliveryId ||
             !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var cursorRevision) ||

@@ -367,6 +367,13 @@ class Instance:
                         case_id,observation_id,expected_purchase_revision,reason)
                         ON brickvault.stock_shortage_closures TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 12 THEN
+                    GRANT INSERT (id,command_id,purchase_id,position_id,location_id,location_code,loss_id,
+                        expected_purchase_revision,catalog_id,catalog_revision,confirmed_identity,reason)
+                        ON brickvault.stock_loss_recoveries TO bv_api;
+                    GRANT INSERT (recovery_id,quarantine_id,saleable_quantity,quarantine_quantity)
+                        ON brickvault.stock_loss_recovery_allocations TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,
