@@ -42,7 +42,7 @@ test('selected draft backing can be partially and fully withdrawn without losing
   await dialog.getByLabel('Confirm physical bin code').fill(f.a.code)
   await dialog.getByLabel('Quantity to withdraw').fill('4'); await expect(save).toBeDisabled()
   await dialog.getByLabel('Quantity to withdraw').fill('1')
-  await expect(dialog.getByLabel('Proposed withdrawal').locator('dd')).toHaveText(['3 â†’ 2','3 â†’ 2','3 â†’ 4'])
+  await expect(dialog.getByLabel('Proposed withdrawal').locator('dd')).toHaveText(['3 → 2','3 → 2','3 → 4'])
   await page.screenshot({path:info.outputPath('draft-withdrawal-desktop.png')})
   await page.setViewportSize({width:320,height:760})
   await expect(save).toBeEnabled()
@@ -103,13 +103,13 @@ test('position offer pages preserve exact selection even with a sibling allocati
   await review(page,pos,f.a.id,shared)
   await d.getByRole('button',{name:'Withdraw backing',exact:true}).click()
   await fill(page,f.a.code,1,'Release a shared allocation')
-  await expect(d.getByLabel('Proposed withdrawal').locator('dd')).toHaveText(['2 â†’ 1','4 â†’ 3','0 â†’ 1'])
+  await expect(d.getByLabel('Proposed withdrawal').locator('dd')).toHaveText(['2 → 1','4 → 3','0 → 1'])
   await f.write('inventory/draft-backing-withdrawals',31,{purchaseId,positionId:pos,offerId:shared,locationId:f.a.id,confirmedLocationCode:f.a.code,quantity:1,reason:'Second operator reviewed the same position'})
   await d.getByRole('button',{name:'Confirm withdrawal'}).click()
   await expect(d).toContainText('The position or offer changed')
   await expect(d.getByRole('button',{name:'Confirm withdrawal'})).toBeDisabled()
   await d.getByRole('button',{name:'Cancel'}).click()
-  await expect(d.getByRole('region',{name:'Selected offer'})).toContainText('1 backed at this position Â· 3 across all positions')
+  await expect(d.getByRole('region',{name:'Selected offer'})).toContainText('1 backed at this position · 3 across all positions')
   await d.getByRole('button',{name:'Withdraw backing',exact:true}).click()
   await fill(page,f.a.code,1,'Final source allocation')
   await d.getByRole('button',{name:'Confirm withdrawal'}).click()
@@ -315,7 +315,7 @@ test('keyboard withdrawal preparation survives workspace entry and repeated hist
     try {
       await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
       await refresh.waiting
-      await expect(dialog.getByText('Reading offer backingâ€¦')).toBeVisible()
+      await expect(dialog.getByText('Reading offer backing…')).toBeVisible()
       await page.keyboard.press('Enter')
       await expect(form).toBeFocused()
       await fill(page,f.a.code,1,'Prepared during revalidation')
@@ -332,7 +332,7 @@ test('keyboard withdrawal preparation survives workspace entry and repeated hist
   try {
     await source.press('Enter')
     await register.waiting
-    await expect(dialog.getByText('Waiting for a complete workspace readâ€¦')).toBeVisible()
+    await expect(dialog.getByText('Waiting for a complete workspace read…')).toBeVisible()
     await expect(start).toHaveCount(0)
   } finally {await register.resume()}
   await start.focus()
