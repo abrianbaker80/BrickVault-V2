@@ -38,6 +38,7 @@ try
     var inventory = new StockRegister(db);
     var positionTimelines = new StockPositionTimelines(db);
     var receiptLots = new StockReceiptLots(db);
+    var draftBacking = new DraftBackingWithdrawals(db);
     var transfers = new Transfers(db);
     var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
     {
@@ -142,11 +143,22 @@ try
         inventory.Search(q, itemType, locationId, positionId, after, limit ?? 25, ct));
     api.MapGet("/inventory/positions/{positionId:guid}/movements", (Guid positionId, Guid? after, int? limit, CancellationToken ct) =>
         inventory.History(positionId, after, limit ?? 25, ct));
-    api.MapGet("/inventory/positions/{positionId:guid}/timeline", (Guid positionId, string? after, int? limit, CancellationToken ct) =>
-        positionTimelines.Read(positionId, after, limit ?? 25, ct));
+    api.MapGet("/inventory/positions/{positionId:guid}/timeline",
+        (Guid positionId, string? after, int? limit, bool? withdrawals, CancellationToken ct) =>
+            positionTimelines.Read(positionId, after, limit ?? 25, ct, withdrawals == true));
     api.MapGet("/inventory/receipt-lots/{deliveryId:guid}",
-        (Guid deliveryId, string? positionAfter, string? eventAfter, int? positionLimit, int? eventLimit, CancellationToken ct) =>
-            receiptLots.Read(deliveryId, positionAfter, eventAfter, positionLimit ?? 25, eventLimit ?? 25, ct));
+        (Guid deliveryId, string? positionAfter, string? eventAfter, int? positionLimit, int? eventLimit, bool? withdrawals, CancellationToken ct) =>
+            receiptLots.Read(deliveryId, positionAfter, eventAfter, positionLimit ?? 25, eventLimit ?? 25, ct, withdrawals == true));
+    api.MapGet("/inventory/positions/{positionId:guid}/draft-backing", (Guid positionId, string? after, int? limit, CancellationToken ct) =>
+        draftBacking.Snapshot(positionId, after, limit ?? 25, ct));
+    api.MapGet("/inventory/positions/{positionId:guid}/draft-backing/{offerId:guid}/history",
+        (Guid positionId, Guid offerId, string? after, int? limit, CancellationToken ct) =>
+            draftBacking.History(positionId, offerId, after, limit ?? 25, ct));
+    api.MapGet("/inventory/positions/{positionId:guid}/draft-backing/receipts",
+        (Guid positionId, Guid? receiptId, Guid? commandId, CancellationToken ct) =>
+            draftBacking.Evidence(positionId, receiptId, commandId, ct));
+    api.MapPost("/inventory/draft-backing-withdrawals", (HttpContext c, CancellationToken ct) =>
+        Save<DraftBackingWithdrawalCommand>(c, draftBacking.Save, ct));
     api.MapGet("/receiving/bins/{locationId:guid}", (Guid locationId, CancellationToken ct) => bins.Snapshot(locationId, ct));
     api.MapGet("/receiving/bins/{locationId:guid}/movements",
         (Guid locationId, CancellationToken ct) => bins.Movements(locationId, ct));

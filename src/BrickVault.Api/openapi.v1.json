@@ -1770,6 +1770,14 @@
               "maximum": 100,
               "default": 25
             }
+          },
+          {
+            "name": "withdrawals",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include recorded draft backing withdrawal events."
           }
         ],
         "responses": {
@@ -1795,6 +1803,16 @@
           },
           "default": {
             "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "The retained client contract cannot represent withdrawals in this scope.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2177,6 +2195,14 @@
               "maximum": 100,
               "default": 25
             }
+          },
+          {
+            "name": "withdrawals",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include recorded draft backing withdrawal events."
           }
         ],
         "responses": {
@@ -2219,8 +2245,254 @@
                 }
               }
             }
+          },
+          "426": {
+            "description": "The retained client contract cannot represent withdrawals in this scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
+      }
+    },
+    "/api/v1/inventory/positions/{positionId}/draft-backing": {
+      "get": {
+        "operationId": "getDraftBackingSnapshot",
+        "description": "Read current and historical draft backing at the selected position.",
+        "parameters": [
+          {
+            "name": "positionId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftBackingSnapshot"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/positions/{positionId}/draft-backing/{offerId}/history": {
+      "get": {
+        "operationId": "getDraftBackingHistory",
+        "description": "Read signed backing changes for the selected offer and position.",
+        "parameters": [
+          {
+            "name": "positionId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "offerId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftBackingHistory"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/positions/{positionId}/draft-backing/receipts": {
+      "get": {
+        "operationId": "getDraftBackingWithdrawalEvidence",
+        "description": "Read exact withdrawal evidence. Supply exactly one receipt or command identifier.",
+        "parameters": [
+          {
+            "name": "positionId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "receiptId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "commandId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftBackingWithdrawalEvidence"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/draft-backing-withdrawals": {
+      "post": {
+        "operationId": "recordDraftBackingWithdrawal",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "description": "The authenticated workspaceId captured when the operator prepared the command. Use that same value for every retry. A missing or mismatched workspace returns 409 workspace_mismatch.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftBackingWithdrawalCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftBackingWithdrawalReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Withdraw selected units of a local internal draft offer from a confirmed receipt position."
       }
     }
   },
@@ -2752,7 +3024,8 @@
               "hold",
               "hold-release",
               "stock-loss",
-              "recount"
+              "recount",
+              "offer-withdrawal"
             ]
           },
           "correlationId": {
@@ -6172,7 +6445,8 @@
               "hold",
               "hold-release",
               "stock-loss",
-              "offer-backing"
+              "offer-backing",
+              "offer-withdrawal"
             ]
           },
           "id": {
@@ -6382,8 +6656,8 @@
               "string",
               "null"
             ],
-            "maxLength": 79,
-            "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing)\\.[0-9a-f]{32}$"
+            "maxLength": 82,
+            "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|offer-withdrawal)\\.[0-9a-f]{32}$"
           },
           "events": {
             "type": "array",
@@ -7168,7 +7442,7 @@
               "string",
               "null"
             ],
-            "maxLength": 123
+            "maxLength": 128
           }
         },
         "required": [
@@ -7205,6 +7479,516 @@
           "events",
           "nextPositionAfter",
           "nextEventAfter"
+        ],
+        "additionalProperties": false
+      },
+      "DraftBackingWithdrawalCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "commandId",
+          "purchaseId",
+          "expectedRevision",
+          "positionId",
+          "offerId",
+          "locationId",
+          "confirmedLocationCode",
+          "quantity",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "DraftBackingWithdrawalReceipt": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "kind": {
+            "type": "string",
+            "const": "offer-withdrawal"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "commandId",
+          "entityId",
+          "revision",
+          "kind",
+          "correlationId"
+        ],
+        "additionalProperties": false
+      },
+      "DraftBackingOfferRow": {
+        "type": "object",
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "unitPriceMinor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000000
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "backedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "totalOfferBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "authority": {
+            "type": "string",
+            "enum": [
+              "internal-unpublished",
+              "unverified-origin"
+            ]
+          },
+          "canWithdraw": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "offerId",
+          "unitPriceMinor",
+          "currency",
+          "backedQuantity",
+          "totalOfferBackedQuantity",
+          "authority",
+          "canWithdraw"
+        ],
+        "additionalProperties": false
+      },
+      "DraftBackingSnapshot": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "position-draft-backing"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "position": {
+            "$ref": "#/components/schemas/StockRegisterRow"
+          },
+          "purchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "hasOpenShortage": {
+            "type": "boolean"
+          },
+          "physicalOnHand": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "heldQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "sellableQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "offerBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "withheldQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "freeToBackQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "offers": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/DraftBackingOfferRow"
+            }
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "position",
+          "purchaseRevision",
+          "hasOpenShortage",
+          "physicalOnHand",
+          "heldQuantity",
+          "sellableQuantity",
+          "offerBackedQuantity",
+          "withheldQuantity",
+          "freeToBackQuantity",
+          "offers",
+          "nextAfter"
+        ],
+        "additionalProperties": false
+      },
+      "DraftBackingContribution": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "recordedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "offer-backing",
+              "transfer-in",
+              "transfer-out",
+              "stock-loss",
+              "offer-withdrawal"
+            ]
+          },
+          "backingDelta": {
+            "type": "integer",
+            "minimum": -1000000,
+            "maximum": 1000000
+          },
+          "relatedPositionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "id",
+          "commandId",
+          "correlationId",
+          "revision",
+          "recordedAt",
+          "kind",
+          "backingDelta",
+          "relatedPositionId",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "DraftBackingHistory": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "position-draft-backing-history"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "position": {
+            "$ref": "#/components/schemas/StockRegisterRow"
+          },
+          "purchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "hasOpenShortage": {
+            "type": "boolean"
+          },
+          "physicalOnHand": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "heldQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "sellableQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "offerBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "withheldQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "freeToBackQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "offer": {
+            "$ref": "#/components/schemas/DraftBackingOfferRow"
+          },
+          "contributions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/DraftBackingContribution"
+            }
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "position",
+          "purchaseRevision",
+          "hasOpenShortage",
+          "physicalOnHand",
+          "heldQuantity",
+          "sellableQuantity",
+          "offerBackedQuantity",
+          "withheldQuantity",
+          "freeToBackQuantity",
+          "offer",
+          "contributions",
+          "nextAfter"
+        ],
+        "additionalProperties": false
+      },
+      "DraftBackingWithdrawalEvidence": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "draft-backing-withdrawal"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "priorBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "remainingBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "priorTotalOfferBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "remainingTotalOfferBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "unitPriceMinor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000000
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "id",
+          "commandId",
+          "correlationId",
+          "revision",
+          "purchaseId",
+          "positionId",
+          "offerId",
+          "location",
+          "confirmedLocationCode",
+          "quantity",
+          "priorBackedQuantity",
+          "remainingBackedQuantity",
+          "priorTotalOfferBackedQuantity",
+          "remainingTotalOfferBackedQuantity",
+          "unitPriceMinor",
+          "currency",
+          "reason",
+          "recordedAt"
         ],
         "additionalProperties": false
       }

@@ -21,7 +21,7 @@ internal sealed record StockReceiptLot(string Scope, DateTime AsOf, bool Complet
 internal sealed class StockReceiptLots(NpgsqlDataSource db)
 {
     public async Task<StockReceiptLot> Read(Guid deliveryId, string? positionAfter, string? eventAfter, int positionLimit,
-        int eventLimit, CancellationToken token)
+        int eventLimit, CancellationToken token, bool withdrawals = false)
     {
         if (positionLimit is < 1 or > 100 || eventLimit is < 1 or > 100)
             throw new Fault(400, "invalid_lot_page", "Choose page sizes from 1 to 100.");
@@ -116,9 +116,12 @@ internal sealed class StockReceiptLots(NpgsqlDataSource db)
             var last = events[^1];
             nextEvent = $"{prefix}{last.Event.Kind}.{last.Event.Id:N}.{last.PositionId:N}";
         }
-        await using var undated = Query(connection, tx, StockPositionTimelines.ScopedEvents(true) + "\n" +
-            "SELECT EXISTS (SELECT 1 FROM events WHERE occurred_at IS NULL)", deliveryId);
-        var hasUndated = evidence.ReceivedAt is null || (bool)(await undated.ExecuteScalarAsync(token))!;
+        var history = (await Rows(connection, tx, StockPositionTimelines.ScopedEvents(true) + "\n" + """
+            SELECT EXISTS (SELECT 1 FROM events WHERE occurred_at IS NULL),
+                EXISTS (SELECT 1 FROM events WHERE kind='offer-withdrawal')
+            """, r => (Undated: r.GetBoolean(0), HasWithdrawals: r.GetBoolean(1)), token, deliveryId)).Single();
+        if (!withdrawals && history.HasWithdrawals) throw DraftBackingWithdrawals.Upgrade();
+        var hasUndated = evidence.ReceivedAt is null || history.Undated;
         var onHand = evidence.Received - evidence.Lost;
         if (onHand != evidence.Unplaced + totals.Positioned)
             throw new Fault(503, "receipt_lot_inconsistent", "The recorded receipt and projected positions could not be reconciled.");
@@ -137,7 +140,7 @@ internal sealed class StockReceiptLots(NpgsqlDataSource db)
     private static string[]? ScopedCursor(string? cursor, Guid deliveryId, int revision, int size)
     {
         if (cursor is null) return null;
-        if (cursor.Length > 123) throw InvalidCursor();
+        if (cursor.Length > 128) throw InvalidCursor();
         var parts = cursor.Split('.');
         if (parts.Length != size || !Guid.TryParseExact(parts[0], "N", out var scope) || scope != deliveryId ||
             !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var cursorRevision) ||
