@@ -13,6 +13,7 @@ export type StockPage = Schema['StockRegisterPage']
 export type PositionMovementPage = Schema['PositionMovementPage']
 export type PositionTimelinePage = Schema['StockPositionTimeline']
 export type TimelineEvent = Schema['StockPositionTimelineEvent']
+export type ReceiptLot = Schema['StockReceiptLot']
 export type StockPosition = Schema['StockRegisterRow']
 export type StockQuery = NonNullable<operations['searchStockPositions']['parameters']['query']>
 export type BinTransferSnapshot = Schema['BinTransferSnapshot']
@@ -125,6 +126,34 @@ export const api = {
     const query = new URLSearchParams({ limit: '25' })
     if (after) query.set('after', after)
     return read('inventory/positions/' + encodeURIComponent(id) + '/movements?' + query, valid.PositionMovementPage)
+  },
+  async receiptLot(id: string, positionAfter: string, eventAfter: string) {
+    const query = new URLSearchParams({ positionLimit: '25', eventLimit: '25' })
+    if (positionAfter) query.set('positionAfter', positionAfter)
+    if (eventAfter) query.set('eventAfter', eventAfter)
+    const lot = await read('inventory/receipt-lots/' + encodeURIComponent(id) + '?' + query, valid.StockReceiptLot)
+    if (lot.deliveryId !== id || lot.positions.some(p => p.layer.deliveryId !== id || p.layer.purchaseId !== lot.purchaseId))
+      throw new ContractFailure()
+    if (lot.complete && (lot.receivedQuantity !== lot.unplacedQuantity + lot.positionedQuantity + lot.lostQuantity ||
+        lot.currentOnHandQuantity !== lot.unplacedQuantity + lot.positionedQuantity ||
+        lot.positionCount < lot.positions.length || lot.heldQuantity + lot.offerBackedQuantity > lot.positionedQuantity ||
+        lot.freeToBackQuantity + lot.heldQuantity + lot.offerBackedQuantity > lot.positionedQuantity ||
+        (lot.itemCostMinor === null
+          ? lot.allocatedLostItemCostMinor !== null || lot.remainingItemCostMinor !== null
+          : lot.allocatedLostItemCostMinor === null || lot.remainingItemCostMinor === null ||
+            lot.itemCostMinor !== lot.allocatedLostItemCostMinor + lot.remainingItemCostMinor)))
+      throw new ContractFailure()
+    for (const row of lot.events) {
+      const event = row.event
+      if (event.kind === 'transfer-in' ||
+          (event.kind === 'transfer-out' && (event.id !== event.relatedPositionId || event.relatedPositionId === row.positionId ||
+            !event.relatedLocationId || !event.relatedLocationCode || !event.locationCodeAtEvent ||
+            event.physicalDelta !== 0 || event.offerBackedDelta !== 0 || row.transferBackedQuantity > event.quantity)) ||
+          (event.kind !== 'transfer-out' && row.transferBackedQuantity !== 0) ||
+          (event.kind === 'count' && event.id !== event.observationId) ||
+          (event.kind === 'stock-loss' && event.id !== event.postingId)) throw new ContractFailure()
+    }
+    return lot
   },
   async positionTimeline(id: string, after: string, previous?: StockPosition) {
     const query = new URLSearchParams({ limit: '25' })

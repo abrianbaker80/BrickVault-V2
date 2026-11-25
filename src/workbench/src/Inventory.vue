@@ -4,6 +4,7 @@ import { api, explain } from './api'
 import type { StockPage, StockQuery, Workspace } from './api'
 import { label, time } from './presentation'
 import PositionInspector from './PositionInspector.vue'
+import ReceiptLotInspector from './ReceiptLotInspector.vue'
 
 const props = defineProps<{ workspace: Workspace; connected: boolean }>()
 const emit = defineEmits<{ failure: [reason: unknown] }>()
@@ -20,10 +21,16 @@ const after = computed(() => starts.value[starts.value.length - 1])
 const result = shallowRef<StockPage | null>(null)
 const error = ref('')
 const loading = ref(false)
-const routeId = () => location.hash.startsWith('#inventory/') ? location.hash.slice('#inventory/'.length).toLowerCase() : ''
+const lotRoute = () => location.hash.startsWith('#inventory/lot/') ? location.hash.slice('#inventory/lot/'.length).toLowerCase() : ''
+const routeId = () => location.hash.startsWith('#inventory/') && !location.hash.startsWith('#inventory/lot/')
+  ? location.hash.slice('#inventory/'.length).toLowerCase() : ''
 const selected = ref(routeId())
+const selectedLot = ref(lotRoute())
+const inspectorOpen = computed(() => Boolean(selected.value || selectedLot.value))
 const historyView = ref<'all' | 'transfers'>('all')
 const previousPosition = ref<string>(history.state?.timelineTo === selected.value ? history.state.timelineFrom : '')
+const lotFrom = ref<string>(history.state?.lotTo === selectedLot.value ? history.state.lotFrom : '')
+const positionFromLot = ref<string>(history.state?.lotPosition === selected.value ? history.state.returnLot : '')
 const filters = computed(() => Boolean(criteria.value.q || criteria.value.itemType || criteria.value.locationId))
 const totalsKnown = computed(() => result.value?.complete === true)
 const lastRead = computed(() => !props.connected || loading.value || Boolean(error.value))
@@ -60,7 +67,9 @@ watch(() => [criteria.value, after.value, props.workspace.asOf, props.connected]
 function inspect(id: string) {
   selected.value = id
   previousPosition.value = ''
-  history.replaceState({ ...history.state, timelineFrom: '', timelineTo: '' }, '', '#inventory/' + id)
+  selectedLot.value = ''
+  positionFromLot.value = ''
+  history.replaceState({ ...history.state, timelineFrom: '', timelineTo: '', lotPosition: '', returnLot: '' }, '', '#inventory/' + id)
 }
 function inspectRelated(id: string) {
   const from = selected.value
@@ -68,9 +77,19 @@ function inspectRelated(id: string) {
   previousPosition.value = from
   selected.value = id
 }
+function inspectLot(id: string) {
+  history.pushState({ ...history.state, lotFrom: selected.value, lotTo: id }, '', '#inventory/lot/' + id)
+  routeChanged()
+}
+function inspectFromLot(id: string) {
+  history.pushState({ ...history.state, timelineFrom: '', timelineTo: '', lotPosition: id, returnLot: selectedLot.value },
+    '', '#inventory/' + id)
+  routeChanged()
+}
 async function close() {
-  const id = selected.value
+  const id = selected.value || lotFrom.value
   selected.value = ''
+  selectedLot.value = ''
   history.replaceState(history.state, '', '#inventory')
   await nextTick()
   const button = host.value?.querySelector<HTMLButtonElement>('[data-position="' + CSS.escape(id) + '"]')
@@ -79,7 +98,10 @@ async function close() {
 }
 function routeChanged() {
   selected.value = routeId()
+  selectedLot.value = lotRoute()
   previousPosition.value = history.state?.timelineTo === selected.value ? history.state.timelineFrom : ''
+  lotFrom.value = history.state?.lotTo === selectedLot.value ? history.state.lotFrom : ''
+  positionFromLot.value = history.state?.lotPosition === selected.value ? history.state.returnLot : ''
 }
 function keyboard(event: KeyboardEvent) {
   if (event.key === '/' && !event.ctrlKey && !event.altKey && !event.metaKey &&
@@ -88,7 +110,7 @@ function keyboard(event: KeyboardEvent) {
     event.preventDefault(); search.value?.focus()
   }
 }
-watch([inspector, selected], async () => {
+watch([inspector, selected, selectedLot], async () => {
   await nextTick()
   if (inspector.value instanceof HTMLDialogElement && !inspector.value.open) inspector.value.showModal()
   else inspector.value?.querySelector<HTMLButtonElement>('button')?.focus()
@@ -113,7 +135,7 @@ onBeforeUnmount(() => {
     <div><span>Matching positions</span><strong>{{ totalsKnown ? result?.matchingPositions : '—' }}</strong></div>
     <div><span>Units in matching positions</span><strong>{{ totalsKnown ? result?.matchingUnits : '—' }}</strong></div>
   </div>
-  <div ref="host" class="register-workspace" :class="{ docked: selected && !compact }">
+  <div ref="host" class="register-workspace" :class="{ docked: inspectorOpen && !compact }">
     <section class="panel inventory-register" role="region" aria-label="Stock register">
       <header class="panel-head"><h2>Stock register</h2>
         <span v-if="result" class="count">Stock read {{ time(result.asOf) }}</span></header>
@@ -158,11 +180,20 @@ onBeforeUnmount(() => {
         <button :disabled="!connected || loading || !!error || !result?.complete || !result.nextAfter" @click="result?.nextAfter && starts.push(result.nextAfter)">Next</button>
       </div>
     </section>
-    <component v-if="selected" :is="compact ? 'dialog' : 'aside'" ref="inspector" class="panel inspector"
+    <component v-if="inspectorOpen" :is="compact ? 'dialog' : 'aside'" ref="inspector" class="panel inspector"
       aria-labelledby="position-title" @cancel.prevent="close" @keydown.esc.prevent="close">
-      <header class="panel-head"><h2 id="position-title">Position inspector</h2><button class="close" aria-label="Close position inspector" @click="close">×</button></header>
-      <p class="previous-position" v-if="previousPosition"><a :href="'#inventory/' + previousPosition">Return to previous position timeline</a></p>
-      <PositionInspector :history-view="historyView" @view="historyView = $event" @related="inspectRelated" :key="selected" :id="selected" :as-of="workspace.asOf" :connected="connected" @failure="emit('failure', $event)" @inspect="inspect" />
+      <header class="panel-head"><h2 id="position-title">{{ selectedLot ? 'Receipt lot inspector' : 'Position inspector' }}</h2>
+        <button class="close" :aria-label="selectedLot ? 'Close receipt lot inspector' : 'Close position inspector'" @click="close">×</button></header>
+      <template v-if="selectedLot">
+        <p v-if="lotFrom" class="previous-position"><a :href="'#inventory/' + lotFrom">Return to opening position</a></p>
+        <ReceiptLotInspector :key="selectedLot" :id="selectedLot" :as-of="workspace.asOf" :connected="connected"
+          @failure="emit('failure', $event)" @inspect="inspectFromLot" />
+      </template>
+      <template v-else>
+        <p class="previous-position" v-if="previousPosition"><a :href="'#inventory/' + previousPosition">Return to previous position timeline</a></p>
+        <p class="previous-position" v-if="positionFromLot"><a :href="'#inventory/lot/' + positionFromLot">Return to receipt lot</a></p>
+        <PositionInspector :history-view="historyView" @view="historyView = $event" @related="inspectRelated" :key="selected" :id="selected" :as-of="workspace.asOf" :connected="connected" @failure="emit('failure', $event)" @inspect="inspect" @lot="inspectLot" />
+      </template>
     </component>
   </div>
 </template>
