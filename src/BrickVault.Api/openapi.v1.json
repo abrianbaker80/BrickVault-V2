@@ -1151,6 +1151,14 @@
               "maximum": 100,
               "default": 25
             }
+          },
+          {
+            "name": "closures",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include exact-recount closure links for returned observations."
           }
         ]
       }
@@ -1864,7 +1872,7 @@
             "schema": {
               "type": "string",
               "maxLength": 84,
-              "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release|offer-withdrawal)\\.[0-9a-f]{32}$"
+              "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release|offer-withdrawal|shortage-closure)\\.[0-9a-f]{32}$"
             }
           },
           {
@@ -1893,6 +1901,14 @@
               "type": "boolean"
             },
             "description": "Include recorded draft backing withdrawal events."
+          },
+          {
+            "name": "closures",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include recorded exact-recount closure events."
           }
         ],
         "responses": {
@@ -1927,7 +1943,7 @@
             }
           },
           "426": {
-            "description": "The retained client contract cannot represent quarantine in this scope.",
+            "description": "The retained client contract cannot represent one or more recorded evidence kinds in this scope.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2326,6 +2342,14 @@
               "type": "boolean"
             },
             "description": "Include recorded draft backing withdrawal events."
+          },
+          {
+            "name": "closures",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include recorded exact-recount closure events."
           }
         ],
         "responses": {
@@ -2370,7 +2394,7 @@
             }
           },
           "426": {
-            "description": "The retained client contract cannot represent quarantine in this scope.",
+            "description": "The retained client contract cannot represent one or more recorded evidence kinds in this scope.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2876,6 +2900,140 @@
           }
         },
         "description": "Withdraw selected units of a local internal draft offer from a confirmed receipt position."
+      }
+    },
+    "/api/v1/receiving/shortage-closures": {
+      "post": {
+        "operationId": "closeExactRecountShortage",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "description": "The authenticated workspaceId captured when the operator prepared the command. Use that same value for every retry. A missing or mismatched workspace returns 409 workspace_mismatch.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockShortageClosureCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockShortageClosureReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Record closure of an open shortage from its latest exact witnessed recount without moving or adjusting stock."
+      }
+    },
+    "/api/v1/receiving/bins/{locationId}/positions/{positionId}/shortages/{caseId}/closure": {
+      "get": {
+        "operationId": "getStockShortageClosure",
+        "description": "Read the exact no-adjustment closure for this bin, position and shortage.",
+        "parameters": [
+          {
+            "name": "locationId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "positionId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "caseId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "commandId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Match one recorded closure command."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockShortageClosureEvidence"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No matching exact recount closure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -3410,7 +3568,8 @@
               "recount",
               "quarantine",
               "quarantine-release",
-              "offer-withdrawal"
+              "offer-withdrawal",
+              "shortage-closure"
             ]
           },
           "correlationId": {
@@ -5295,6 +5454,14 @@
             ],
             "format": "uuid",
             "description": "Pass this observation ID as after for the next history page. Null indicates the end of the scoped history."
+          },
+          "closures": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/StockShortageClosureSummary"
+            },
+            "description": "With closures=true, includes exact-recount closures linked to the observation page or exact observation."
           }
         },
         "required": [
@@ -6899,7 +7066,8 @@
               "offer-backing",
               "quarantine",
               "quarantine-release",
-              "offer-withdrawal"
+              "offer-withdrawal",
+              "shortage-closure"
             ]
           },
           "id": {
@@ -7110,7 +7278,7 @@
               "null"
             ],
             "maxLength": 84,
-            "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release|offer-withdrawal)\\.[0-9a-f]{32}$"
+            "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release|offer-withdrawal|shortage-closure)\\.[0-9a-f]{32}$"
           },
           "events": {
             "type": "array",
@@ -8956,6 +9124,254 @@
           "quantity",
           "priorRemainingQuantity",
           "remainingQuantity"
+        ],
+        "additionalProperties": false
+      },
+      "StockShortageClosureCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "caseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedObservationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "commandId",
+          "purchaseId",
+          "expectedRevision",
+          "positionId",
+          "locationId",
+          "confirmedLocationCode",
+          "caseId",
+          "expectedObservationId",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "StockShortageClosureReceipt": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "kind": {
+            "type": "string",
+            "const": "shortage-closure"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "commandId",
+          "entityId",
+          "revision",
+          "kind",
+          "correlationId"
+        ],
+        "additionalProperties": false
+      },
+      "StockShortageClosureSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "caseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "openingObservationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recountObservationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "caseId",
+          "positionId",
+          "commandId",
+          "openingObservationId",
+          "recountObservationId",
+          "recordedAt"
+        ],
+        "additionalProperties": false
+      },
+      "StockShortageClosureEvidence": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "shortage-closure"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "caseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "openingObservation": {
+            "$ref": "#/components/schemas/StockCountObservation"
+          },
+          "recountObservation": {
+            "$ref": "#/components/schemas/StockCountObservation"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/AdjustmentReceiptEvidence"
+          },
+          "ledgerQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "quarantinedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "heldQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "offerBackedQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "id",
+          "commandId",
+          "correlationId",
+          "revision",
+          "purchaseId",
+          "positionId",
+          "caseId",
+          "location",
+          "confirmedLocationCode",
+          "openingObservation",
+          "recountObservation",
+          "receipt",
+          "ledgerQuantity",
+          "quarantinedQuantity",
+          "heldQuantity",
+          "offerBackedQuantity",
+          "reason",
+          "recordedAt"
         ],
         "additionalProperties": false
       }

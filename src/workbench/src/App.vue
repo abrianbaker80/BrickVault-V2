@@ -138,6 +138,7 @@ function openForm() {
             <a v-if="notice.quarantineReceipt" :href="notice.quarantineReceipt">View quarantine receipt</a>
             <a v-if="notice.withdrawalLink" :href="notice.withdrawalLink">View withdrawal receipt</a>
             <a v-if="notice.recountLink" :href="notice.recountLink">View recount receipt</a>
+            <a v-if="notice.closureReceipt" :href="notice.closureReceipt">View shortage closure receipt</a>
             <a v-if="notice.lossLink" :href="notice.lossLink">View posted stock loss</a>
             <a v-if="notice.countLink" :href="notice.countLink">View count receipt</a></div>
           <p v-if="readState === 'partial'" class="warning" role="status">The service returned a partial register. Refresh to verify the complete workspace before making a change.</p>

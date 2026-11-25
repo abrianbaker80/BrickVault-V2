@@ -52,7 +52,7 @@ internal sealed class StockCounts(NpgsqlDataSource db)
         """;
 
     public async Task<BinCountSnapshot> Snapshot(Guid locationId, CancellationToken token, Guid? positionId = null,
-        Guid? after = null, int limit = 25, Guid? observationId = null, Guid? commandId = null)
+        Guid? after = null, int limit = 25, Guid? observationId = null, Guid? commandId = null, bool closures = false)
     {
         var exact = observationId.HasValue || commandId.HasValue;
         if (limit is < 1 or > 100 || (observationId.HasValue && commandId.HasValue) || (exact && after.HasValue))
@@ -152,7 +152,11 @@ internal sealed class StockCounts(NpgsqlDataSource db)
             r.GetDateTime(3),r.GetInt32(4),r.GetGuid(5),r.GetDateTime(6),r.GetInt32(7)),
             token, locationId, Nullable(NpgsqlDbType.Uuid, positionId), Nullable(NpgsqlDbType.Integer, witnessRevision));
 
-        return new BinCountSnapshot("bin-counts", asOf, true, location, positionId, next, positions, observations, shortages);
+        IReadOnlyList<StockShortageClosureSummary>? closureRows = null;
+        if (closures)
+            closureRows = observations.Count == 0 ? [] :
+                await StockShortageClosures.ReadSummaries(connection, tx, observations, token);
+        return new BinCountSnapshot("bin-counts", asOf, true, location, positionId, next, positions, observations, shortages, closureRows);
     }
 
     internal static StockCountObservation ReadObservation(NpgsqlDataReader r)

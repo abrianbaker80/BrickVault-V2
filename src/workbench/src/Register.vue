@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import BinStock from './BinStock.vue'
 import StockQuarantine from './StockQuarantine.vue'
+import ShortageClosure from './ShortageClosure.vue'
 import DraftBacking from './DraftBacking.vue'
 import BuildHolds from './BuildHolds.vue'
 import StockLossWorkspace from './StockLossWorkspace.vue'
@@ -39,7 +40,7 @@ function inspect(row: Catalog | Location, event: MouseEvent) {
 watch(() => props.confirmedSourceId, id => {
   if (id && !inspectedId.value && props.page === 'locations') inspectedId.value = id
 })
-const separateDialog = computed(() => props.countLink?.holdPositionId || props.countLink?.lossPositionId || props.countLink?.quarantinePositionId || props.countLink?.draftPositionId)
+const separateDialog = computed(() => props.countLink?.closure || props.countLink?.holdPositionId || props.countLink?.lossPositionId || props.countLink?.quarantinePositionId || props.countLink?.draftPositionId)
 watch([inspectedId, compact, separateDialog], async () => {
   await nextTick()
   if (separateDialog.value) return
@@ -136,6 +137,10 @@ onBeforeUnmount(() => {
       :connected="connected" :locations="workspace.locations" :catalog="workspace.catalog" :transfers="transfers" :count-link="countLink"
       @inspect="inspectBin" @recover="close" @failure="emit('failure', $event)" />
   </component>
+  <ShortageClosure v-if="inspected && 'code' in inspected && countLink?.binId===inspected.id && countLink.closure"
+    :key="[inspected.id,countLink.closure.position,countLink.closure.caseId,countLink.closure.mode,countLink.closure.id].join('/')"
+    :location="inspected" :route="countLink.closure" :as-of="workspace.asOf" :workspace-ready="workspaceReady" :connected="connected" :controls="transfers"
+    @failure="emit('failure',$event)" @recover="close" @close="inspectBin(inspected.id)" />
   <StockLossWorkspace v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.lossPositionId"
     :key="countLink.binId + '/' + countLink.lossPositionId + '/' + (countLink.lossReceiptId ? 'posting/' + countLink.lossReceiptId : 'case/' + countLink.lossCaseId)" :location="inspected" :position="countLink.lossPositionId"
     :catalog="workspace.catalog" :case-id="countLink.lossCaseId" :posting="countLink.lossReceiptId" :as-of="workspace.asOf" :connected="connected" :controls="transfers"

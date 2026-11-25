@@ -50,13 +50,14 @@ export type ReceivingCommand = { workspaceId: string } & (
   | { kind: 'transfer'; body: TransferCommand }
   | { kind: 'count'; body: Schema['StockCountCommand'] }
   | { kind: 'stock-loss'; body: StockLossCommand }
+  | { kind: 'shortage-closure'; body: Schema['StockShortageClosureCommand'] }
   | { kind: 'hold'; body: Schema['StockHoldCommand'] }
   | { kind: 'hold-release'; locationId: string; positionId: string; body: Schema['StockHoldReleaseCommand'] })
 export type Command = ReceivingCommand | { workspaceId: string } & (
   | { kind: 'catalog'; body: Schema['CatalogCommand'] }
   | { kind: 'location'; body: Schema['LocationCommand'] })
 export type Held = { workspaceId: string | null; commandId: string }
-export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | Schema['RecountReceipt'] | Schema['StockQuarantineReceipt'] | Schema['DraftBackingWithdrawalReceipt'] | undefined>
+export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | Schema['RecountReceipt'] | Schema['StockQuarantineReceipt'] | Schema['DraftBackingWithdrawalReceipt'] | Schema['StockShortageClosureReceipt'] | undefined>
 
 export function commandLabel(command: Command) {
   switch (command.kind) {
@@ -71,6 +72,7 @@ export function commandLabel(command: Command) {
     case 'offer': return 'Unpublished offer'
     case 'hold': return 'Build hold for ' + command.body.purpose
     case 'hold-release': return 'Release of ' + command.body.quantity + (command.body.quantity === 1 ? ' held unit' : ' held units')
+    case 'shortage-closure': return 'Shortage closure in ' + command.body.confirmedLocationCode
     case 'stock-loss': return 'Stock loss in ' + command.body.confirmedLocationCode
     case 'count': return 'Stock count of ' + command.body.countedQuantity + ' in ' + command.body.confirmedLocationCode
     case 'transfer': return 'Transfer of ' + command.body.quantity + ' from ' + command.body.confirmedSourceLocationCode + ' to ' + command.body.confirmedDestinationLocationCode
@@ -88,6 +90,7 @@ const commands = {
   delivery: { path: 'receiving/deliveries', valid: valid.DeliveryCommand },
   putaway: { path: 'receiving/putaway', valid: valid.PutawayCommand },
   offer: { path: 'receiving/offers', valid: valid.OfferCommand },
+  'shortage-closure': { path:'receiving/shortage-closures', valid: valid.StockShortageClosureCommand },
   'stock-loss': { path: 'receiving/stock-losses', valid: valid.StockLossCommand },
   count: { path: 'receiving/counts', valid: valid.StockCountCommand },
   hold: { path: 'receiving/holds', valid: valid.StockHoldCommand },
@@ -143,7 +146,9 @@ function checkedPreview(page: RecountPreviewPage, input: RecountPreviewRequest) 
   return page
 }
 
-function invalidWithdrawalEvent(event: TimelineEvent) {
+function invalidNonphysicalEvent(event: TimelineEvent) {
+  if (event.kind==='shortage-closure') return !event.caseId || !event.observationId || event.quantity!==event.ledgerQuantityAtWitness ||
+    event.physicalDelta!==0 || event.reservedDelta!==0 || event.offerBackedDelta!==0
   return event.kind === 'offer-withdrawal' && (!event.offerId || event.physicalDelta !== 0 || event.reservedDelta !== 0 ||
     event.offerBackedDelta !== -event.quantity || event.quantity < 1)
 }
@@ -184,7 +189,7 @@ export const api = {
     return read('inventory/positions/' + encodeURIComponent(id) + '/movements?' + query, valid.PositionMovementPage)
   },
   async receiptLot(id: string, positionAfter: string, eventAfter: string) {
-    const query = new URLSearchParams({ positionLimit: '25', eventLimit: '25', quarantine: 'true', withdrawals: 'true' })
+    const query = new URLSearchParams({ positionLimit: '25', eventLimit: '25', quarantine: 'true', withdrawals: 'true', closures:'true' })
     if (positionAfter) query.set('positionAfter', positionAfter)
     if (eventAfter) query.set('eventAfter', eventAfter)
     const lot = await read('inventory/receipt-lots/' + encodeURIComponent(id) + '?' + query, valid.StockReceiptLot)
@@ -201,7 +206,7 @@ export const api = {
       throw new ContractFailure()
     for (const row of lot.events) {
       const event = row.event
-      if (invalidWithdrawalEvent(event) || event.kind === 'transfer-in' ||
+      if (invalidNonphysicalEvent(event) || event.kind === 'transfer-in' ||
           (event.kind === 'transfer-out' && (event.id !== event.relatedPositionId || event.relatedPositionId === row.positionId ||
             !event.relatedLocationId || !event.relatedLocationCode || !event.locationCodeAtEvent ||
             event.physicalDelta !== 0 || event.offerBackedDelta !== 0 || row.transferBackedQuantity > event.quantity)) ||
@@ -212,7 +217,7 @@ export const api = {
     return lot
   },
   async positionTimeline(id: string, after: string, previous?: StockPosition) {
-    const query = new URLSearchParams({ limit: '25', quarantine: 'true', withdrawals: 'true' })
+    const query = new URLSearchParams({ limit: '25', quarantine: 'true', withdrawals: 'true', closures:'true' })
     if (after) query.set('after', after)
     const page = await read('inventory/positions/' + encodeURIComponent(id) + '/timeline?' + query, valid.StockPositionTimeline)
     const position = page.position
@@ -225,7 +230,7 @@ export const api = {
         position.layer.purchaseId !== previous.layer.purchaseId || position.layer.deliveryId !== previous.layer.deliveryId ||
         position.layer.catalogId !== previous.layer.catalogId || position.location.revision < previous.location.revision)) throw new ContractFailure()
     for (const event of page.events) {
-      if (invalidWithdrawalEvent(event) || event.locationId !== page.location.id ||
+      if (invalidNonphysicalEvent(event) || event.locationId !== page.location.id ||
           (event.kind === 'count' && (event.id !== event.observationId || event.ledgerQuantityAtWitness === null)) ||
           (event.kind === 'stock-loss' && event.id !== event.postingId)) throw new ContractFailure()
       if (event.kind === 'transfer-in' || event.kind === 'transfer-out') {
@@ -353,10 +358,28 @@ export const api = {
         result.releases[0].commandId !== commandId))) throw new ContractFailure()
     return result
   },
-  async binCounts(binId: string, query: { positionId?: string; observationId?: string; commandId?: string; after?: string; limit?: string }) {
-    const result = await read('receiving/bins/' + encodeURIComponent(binId) + '/counts?' + new URLSearchParams(query), valid.BinCountSnapshot)
+  async closure(bin:string,position:string,caseId:string, selector?: {receiptId:string}|{commandId:string}) {
+    const path='receiving/bins/'+encodeURIComponent(bin)+'/positions/'+encodeURIComponent(position)+'/shortages/'+encodeURIComponent(caseId)+'/closure'
+    const result=await read(path+(selector && 'commandId' in selector ? '?'+new URLSearchParams(selector) : ''),valid.StockShortageClosureEvidence)
+    const {openingObservation:opening,recountObservation:exact}=result
+    if (result.location.id!==bin || result.positionId!==position || result.caseId!==caseId ||
+        (selector && ('receiptId' in selector ? selector.receiptId!==result.id : selector.commandId!==result.commandId)) ||
+        [opening,exact].some(o=>o.locationId!==bin || o.positionId!==position || o.purchaseId!==result.purchaseId) ||
+        opening.id!==caseId || opening.id===exact.id || opening.missingQuantity<=0 || exact.expectedPurchaseRevision<=opening.expectedPurchaseRevision ||
+        exact.missingQuantity!==0 || exact.unidentifiedSurplusQuantity!==0 || exact.countedQuantity!==result.ledgerQuantity ||
+        exact.ledgerQuantity!==result.ledgerQuantity || result.quarantinedQuantity+result.heldQuantity+result.offerBackedQuantity>result.ledgerQuantity)
+      throw new ContractFailure()
+    return result
+  },
+  async binCounts(binId: string, query: { positionId?: string; observationId?: string; commandId?: string; after?: string; limit?: string }, withClosures=false) {
+    const params=new URLSearchParams(query)
+    if (withClosures) params.set('closures','true')
+    const result = await read('receiving/bins/' + encodeURIComponent(binId) + '/counts?' + params, valid.BinCountSnapshot)
     const scoped = Boolean(query.positionId || query.commandId || query.observationId)
     const wrongPosition = (id: string) => scoped && id !== result.positionId
+    if (withClosures && result.complete && (!result.closures || result.closures.some(c=>wrongPosition(c.positionId) ||
+        c.openingObservationId!==c.caseId || c.openingObservationId===c.recountObservationId) ||
+        ((query.observationId || query.commandId) && result.closures.length>1))) throw new ContractFailure()
     if (result.location.id !== binId || scoped !== Boolean(result.positionId) || (query.positionId && wrongPosition(query.positionId)) ||
         result.observations.some(o => o.locationId !== binId || wrongPosition(o.positionId) ||
           (query.observationId && o.id !== query.observationId) || (query.commandId && o.commandId !== query.commandId)) ||
@@ -379,12 +402,13 @@ export const api = {
       : command.kind === 'quarantine' || command.kind === 'quarantine-release' ? await read(path, valid.StockQuarantineReceipt, options)
       : command.kind === 'offer-withdrawal' ? await read(path, valid.DraftBackingWithdrawalReceipt, options)
       : command.kind === 'recount' ? await read(path, valid.RecountReceipt, options)
+      : command.kind === 'shortage-closure' ? await read(path,valid.StockShortageClosureReceipt,options)
       : command.kind === 'stock-loss' ? await read(path, valid.StockLossReceipt, options)
       : command.kind === 'count' ? await read(path, valid.StockCountReceipt, options)
       : command.kind === 'transfer' ? await read(path, valid.TransferReceipt, options) : await read(path, valid.ReceivingReceipt, options)
     if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind ||
         ((command.kind === 'quarantine' || command.kind === 'quarantine-release') && receipt.revision !== command.body.expectedRevision + 1) ||
-        (command.kind === 'offer-withdrawal' && receipt.revision !== command.body.expectedRevision + 1) ||
+        ((command.kind === 'shortage-closure' || command.kind === 'offer-withdrawal') && receipt.revision !== command.body.expectedRevision + 1) ||
         (command.kind === 'recount' && (receipt.entityId !== command.body.previewId || receipt.revision !== 1))) throw new ContractFailure()
     return receipt
   }

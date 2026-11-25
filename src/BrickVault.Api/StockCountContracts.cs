@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace BrickVault.Api;
 
@@ -46,4 +47,5 @@ internal sealed record StockShortageCase(Guid Id, Guid PositionId, Guid Purchase
     DateTime LatestObservedAt, int LatestObservedMissingQuantity);
 internal sealed record BinCountSnapshot(string Scope, DateTime AsOf, bool Complete, LocationRow Location,
     Guid? PositionId, Guid? NextAfter, IReadOnlyList<CountPosition> Positions, IReadOnlyList<StockCountObservation> Observations,
-    IReadOnlyList<StockShortageCase> Shortages);
+    IReadOnlyList<StockShortageCase> Shortages,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<StockShortageClosureSummary>? Closures = null);
