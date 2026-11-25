@@ -235,3 +235,61 @@ test('paged offer history restarts after a competing revision and two operators 
     expect(current.contributions.filter(row=>row.reason?.startsWith('Request for the last unit'))).toHaveLength(1)
   } finally {await other.close()}
 })
+
+test('keyboard withdrawal preparation survives workspace entry and repeated history refreshes',async ({page})=>{
+  const f=await eight(page)
+  const dialog=view(page), start=dialog.getByRole('button',{name:'Withdraw backing',exact:true})
+  const form=dialog.getByRole('heading',{name:'Withdraw draft backing',exact:true})
+  const history=path(f.position)+'/'+f.offer+'/history'
+  async function delayResponse(pathname:string) {
+    let received!:()=>void, release!:()=>void, done!:()=>void
+    const waiting=new Promise<void>(resolve=>{received=resolve})
+    const allowed=new Promise<void>(resolve=>{release=resolve})
+    const finished=new Promise<void>(resolve=>{done=resolve})
+    await page.route(url=>url.pathname===pathname,async route=>{
+      const response=await route.fetch()
+      received()
+      try {
+        await allowed
+        await route.fulfill({response})
+      } finally {
+        await response.dispose()
+        done()
+      }
+    },{times:1})
+    return {waiting, async resume() {release(); await finished}}
+  }
+  await review(page,f.position,f.a.id,f.offer)
+  await expect(start).toBeEnabled()
+  for(let i=0;i<2;i++) {
+    await start.focus()
+    await expect(start).toBeFocused()
+    const refresh=await delayResponse(history)
+    try {
+      await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
+      await refresh.waiting
+      await expect(dialog.getByText('Reading offer backing…')).toBeVisible()
+      await page.keyboard.press('Enter')
+      await expect(form).toBeFocused()
+      await fill(page,f.a.code,1,'Prepared during revalidation')
+      await expect(dialog.getByRole('button',{name:'Confirm withdrawal'})).toBeDisabled()
+    } finally {await refresh.resume()}
+    await expect(dialog.getByRole('button',{name:'Confirm withdrawal'})).toBeEnabled()
+    await dialog.getByRole('button',{name:'Cancel',exact:true}).press('Enter')
+    await expect(start).toBeFocused()
+  }
+  await page.goto('/#receiving/'+f.purchaseId)
+  const source=page.getByRole('link',{name:'Review draft offer '+f.offer+' at position '+f.position})
+  await expect(source).toBeVisible()
+  const register=await delayResponse('/api/v1/workspace')
+  try {
+    await source.press('Enter')
+    await register.waiting
+    await expect(dialog.getByText('Waiting for a complete workspace read…')).toBeVisible()
+    await expect(start).toHaveCount(0)
+  } finally {await register.resume()}
+  await start.focus()
+  await expect(start).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(form).toBeFocused()
+})

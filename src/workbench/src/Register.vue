@@ -7,7 +7,7 @@ import StockLossWorkspace from './StockLossWorkspace.vue'
 import type { CountLink } from './countLinks'
 import { label } from './presentation'
 import type { Catalog, Location, TransferControls, Workspace } from './api'
-const props = defineProps<{ page: 'catalog' | 'locations'; workspace: Workspace; connected: boolean; transfers: TransferControls; confirmedSourceId?: string; countLink?: CountLink }>()
+const props = defineProps<{ page: 'catalog' | 'locations'; workspace: Workspace; connected: boolean; workspaceReady: boolean; transfers: TransferControls; confirmedSourceId?: string; countLink?: CountLink }>()
 const emit = defineEmits<{ failure: [reason: unknown] }>()
 const query = ref('')
 const search = ref<HTMLInputElement>()
@@ -141,7 +141,7 @@ onBeforeUnmount(() => {
     @failure="emit('failure', $event)" @recover="close" @close="inspectBin(inspected.id)" />
   <DraftBacking v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.draftPositionId"
     :key="[countLink.binId,countLink.draftPositionId,countLink.draftOfferId,countLink.withdrawalId].join('/')"
-    :bin="inspected" :position="countLink.draftPositionId" :offer="countLink.draftOfferId" :receipt="countLink.withdrawalId"
+    :bin="inspected" :position="countLink.draftPositionId" :offer="countLink.draftOfferId" :receipt="countLink.withdrawalId" :workspace-ready="workspaceReady"
     :as-of="workspace.asOf" :connected="connected" :controls="transfers"
     @failure="emit('failure',$event)" @recover="close" @close="inspectBin(inspected.id)" />
   <BuildHolds v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.holdPositionId"
