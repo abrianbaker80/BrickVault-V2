@@ -32,7 +32,7 @@ const validQuantity = (entry: {offer: Offer; quantity: string}) => /^[0-9]+$/.te
 const chosen = computed(() => selected.value.reduce((total, row) => total + (validQuantity(row) ? Number(row.quantity) : 0),0))
 const ready = computed(() => props.connected && props.controls.enabled && !sending.value && !loading.value &&
   !error.value && !stale.value && !resolved.value && !!page.value)
-const permitted = computed(() => ready.value && !!page.value?.candidateLossQuantity && !page.value.protectedProjectShortfall)
+const permitted = computed(() => ready.value && !!page.value?.candidateLossQuantity && !page.value.protectedProjectShortfall && page.value.quarantineBlocksLoss === false)
 const canPost = computed(() => permitted.value && page.value && selected.value.every(validQuantity) &&
   chosen.value === page.value.minimumOfferBackingReduction && code.value === page.value.location.code && reason.value.trim() !== '')
 let mounted = true
@@ -123,6 +123,7 @@ async function post() {
           <dt>Protected build holds</dt><dd>{{ page.protectedProjectQuantity }}</dd><dt>Capacity for offers after loss</dt><dd>{{ page.offerCapacityAfterLoss }}</dd>
           <dt>Currently backed here</dt><dd>{{ page.offerBackedQuantity }}</dd></dl>
         <a v-if="page.protectedProjectQuantity" :href="holdPositionLink(location.id,position)">Inspect named build holds</a>
+        <p v-if="page.quarantineBlocksLoss" class="warning">{{ page.quarantinedQuantity }} quarantined in this position. The count does not identify which pieces are missing. Loss posting is blocked.</p>
         <p v-if="page.protectedProjectShortfall" class="warning">Build holds exceed remaining stock by {{ page.protectedProjectShortfall }}. Review the named holds before posting.</p>
         <p v-if="!page.candidateLossQuantity" class="warning">The latest witnessed count supports no stock loss.</p>
         <form @submit.prevent="post">

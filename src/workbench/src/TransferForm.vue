@@ -20,8 +20,9 @@ const sending = ref(false)
 const attempted = ref(false)
 const line = props.original.layer
 const sourceAtOpen = props.source.code
-const movable = computed(() => line.quantity - props.reserved)
-const movableUnbacked = computed(() => line.unbackedQuantity - props.reserved)
+const restricted = computed(() => props.reserved + (line.quarantinedQuantity ?? 0))
+const movable = computed(() => line.quantity - restricted.value)
+const movableUnbacked = computed(() => line.unbackedQuantity - restricted.value)
 const stale = computed(() => !props.current || props.current.purchaseRevision !== props.original.purchaseRevision ||
   props.source.code !== sourceAtOpen || props.current.layer.currentCatalog.revision !== line.currentCatalog.revision)
 const backing = computed(() => props.original.backing.map(offer => ({
@@ -73,7 +74,7 @@ async function submit() {
       <div><strong>{{ line.purchaseReference }} · {{ line.deliveryReference }}</strong>
         <p class="field-hint">{{ itemLabel([line.currentCatalog], line.catalogId) }}</p>
         <p>{{ line.quantity }} in {{ sourceAtOpen }} · {{ line.unbackedQuantity }} unbacked</p>
-        <p v-if="reserved" class="field-hint">{{ reserved }} reserved for builds · {{ movable }} can move, including {{ movableUnbacked }} without offer backing.</p></div>
+        <p v-if="restricted" class="field-hint">{{ reserved }} reserved for builds · <template v-if="line.quarantinedQuantity">{{ line.quarantinedQuantity }} quarantined · </template>{{ movable }} can move, including {{ movableUnbacked }} without offer backing.</p></div>
       <p v-if="line.catalogRevision !== line.currentCatalog.revision || !line.currentCatalog.integrationEligible" class="warning">
         The layer keeps its recorded catalog revision {{ line.catalogRevision }}. The current catalog revision is {{ line.currentCatalog.revision }}.
         The selected offer quantities stay backed when they move.
@@ -91,7 +92,7 @@ async function submit() {
         <label class="span">Reason<input v-model="reason" required maxlength="200" /></label>
       </fieldset>
       <label v-if="original.backing.length" class="whole-position">
-        <input v-model="moveAll" type="checkbox" :disabled="!available || reserved > 0" />
+        <input v-model="moveAll" type="checkbox" :disabled="!available || restricted > 0" />
         <span>Move the whole position with all offer backing
           <small>{{ line.quantity }} units in this position · {{ line.backedQuantity }} backed across {{ original.backing.length }} {{ original.backing.length === 1 ? 'offer' : 'offers' }}</small>
         </span>

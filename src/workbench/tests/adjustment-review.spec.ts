@@ -33,7 +33,7 @@ test('a count review identifies protected pieces and both unpublished offers bef
   await audit(page)
   await review.getByRole('heading', { name: 'Unpublished offers (2)' }).scrollIntoViewIfNeeded()
   await page.screenshot({ path: info.outputPath('adjustment-review-mobile.png') })
-  const fresh = await page.request.get('/api/v1/receiving/current?holds=true&losses=true')
+  const fresh = await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true')
   const facts = (await fresh.json()).purchases.find((p: {id: string}) => p.id === f.paid.purchaseId)
   expect(facts.balances.physicalOnHand).toBe(8)
   expect(facts.balances.reserved).toBe(1)

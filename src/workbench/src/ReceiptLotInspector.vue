@@ -2,7 +2,7 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, explain } from './api'
 import type { ReceiptLot, TimelineEvent } from './api'
-import { countReceiptLink, lossReceiptLink } from './countLinks'
+import { countReceiptLink, lossReceiptLink, quarantineLink } from './countLinks'
 import { time } from './presentation'
 import { money } from './receiving'
 
@@ -52,6 +52,7 @@ function pageBy(list: keyof Cursors, cursor?: string) {
 const titles: Record<TimelineEvent['kind'], string> = {
   'putaway': 'Put away', 'transfer-in': 'Transfer within lot', 'transfer-out': 'Transfer within lot',
   'count': 'Count witnessed', 'hold': 'Build hold placed', 'hold-release': 'Build hold released',
+  'quarantine': 'Quarantined in bin', 'quarantine-release': 'Released after inspection',
   'stock-loss': 'Stock loss posted', 'offer-backing': 'Offer backing added',
 }
 function signed(value: number) { return value > 0 ? '+' + value : String(value) }
@@ -79,6 +80,7 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
         <dt>In positions</dt><dd>{{ page.positionedQuantity }}</dd>
         <dt>Posted loss</dt><dd>{{ page.lostQuantity }}</dd>
         <dt>Current on hand</dt><dd>{{ page.currentOnHandQuantity }}</dd>
+        <template v-if="page.quarantinedQuantity"><dt>Quarantined in bins</dt><dd>{{ page.quarantinedQuantity }}</dd></template>
         <dt>Held for builds</dt><dd>{{ page.heldQuantity }}</dd>
         <dt>Backed by offers</dt><dd>{{ page.offerBackedQuantity }}</dd>
         <dt>Available to back</dt><dd>{{ page.freeToBackQuantity }}</dd>
@@ -135,7 +137,11 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
               <p v-if="event.offerBackedDelta">{{ signed(event.offerBackedDelta) }} backed</p>
               <p v-if="event.kind === 'count'">{{ event.quantity }} observed · {{ event.ledgerQuantityAtWitness }} recorded at count</p>
               <p v-if="event.locationCodeAtEvent">Recorded bin {{ event.locationCodeAtEvent }}</p>
-              <a v-if="event.kind === 'count' && event.observationId" :href="countReceiptLink(event.locationId, event.observationId)">View count receipt</a>
+              <template v-if="event.kind === 'quarantine' || event.kind === 'quarantine-release'">
+            <p>{{ event.quantity }} {{ event.kind === 'quarantine' ? 'made unavailable in this bin' : 'released from quarantine after inspection' }}</p>
+            <a :href="quarantineLink(event.locationId, positionId, event.id)">View quarantine receipt</a>
+          </template>
+          <a v-if="event.kind === 'count' && event.observationId" :href="countReceiptLink(event.locationId, event.observationId)">View count receipt</a>
               <a v-if="event.kind === 'stock-loss' && event.postingId" :href="lossReceiptLink(event.locationId, positionId, event.postingId)">View posted loss receipt</a>
               <a :href="'#inventory/' + positionId" @click.exact.prevent="emit('inspect', positionId)">Inspect event position</a>
             </template>

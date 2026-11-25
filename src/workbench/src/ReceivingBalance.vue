@@ -22,6 +22,7 @@ const amount = (value: number | null) => money(value, props.purchase.currency)
         <li v-for="d in purchase.deliveries" :key="d.id">
           <div class="receipt-line-head"><strong>{{ d.reference }}</strong><span>{{ d.quantity }} received</span></div>
           <small>{{ d.catalogId ? itemLabel(catalog, d.catalogId, d.catalogRevision) : 'Mixed delivery' }} · Item cost {{ amount(d.itemCostMinor) }}</small>
+          <small v-if="d.quarantinedQuantity">{{ d.quarantinedQuantity }} quarantined in bin positions</small>
           <small v-if="d.lostQuantity">{{ d.lostQuantity }} lost · Allocated item cost {{ amount(d.allocatedLostItemCostMinor) }} · Remaining delivery cost {{ amount(d.remainingItemCostMinor) }}</small>
           <ul class="bin-rows">
             <li v-if="d.intakeQuantity"><span>{{ d.catalogId ? 'Intake' : 'Quarantine' }}</span><strong>{{ d.intakeQuantity }}</strong></li>

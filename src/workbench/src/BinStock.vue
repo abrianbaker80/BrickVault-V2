@@ -4,7 +4,7 @@ import { api, ContractFailure, explain } from './api'
 import type { BinTransferSnapshot, Catalog, Location, TransferControls, TransferPosition } from './api'
 import TransferForm from './TransferForm.vue'
 import CountWorkspace from './CountWorkspace.vue'
-import { countPositionLink, holdPositionLink, type CountLink } from './countLinks'
+import { countPositionLink, holdPositionLink, quarantineLink, type CountLink } from './countLinks'
 import { itemLabel, money } from './receiving'
 import { time } from './presentation'
 
@@ -25,7 +25,7 @@ function closeCount() {
   window.location.hash = 'locations/' + props.location.id
 }
 watch(() => props.countLink, async (link, previous) => {
-  if (link?.binId === props.location.id && !link.positionId && !link.receiptId && !link.holdPositionId && (previous?.positionId || previous?.receiptId || previous?.holdPositionId)) {
+  if (link?.binId === props.location.id && !link.positionId && !link.receiptId && !link.holdPositionId && !link.quarantinePositionId && (previous?.positionId || previous?.receiptId || previous?.holdPositionId || previous?.quarantinePositionId)) {
     await nextTick()
     heading.value?.focus()
   }
@@ -53,7 +53,8 @@ async function openTransfer(position: TransferPosition, event: MouseEvent) {
       return
     }
     if (!result.complete || result.purchaseRevision !== position.purchaseRevision || result.ledgerQuantity !== position.layer.quantity ||
-        result.offerBackedQuantity !== position.layer.backedQuantity) {
+        result.offerBackedQuantity !== position.layer.backedQuantity || result.quarantinedQuantity === undefined ||
+        result.quarantinedQuantity !== position.layer.quarantinedQuantity) {
       transferError.value = 'Refresh this bin to verify the current position before transferring stock.'
       return
     }
@@ -72,7 +73,7 @@ async function closeTransfer() {
 const arrivals = computed(() => new Map(stock.value?.movements.map(move => [move.destinationPlacementId, move])))
 
 const binScope = () => [props.location.id, props.location.revision, props.asOf, props.connected,
-  inspectingCount.value || Boolean(props.countLink?.holdPositionId || props.countLink?.lossPositionId)] as const
+  inspectingCount.value || Boolean(props.countLink?.holdPositionId || props.countLink?.lossPositionId || props.countLink?.quarantinePositionId)] as const
 
 watch([binScope, retryShortages], async ([[id, revision, , connected, inspecting]], _, onCleanup) => {
   let current = true
@@ -142,6 +143,7 @@ watch(binScope,
         <dl class="details">
           <dt>On hand</dt><dd>{{ stock.physicalOnHand }}</dd>
           <dt>Backed by offers</dt><dd>{{ stock.backedQuantity }}</dd>
+          <template v-if="stock.positions.some(p => p.layer.quarantinedQuantity)"><dt>Quarantined in bin</dt><dd>{{ stock.positions.reduce((sum,p) => sum+(p.layer.quarantinedQuantity ?? 0),0) }}</dd></template>
           <dt>Unbacked</dt><dd>{{ stock.unbackedQuantity }}</dd>
           <dt>Available to back</dt><dd>{{ stock.freeToBackQuantity }}</dd>
         </dl>
@@ -155,6 +157,7 @@ watch(binScope,
             <small v-if="locationCodeAtPlacement !== stock.location.code && locationCodeAtPlacement !== layer.locationCodeAtPutaway">Bin code at arrival {{ locationCodeAtPlacement }}</small>
             <small v-if="layer.locationCodeAtPutaway !== stock.location.code">Bin code at putaway {{ layer.locationCodeAtPutaway }}</small>
             <small>{{ layer.backedQuantity }} backed · {{ layer.unbackedQuantity }} unbacked · {{ layer.freeToBackQuantity }} available to back</small>
+            <small v-if="layer.quarantinedQuantity">{{ layer.quarantinedQuantity }} quarantined in this bin</small>
             <small>Whole delivery of {{ layer.receiptQuantity }} · Item cost {{ money(layer.receiptItemCostMinor, layer.currency) }}<template v-if="layer.receiptItemCostMinor === null"> ({{ layer.currency }})</template></small>
             <details><summary>Placement details</summary><small>Placement {{ layer.placementId }}</small>
               <small>Receipt correlation ID {{ layer.receiptCorrelationId }}</small></details>
@@ -163,6 +166,7 @@ watch(binScope,
               @click="openTransfer(stock.positions[index], $event)">Transfer stock</button>
             <a class="count-link" :href="countPositionLink(location.id, layer.placementId)" :aria-label="'Count stock for ' + layer.purchaseReference + ' · ' + layer.deliveryReference">Count stock</a>
             <a class="count-link" :href="holdPositionLink(location.id, layer.placementId)" :aria-label="'Build holds for ' + layer.purchaseReference + ' · ' + layer.deliveryReference + ' · Position ID ' + layer.placementId">Build holds</a>
+            <a class="count-link" :href="quarantineLink(location.id,layer.placementId)" :aria-label="'Quarantine for ' + layer.purchaseReference + ' · ' + layer.deliveryReference + ' · Position ID ' + layer.placementId">Quarantine</a>
             <small v-if="fenced.has(layer.placementId)" class="warning">Open shortage · transfers and new offer backing are blocked.</small>
           </li>
         </ul>
