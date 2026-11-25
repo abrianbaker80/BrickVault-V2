@@ -22,6 +22,8 @@
 
 ## M2 isolated technical foundation
 
+- Protected private request and response fields in gateway diagnostics when a response is interrupted. The service still records the operational warning.
+
 - The Windows backup task retries delayed OneDrive uploads within the same run and verifies the signed receipt and encrypted archive. The server continues to capture nightly. [Hosted backup operations](docs/verification/m2-hosted-backups.md)
 
 - Restricted database cleanup to expired operator sessions. Existing instances can refresh the policy while stopped. A retained client kept its active session and original command receipts across the update and restart. [Foundation runbook](docs/verification/m2-foundation.md)

@@ -919,6 +919,9 @@ def verify(port):
 
             verify_offhost(s, lab, port + 3, before, Browser)
             qualify_gateway_error(s)
+            from verify_gateway_logs import qualify_gateway_log_privacy
+
+            qualify_gateway_log_privacy(lab, port)
             recipient = s.config["recipient"]
             bad_recipient = recipient[:-1] + ("p" if recipient[-1] != "p" else "q")
             expected_failure(
