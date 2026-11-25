@@ -33,7 +33,10 @@ HOLD_FACTS = ("stock_build_holds", "stock_build_hold_releases")
 LOSS_FACTS = ("stock_loss_postings", "stock_loss_offer_reductions")
 RECOUNT_FACTS = ("recount_previews", "recount_preview_targets", "recount_batches", "recount_results")
 WITHDRAWAL_FACTS = ("draft_backing_withdrawals",)
-QUARANTINE_FACTS = ("stock_quarantines", "stock_quarantine_releases")
+QUARANTINE_FACTS = (
+    "stock_quarantines", "stock_quarantine_releases",
+    "stock_loss_quarantine_reviews", "stock_loss_quarantine_attributions",
+)
 SCHEMA_FACTS = {
     2: FACTS,
     3: FACTS + RECEIVING_FACTS,

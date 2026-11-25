@@ -943,6 +943,7 @@ def verify(port):
             from verify_receipt_lots import verify_receipt_lots
             from verify_recounts import qualify_recounts, verify_recovered_recounts
             from verify_quarantine import qualify_quarantine, verify_recovered_quarantine
+            from verify_quarantine_losses import qualify_quarantine_losses, verify_recovered_quarantine_losses
             from verify_withdrawals import qualify_withdrawals, verify_recovered_withdrawals
 
             receiving = qualify_receiving(s, first, rec["entityId"])
@@ -955,6 +956,7 @@ def verify(port):
             lots = verify_receipt_lots(first, receiving, transfer, loss)
             recounts = qualify_recounts(first, rec["entityId"])
             quarantines = qualify_quarantine(first, rec["entityId"])
+            attributed_losses = qualify_quarantine_losses(first, rec["entityId"])
             withdrawals = qualify_withdrawals(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
@@ -1120,6 +1122,7 @@ def verify(port):
                         "Restored receipt-lot history, costs or positions differed.")
                 verify_recovered_recounts(recovered, recounts)
                 verify_recovered_quarantine(recovered, quarantines)
+                verify_recovered_quarantine_losses(recovered, attributed_losses)
                 verify_recovered_withdrawals(recovered, withdrawals)
                 require(
                     all(
