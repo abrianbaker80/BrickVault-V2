@@ -32,6 +32,8 @@ Under D10, a proposed stock loss shows how much unpublished offer backing the se
 
 Under D11, when the counted position contains quarantined pieces, the operator confirms which quarantine records lost pieces. Confirming zero is an explicit choice. The remaining unavailable quantity equals the opening quarantine quantity less the chosen loss from those records. The remaining pieces can support offers only after deducting this unavailable quantity and existing reservations from the witnessed physical count. The loss receipt preserves the selected records and quantities. An inspection release keeps its own receipt. [Quarantined stock loss](https://github.com/abrianbaker80/BrickVault-V2/issues/33#issuecomment-7155121127)
 
+Under D12, the operator confirms identified pieces against a named earlier loss in the original receipt position. For each ordinary or named quarantine source the operator records how many inspected pieces are saleable and how many enter quarantine. The correction adds each found unit to physical stock once. Existing offers, holds and later shortage cases retain their records. A later inspection can release the newly quarantined pieces through the ordinary quarantine workflow. Partial recoveries reverse the exact receipt-layer cents allocated to their original posting, with unknown costs carried separately. [Owner decision](https://github.com/abrianbaker80/BrickVault-V2/issues/39#issuecomment-7172430113)
+
 ## Proposed relational design
 
 | Aggregate and relationships | Fields and rules that matter |

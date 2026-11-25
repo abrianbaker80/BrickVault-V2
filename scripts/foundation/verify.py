@@ -250,6 +250,16 @@ def migration_test(s):
         "An interrupted shortage-closure upgrade changed the previous database.",
     )
     s.sql("DROP TABLE brickvault.stock_shortage_closures;", db, "bv_migrator")
+    s.migrate(db, to=11)
+    s.sql("CREATE TABLE brickvault.stock_loss_recovery_allocations(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "11"
+        and s.sql("SELECT to_regclass('brickvault.stock_loss_recoveries') IS NULL", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted recovery upgrade changed the previous database.",
+    )
+    s.sql("DROP TABLE brickvault.stock_loss_recovery_allocations;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -263,11 +273,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "11",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "12",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v11, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v12, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -317,7 +327,7 @@ def qualify_staged_upgrade(lab, port, source_version):
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "11"), (original, str(source_version))):
+    for inst, schema in ((candidate, "12"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -665,7 +675,7 @@ def verify(port):
     qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in range(2, 11):
+        for source_version in range(2, 12):
             qualify_staged_upgrade(lab, port, source_version)
         from verify_withdrawals import verify_legacy_allocation
         legacy = init(lab / "legacy-withdrawal", lab / "legacy-keys", port)
@@ -956,6 +966,7 @@ def verify(port):
             from verify_quarantine import qualify_quarantine, verify_recovered_quarantine
             from verify_quarantine_losses import qualify_quarantine_losses, verify_recovered_quarantine_losses
             from verify_shortage_closures import qualify_shortage_closure, verify_recovered_closure
+            from verify_stock_recoveries import qualify_recoveries, verify_recovered_inspections
             from verify_withdrawals import qualify_withdrawals, verify_recovered_withdrawals
 
             receiving = qualify_receiving(s, first, rec["entityId"])
@@ -971,6 +982,7 @@ def verify(port):
             attributed_losses = qualify_quarantine_losses(first, rec["entityId"])
             closure = qualify_shortage_closure(first, rec["entityId"])
             withdrawals = qualify_withdrawals(first, rec["entityId"])
+            found = qualify_recoveries(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -1138,6 +1150,7 @@ def verify(port):
                 verify_recovered_quarantine_losses(recovered, attributed_losses)
                 verify_recovered_closure(recovered, closure)
                 verify_recovered_withdrawals(recovered, withdrawals)
+                verify_recovered_inspections(recovered, found)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]

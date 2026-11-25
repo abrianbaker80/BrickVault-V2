@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Added inspection when recording pieces found after a posted stock loss. Workbench tracks saleable and quarantined quantities against their original loss records and restores the receipt cost assigned to those pieces. [Recovery inspection](https://github.com/abrianbaker80/BrickVault-V2/issues/39)
+
 - Added a separate confirmation for a shortage when a later count finds every piece in the same receipt position. Operators can reopen the resolution receipt from count history. [Exact recount resolution](https://github.com/abrianbaker80/BrickVault-V2/issues/37)
 
 - Added quarantine and inspected release for pieces already in a bin. Workbench preserves their receipt cost and shows how many pieces remain available for a new offer, hold or transfer. [Quarantine and inspection](https://github.com/abrianbaker80/BrickVault-V2/issues/33)
