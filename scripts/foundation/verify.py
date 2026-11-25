@@ -641,6 +641,15 @@ def verify(port):
         lab = Path(tmp)
         for source_version in (2, 3, 4, 5, 6, 7, 8, 9):
             qualify_staged_upgrade(lab, port, source_version)
+        from verify_withdrawals import verify_legacy_allocation
+        legacy = init(lab / "legacy-withdrawal", lab / "legacy-keys", port)
+        try:
+            start(legacy)
+            legacy_client = Browser(legacy)
+            legacy_client.login((legacy.path / "owner-login.txt").read_text().splitlines()[1])
+            verify_legacy_allocation(legacy_client)
+        finally:
+            stop(legacy)
         runtime_dir = lab / "runtime"
         runtime_dir.mkdir()
         if WIN:

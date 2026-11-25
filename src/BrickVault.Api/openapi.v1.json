@@ -1824,8 +1824,8 @@
             "required": false,
             "schema": {
               "type": "string",
-              "maxLength": 79,
-              "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing)\\.[0-9a-f]{32}$"
+              "maxLength": 84,
+              "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release|offer-withdrawal)\\.[0-9a-f]{32}$"
             }
           },
           {
@@ -2247,7 +2247,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "maxLength": 123
+              "maxLength": 128
             }
           },
           {

@@ -132,6 +132,9 @@ internal sealed class Receiving(NpgsqlDataSource db)
         if (snapshot.Purchases.SelectMany(p => p.Deliveries).Any(d => d.LostQuantity > 0))
             throw new Fault(426, "receiving_client_upgrade_required",
                 "Posted stock losses require a newer Workbench. Update Workbench to distinguish original receipt quantities, posted losses and current stock.");
+        if (snapshot.Purchases.SelectMany(p => p.Offers).Any(o => o.Backing.Count == 0))
+            throw new Fault(426, "receiving_client_upgrade_required",
+                "An offer has no remaining backing. Update Workbench to see the offer and its current allocation.");
         return BeforeLossContract(snapshot);
     }
 
