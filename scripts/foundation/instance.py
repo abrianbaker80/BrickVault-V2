@@ -349,6 +349,9 @@ class Instance:
                     GRANT INSERT ON brickvault.recount_previews, brickvault.recount_preview_targets,
                         brickvault.recount_batches, brickvault.recount_results TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 9 THEN
+                    GRANT INSERT ON brickvault.stock_quarantines, brickvault.stock_quarantine_releases TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,

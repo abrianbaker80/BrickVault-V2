@@ -99,6 +99,10 @@ def stage_upgrade(source, output, release=RELEASE):
                     projections = ("current_placement_stock", "current_offer_backing")
                     if "stock_build_holds" in before:
                         projections += ("current_build_holds",)
+                    if "recount_batches" in before:
+                        projections += ("recount_tasks",)
+                    if "stock_quarantines" in before:
+                        projections += ("current_stock_quarantines", "current_position_quarantine")
                     opening = None
                     if "placement_positions" in before:
                         opening = row_signatures(candidate, candidate.database, projections)
@@ -123,7 +127,7 @@ def stage_upgrade(source, output, release=RELEASE):
                         )
                     if opening is not None:
                         if row_signatures(candidate, candidate.database, projections) != opening:
-                            raise ValueError("Existing stock, offer backing or project reservations changed during upgrade.")
+                            raise ValueError("An existing stock balance, commitment or recount task changed during upgrade.")
                     elif "placement_positions" in after:
                         verify_opening_stock(candidate)
                 finally:
