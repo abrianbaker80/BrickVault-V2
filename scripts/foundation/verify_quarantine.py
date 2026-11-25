@@ -29,24 +29,29 @@ def qualify_quarantine(client, catalog):
     code = "INSPECT-01"
     _, location = post(client, "locations", 0, code=code, name="Inspection training shelf")
     bin_id = location["entityId"]
+    recorded_item = dict(itemType="part", itemNumber="INSPECT-33", variant=None, name="Inspection sample",
+                         colorId=0, colorState="known", condition="new", completeness="complete",
+                         source="Fictional inspection", license="operator-owned", mapping="confirmed")
+    _, editable = post(client, "catalog", 0, **recorded_item)
     results = []
     for name, cost in (("Paid", 839), ("Documented zero", 0), ("Unknown", None)):
+        item = editable["entityId"] if cost is None else catalog
         _, order = post(client, "receiving/purchases", 0, reference="Inspection " + name,
                         source="Fictional purchase", currency="USD", orderedQuantity=8, pendingChargeMinor=None)
         purchase = order["entityId"]
         _, delivery = post(client, "receiving/deliveries", order["revision"], purchaseId=purchase,
-                           reference=name, quantity=8, catalogId=catalog, itemCostMinor=cost)
+                           reference=name, quantity=8, catalogId=item, itemCostMinor=cost)
         lot = delivery["entityId"]
         _, placement = post(client, "receiving/putaway", delivery["revision"], purchaseId=purchase,
-                            deliveryId=lot, catalogId=catalog, locationId=bin_id, confirmedLocationCode=code, quantity=8)
+                            deliveryId=lot, catalogId=item, locationId=bin_id, confirmedLocationCode=code, quantity=8)
         position = placement["entityId"]
         fields = dict(purchaseId=purchase, positionId=position, locationId=bin_id, confirmedLocationCode=code)
         _, hold = post(client, "receiving/holds", placement["revision"], **fields, quantity=2,
                        purpose="Training build", reason="Keep two pieces together")
-        _, offer = post(client, "receiving/offers", hold["revision"], purchaseId=purchase, catalogId=catalog,
+        _, offer = post(client, "receiving/offers", hold["revision"], purchaseId=purchase, catalogId=item,
                         unitPriceMinor=175, backing=[{"placementId": position, "quantity": 3}])
         layer = client.call("inventory/positions?positionId=" + position)["rows"][0]["layer"]
-        identity = dict(catalogId=catalog, catalogRevision=layer["currentCatalog"]["revision"])
+        identity = dict(catalogId=item, catalogRevision=layer["currentCatalog"]["revision"])
         blocked = dict(commandId=str(uuid4()), expectedRevision=offer["revision"], **fields, **identity,
                        quantity=4, reason="Includes committed stock")
         client.call(QUARANTINE, "POST", blocked, expected=409)
@@ -59,6 +64,8 @@ def qualify_quarantine(client, catalog):
         after = check_position(client, purchase, cost, 1)
         assert after["revision"] == cleared["revision"]
         results.append((purchase, lot, position, cost, enter, received, leave, cleared))
+    post(client, "catalog", editable["revision"], id=editable["entityId"],
+         **{**recorded_item, "name": "Revised inspection sample", "condition": "used"})
     verify_recovered_quarantine(client, results)
     return results
 
@@ -81,7 +88,12 @@ def verify_recovered_quarantine(client, results):
         assert (header["currentOnHandQuantity"], header["heldQuantity"], header["offerBackedQuantity"],
                 header["remainingItemCostMinor"]) == (8, 2, 3, cost)
         assert len(positions) == 1 and positions[0]["placementId"] == position
-        assert positions[0]["quantity"] == 8 and positions[0]["freeToBackQuantity"] == 2
+        assert positions[0]["quantity"] == 8
+        if cost is None:
+            assert positions[0]["currentCatalog"]["condition"] == "used"
+            assert positions[0]["freeToBackQuantity"] == 0
+        else:
+            assert positions[0]["freeToBackQuantity"] == 2
         history = client.call(f"inventory/positions/{position}/timeline?quarantine=true")
         for submitted, saved in ((enter, received), (leave, cleared)):
             by_id = client.call(path + "/receipts?receiptId=" + saved["entityId"])
@@ -94,6 +106,11 @@ def verify_recovered_quarantine(client, results):
                         "commandId", "quantity", "reason"):
                 assert by_id[key] == submitted[key]
             assert by_id["inspectionResult"] == submitted.get("inspectionResult")
+            observed = by_id["recordedCatalog"]
+            assert (observed["id"], observed["revision"]) == (submitted["catalogId"], submitted["catalogRevision"])
+            if cost is None:
+                assert (observed["itemNumber"], observed["name"], observed["condition"]) == (
+                    "INSPECT-33", "Inspection sample", "new")
             change = next(e["event"] for e in events if e["event"]["commandId"] == saved["commandId"])
             assert change["physicalDelta"] == change["reservedDelta"] == change["offerBackedDelta"] == 0
             assert any(e["commandId"] == saved["commandId"] for e in history["events"])
