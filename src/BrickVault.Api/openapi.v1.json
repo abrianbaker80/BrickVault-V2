@@ -1872,7 +1872,7 @@
             "schema": {
               "type": "string",
               "maxLength": 84,
-              "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release|offer-withdrawal)\\.[0-9a-f]{32}$"
+              "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release|offer-withdrawal|shortage-closure)\\.[0-9a-f]{32}$"
             }
           },
           {

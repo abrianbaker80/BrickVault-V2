@@ -203,8 +203,25 @@ public sealed class StockShortageClosureTests
         Assert.Equal(("shortage-closure", saved.EntityId, latest.EntityId, opening.EntityId, 8, 0, 0, 0),
             (closedEvent.Kind, closedEvent.Id, closedEvent.ObservationId, closedEvent.CaseId, closedEvent.Quantity,
                 closedEvent.PhysicalDelta, closedEvent.ReservedDelta, closedEvent.OfferBackedDelta));
-        Assert.Equal("count", Assert.Single((await timelines.Read(position.EntityId, pageOne.NextAfter, 1,
-            token, quarantine: true, closures: true)).Events).Kind);
+        var closureCursor = Assert.IsType<string>(pageOne.NextAfter);
+        using var contractStream = typeof(StockPositionTimeline).Assembly
+            .GetManifestResourceStream("BrickVault.Api.openapi.v1.json")!;
+        using var contract = JsonDocument.Parse(contractStream);
+        var timelineContract = contract.RootElement.GetProperty("paths")
+            .GetProperty("/api/v1/inventory/positions/{positionId}/timeline").GetProperty("get");
+        var input = timelineContract.GetProperty("parameters").EnumerateArray()
+            .Single(parameter => parameter.GetProperty("name").GetString() == "after").GetProperty("schema");
+        var output = contract.RootElement.GetProperty("components").GetProperty("schemas")
+            .GetProperty("StockPositionTimeline").GetProperty("properties").GetProperty("nextAfter");
+        var pattern = input.GetProperty("pattern").GetString()!;
+        Assert.Equal(pattern, output.GetProperty("pattern").GetString());
+        Assert.Equal(input.GetProperty("maxLength").GetInt32(), output.GetProperty("maxLength").GetInt32());
+        Assert.True(closureCursor.Length <= input.GetProperty("maxLength").GetInt32());
+        Assert.Matches(pattern, closureCursor);
+        var next = await timelines.Read(position.EntityId, closureCursor, 1, token, quarantine: true, closures: true);
+        Assert.Equal(latest.EntityId, Assert.Single(next.Events).Id);
+        Assert.Equal("invalid_timeline_cursor", await Reject(() =>
+            timelines.Read(sibling.EntityId, closureCursor, 1, token, closures: true)));
         var lotBeforeAnyLoss = await lots.Read(delivery.EntityId, null, null, 25, 25, token, quarantine: true, closures: true);
         Assert.Equal((11, 0, 2, 2, 4, 103), (lotBeforeAnyLoss.CurrentOnHandQuantity, lotBeforeAnyLoss.LostQuantity,
             lotBeforeAnyLoss.QuarantinedQuantity, lotBeforeAnyLoss.HeldQuantity, lotBeforeAnyLoss.OfferBackedQuantity,
