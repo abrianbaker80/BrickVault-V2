@@ -23,7 +23,7 @@ internal sealed record StockReceiptLot(string Scope, DateTime AsOf, bool Complet
 internal sealed class StockReceiptLots(NpgsqlDataSource db)
 {
     public async Task<StockReceiptLot> Read(Guid deliveryId, string? positionAfter, string? eventAfter, int positionLimit,
-        int eventLimit, CancellationToken token, bool withdrawals = false, bool quarantine = false)
+        int eventLimit, CancellationToken token, bool withdrawals = false, bool quarantine = false, bool closures = false)
     {
         if (positionLimit is < 1 or > 100 || eventLimit is < 1 or > 100)
             throw new Fault(400, "invalid_lot_page", "Choose page sizes from 1 to 100.");
@@ -124,10 +124,12 @@ internal sealed class StockReceiptLots(NpgsqlDataSource db)
         var history = (await Rows(connection, tx, StockPositionTimelines.ScopedEvents(true) + "\n" + """
             SELECT EXISTS (SELECT 1 FROM events WHERE occurred_at IS NULL),
                 EXISTS (SELECT 1 FROM events WHERE kind IN ('quarantine','quarantine-release')),
-                EXISTS (SELECT 1 FROM events WHERE kind='offer-withdrawal')
-            """, r => (Undated: r.GetBoolean(0), HasQuarantine: r.GetBoolean(1), HasWithdrawals: r.GetBoolean(2)), token, deliveryId)).Single();
+                EXISTS (SELECT 1 FROM events WHERE kind='offer-withdrawal'),
+                EXISTS (SELECT 1 FROM events WHERE kind='shortage-closure')
+            """, r => (Undated: r.GetBoolean(0), HasQuarantine: r.GetBoolean(1), HasWithdrawals: r.GetBoolean(2), HasClosures: r.GetBoolean(3)), token, deliveryId)).Single();
         if (!quarantine && history.HasQuarantine) throw StockQuarantines.Upgrade();
         if (!withdrawals && history.HasWithdrawals) throw DraftBackingWithdrawals.Upgrade();
+        if (!closures && history.HasClosures) throw StockShortageClosures.Upgrade();
         var hasUndated = evidence.ReceivedAt is null || history.Undated;
         var onHand = evidence.Received - evidence.Lost;
         if (onHand != evidence.Unplaced + totals.Positioned)
