@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Added voluntary withdrawal of backing from unpublished draft offers. Operators choose the receipt position, offer and quantity, and can reopen the withdrawal receipt after the offer reaches zero backing. [Draft offer backing](https://github.com/abrianbaker80/BrickVault-V2/issues/35)
+
 - Added receipt-lot history across bins. A transfer shows the units and offer backing moved, and a delivery's cost appears once. [Inventory workflow](https://github.com/abrianbaker80/BrickVault-V2/issues/31)
 
 - Added recount previews, a shared count queue and a receipt for each batch. Operators can freeze selected positions or every match to a filter, then see which targets were queued, changed, already queued or unavailable.

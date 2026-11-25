@@ -218,6 +218,17 @@ def migration_test(s):
         "An interrupted recount upgrade changed the stock-loss database.",
     )
     s.sql("DROP TABLE brickvault.recount_results;", db, "bv_migrator")
+    s.migrate(db, to=8)
+    s.sql("CREATE TABLE brickvault.draft_backing_withdrawals(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "8"
+        and s.sql("""SELECT position('offer-withdrawal' in pg_get_constraintdef(oid)) = 0 FROM pg_constraint
+                     WHERE conrelid='brickvault.commands'::regclass AND conname='commands_kind_check'""", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted withdrawal upgrade changed the recount database.",
+    )
+    s.sql("DROP TABLE brickvault.draft_backing_withdrawals;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -231,11 +242,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "8",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "9",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v8, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v9, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -272,6 +283,9 @@ def qualify_staged_upgrade(lab, port, source_version):
                 if source_version >= 6:
                     from verify_losses import seed_prior_build_hold
                     seed_prior_build_hold(original, fixture, records[0], records[1])
+                if source_version >= 8:
+                    from verify_recounts import seed_prior_recount
+                    seed_prior_recount(original, records[1])
                 seed_previous_count(original, fixture, records[0], records[1], revision=6 if source_version >= 6 else 5)
         expected_failure(lambda: stage_upgrade(original, output))
         require(not output.exists(), "Running source created a staged directory.")
@@ -279,7 +293,7 @@ def qualify_staged_upgrade(lab, port, source_version):
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "8"), (original, str(source_version))):
+    for inst, schema in ((candidate, "9"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -291,6 +305,11 @@ def qualify_staged_upgrade(lab, port, source_version):
                 inst.sql(query, role="bv_api") == "OLD-01",
                 "Upgrade lost a baseline location.",
             )
+            if source_version >= 8:
+                require(
+                    inst.sql("SELECT count(*) FROM brickvault.recount_tasks WHERE observation_id IS NOT NULL") == "1",
+                    "Upgrade lost the witnessed count attached to the queued position.",
+                )
         finally:
             inst.pg_stop()
     print(
@@ -610,7 +629,7 @@ def verify(port):
     qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in (2, 3, 4, 5, 6, 7):
+        for source_version in (2, 3, 4, 5, 6, 7, 8):
             qualify_staged_upgrade(lab, port, source_version)
         runtime_dir = lab / "runtime"
         runtime_dir.mkdir()
@@ -889,6 +908,7 @@ def verify(port):
             from verify_timeline import verify_timeline
             from verify_receipt_lots import verify_receipt_lots
             from verify_recounts import qualify_recounts, verify_recovered_recounts
+            from verify_withdrawals import qualify_withdrawals, verify_recovered_withdrawals
 
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
@@ -899,6 +919,7 @@ def verify(port):
             timeline = verify_timeline(first, loss)
             lots = verify_receipt_lots(first, receiving, transfer, loss)
             recounts = qualify_recounts(first, rec["entityId"])
+            withdrawals = qualify_withdrawals(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -1062,6 +1083,7 @@ def verify(port):
                 require(verify_receipt_lots(recovered, receiving, transfer, loss) == lots,
                         "Restored receipt-lot history, costs or positions differed.")
                 verify_recovered_recounts(recovered, recounts)
+                verify_recovered_withdrawals(recovered, withdrawals)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]
