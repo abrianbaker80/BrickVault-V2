@@ -893,7 +893,7 @@
             "schema": {
               "type": "boolean"
             },
-            "description": "Include per-delivery quarantine quantities. Requires losses=true and holds=true."
+            "description": "Include per-delivery quarantine quantities when losses=true."
           }
         ]
       }
@@ -5703,7 +5703,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 1000000,
-            "description": "Ledger quantity excluding build holds. This includes any existing offer backing."
+            "description": "Physical quantity less active build holds and quarantined pieces. Includes existing offer backing. Reading an affected position requires quarantine=true."
           },
           "availableToHoldQuantity": {
             "type": "integer",

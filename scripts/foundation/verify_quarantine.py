@@ -52,10 +52,28 @@ def qualify_quarantine(client, catalog):
                         unitPriceMinor=175, backing=[{"placementId": position, "quantity": 3}])
         layer = client.call("inventory/positions?positionId=" + position)["rows"][0]["layer"]
         identity = dict(catalogId=item, catalogRevision=layer["currentCatalog"]["revision"])
-        blocked = dict(commandId=str(uuid4()), expectedRevision=offer["revision"], **fields, **identity,
+        revision = offer["revision"]
+        if cost == 0:
+            hold_path = f"receiving/bins/{bin_id}/positions/{position}/holds"
+            lookup = "?commandId=" + hold["commandId"]
+            _, sample = post(client, QUARANTINE, revision, **fields, **identity, quantity=2,
+                             reason="Inspect held-position compatibility")
+            for suffix in ("", lookup):
+                assert client.call(hold_path + suffix, expected=426)["code"] == "quarantine_client_upgrade_required"
+            assert client.call(hold_path + "?commandId=" + str(uuid4()), expected=404)["code"] == "unknown_hold_command"
+            observed = client.call(hold_path + lookup + "&quarantine=true")
+            assert observed["freeQuantity"] == 4 and observed["quarantinedQuantity"] == 2
+            _, passed = post(client, RELEASE, sample["revision"], **fields, **identity, quantity=2,
+                             quarantineId=sample["entityId"], inspectionResult="passed", reason="Inspected both pieces")
+            revision = passed["revision"]
+            for suffix in ("", lookup):
+                restored = client.call(hold_path + suffix)
+                assert restored["freeQuantity"] == 6 and "quarantinedQuantity" not in restored
+                assert restored["holds"][0]["commandId"] == hold["commandId"]
+        blocked = dict(commandId=str(uuid4()), expectedRevision=revision, **fields, **identity,
                        quantity=4, reason="Includes committed stock")
         client.call(QUARANTINE, "POST", blocked, expected=409)
-        enter, received = post(client, QUARANTINE, offer["revision"], **fields, **identity,
+        enter, received = post(client, QUARANTINE, revision, **fields, **identity,
                                quantity=2, reason="Two pieces require inspection")
         check_position(client, purchase, cost, 2)
         leave, cleared = post(client, RELEASE, received["revision"], **fields, **identity, quantity=1,
@@ -81,7 +99,7 @@ def verify_recovered_quarantine(client, results):
         assert (state["onHandQuantity"], state["quarantinedQuantity"], state["heldQuantity"],
                 state["offerBackedQuantity"], state["sellableQuantity"], state["availableToQuarantineQuantity"]) == (
                     8, 1, 2, 3, 5, 2)
-        marked, = state["quarantines"]
+        marked, = [entry for entry in state["quarantines"] if entry["id"] == received["entityId"]]
         assert (marked["id"], marked["quantity"], marked["releasedQuantity"], marked["remainingQuantity"]) == (
             received["entityId"], 2, 1, 1)
         header, positions, events = read_lot(client, lot, quarantine=True)

@@ -111,6 +111,7 @@ internal sealed class BuildHolds(NpgsqlDataSource db)
                 r.GetInt32(5), r.GetInt32(6), r.GetInt32(7), r.GetDateTime(8), r.GetInt32(9), r.GetString(10)),
             token, positionId, Nullable(NpgsqlDbType.Integer, cursor), limit + 1, Nullable(NpgsqlDbType.Uuid, commandId));
         RequireMatch(holds.Count, commandId);
+        if (!quarantine && position.Quarantined > 0) throw StockQuarantines.Upgrade();
         var next = Next(holds, limit, h => h.Id);
         var free = position.Ledger - position.Reserved - position.Quarantined;
         var available = position.Eligible && position.Shortage is null ? free - position.Backed : 0;

@@ -297,6 +297,9 @@ def qualify_staged_upgrade(lab, port, source_version):
                     from verify_recounts import seed_prior_recount
                     seed_prior_recount(original, records[1])
                 seed_previous_count(original, fixture, records[0], records[1], revision=6 if source_version >= 6 else 5)
+                if source_version >= 9:
+                    from verify_withdrawals import seed_prior_withdrawal
+                    prior_withdrawal = seed_prior_withdrawal(original, records[0], records[2])
         expected_failure(lambda: stage_upgrade(original, output))
         require(not output.exists(), "Running source created a staged directory.")
     finally:
@@ -320,6 +323,18 @@ def qualify_staged_upgrade(lab, port, source_version):
                     inst.sql("SELECT count(*) FROM brickvault.recount_tasks WHERE observation_id IS NOT NULL") == "1",
                     "Upgrade lost the witnessed count attached to the queued position.",
                 )
+            if source_version >= 9:
+                require(inst.sql(f"""
+                    SELECT w.prior_backed_quantity=1 AND w.prior_total_offer_backed_quantity=2
+                        AND b.backing_delta=-1 AND c.revision=w.expected_purchase_revision+1
+                        AND NOT EXISTS (SELECT 1 FROM brickvault.current_offer_backing v
+                            WHERE v.offer_id=w.offer_id AND v.placement_id=w.position_id)
+                    FROM brickvault.draft_backing_withdrawals w JOIN brickvault.offer_backing_ledger b
+                        ON b.event_id=w.id AND b.kind='offer-withdrawal'
+                    JOIN brickvault.commands c ON c.command_id=w.command_id
+                    JOIN brickvault.audit a ON a.command_id=c.command_id
+                    WHERE w.id='{prior_withdrawal}'
+                """) == "t", "Upgrade lost the original withdrawal receipt or restored its withdrawn backing.")
         finally:
             inst.pg_stop()
     print(

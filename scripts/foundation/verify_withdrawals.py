@@ -11,6 +11,29 @@ from verify_receiving import post, purchase_row
 WITHDRAW = "inventory/draft-backing-withdrawals"
 
 
+def seed_prior_withdrawal(instance, purchase, offer):
+    """Withdraw the existing allocation at the destination of the previous transfer."""
+    receipt, command = uuid4(), uuid4()
+    instance.sql(f"""
+        BEGIN;
+        INSERT INTO brickvault.audit(command_id,actor)
+            SELECT command_id,'operator' FROM brickvault.offers WHERE id='{offer}';
+        INSERT INTO brickvault.draft_backing_withdrawals(id,command_id,purchase_id,position_id,offer_id,
+            location_id,location_code,expected_purchase_revision,quantity,reason)
+            SELECT '{receipt}','{command}',p.purchase_id,p.id,'{offer}',p.location_id,p.location_code,
+                   buy.revision,1,'Withdraw the transferred draft allocation'
+            FROM brickvault.current_placement_stock p JOIN brickvault.purchases buy ON buy.id=p.purchase_id
+            WHERE p.purchase_id='{purchase}' AND p.location_code='NEW-02';
+        INSERT INTO brickvault.commands(command_id,kind,digest,entity_id,revision,correlation_id)
+            SELECT '{command}','offer-withdrawal',decode(repeat('00',32),'hex'),'{receipt}',
+                   expected_purchase_revision+1,gen_random_uuid()
+            FROM brickvault.draft_backing_withdrawals WHERE id='{receipt}';
+        INSERT INTO brickvault.audit(command_id,actor) VALUES ('{command}','operator');
+        COMMIT;
+        """, role="bv_migrator")
+    return receipt
+
+
 def verify_legacy_allocation(client):
     _, item = post(client, "catalog", 0, itemType="part", itemNumber="DRAFT-LEGACY", variant=None,
                    name="Training brick", colorId=0, colorState="known", condition="new", completeness="complete",
