@@ -16,21 +16,7 @@ internal sealed record PositionMovementPage(string Scope, Guid PositionId, DateT
 
 internal sealed class StockRegister(NpgsqlDataSource db)
 {
-    public async Task<StockRegisterPage> Search(string? query, string? itemType, Guid? locationId,
-        Guid? positionId, Guid? after, int limit, CancellationToken ct)
-    {
-        var term = query?.Trim() ?? "";
-        if (term.Length > 160 || term.Any(char.IsControl) || limit is < 1 or > 100 ||
-            (itemType is not (null or "part" or "set" or "minifigure" or "book" or "gear" or "instruction" or "original-box" or "catalog")))
-            throw new Fault(400, "invalid_stock_search", "Choose a supported item type, search term and page size.");
-        Guid? exactId = Guid.TryParse(term, out var id) ? id : null;
-        await using var connection = await db.OpenConnectionAsync(ct);
-        await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
-        await using (var mode = Query(connection, tx, "SET TRANSACTION READ ONLY"))
-            await mode.ExecuteNonQueryAsync(ct);
-        await Migration.CheckWithin(connection, tx, ct);
-
-        var filtered = PositionRows.RegisterFrom + "\n" + """
+    internal const string Filtered = PositionRows.RegisterFrom + "\n" + """
             WHERE (p.quantity>0 OR p.id=$2 OR p.id=$5)
               AND ($5::uuid IS NULL OR p.id=$5)
               AND ($3::text IS NULL OR c.item_type=$3)
@@ -41,13 +27,34 @@ internal sealed class StockRegister(NpgsqlDataSource db)
                    OR strpos(lower(loc.code),lower($1))>0 OR strpos(lower(buy.reference),lower($1))>0
                    OR strpos(lower(d.reference),lower($1))>0)
             """;
-        object[] Filters() => [term, Nullable(NpgsqlDbType.Uuid, exactId), Nullable(NpgsqlDbType.Text, itemType),
+
+    internal static object[] Filters(string? query, string? itemType, Guid? locationId, Guid? positionId)
+    {
+        var term = query?.Trim() ?? "";
+        if (term.Length > 160 || term.Any(char.IsControl) ||
+            (itemType is not (null or "part" or "set" or "minifigure" or "book" or "gear" or "instruction" or "original-box" or "catalog")))
+            throw new Fault(400, "invalid_stock_search", "Choose a supported item type, search term and page size.");
+        Guid? exactId = Guid.TryParse(term, out var id) ? id : null;
+        return [term, Nullable(NpgsqlDbType.Uuid, exactId), Nullable(NpgsqlDbType.Text, itemType),
             Nullable(NpgsqlDbType.Uuid, locationId), Nullable(NpgsqlDbType.Uuid, positionId)];
-        var totals = await Rows(connection, tx, "SELECT transaction_timestamp(),count(*),coalesce(sum(p.quantity),0) " + filtered,
-            r => (AsOf: r.GetDateTime(0), Count: r.GetInt64(1), Units: r.GetInt64(2)), ct, Filters());
-        var rows = await Rows(connection, tx, "SELECT " + PositionRows.RegisterSelect + " " + filtered +
+    }
+
+    public async Task<StockRegisterPage> Search(string? query, string? itemType, Guid? locationId,
+        Guid? positionId, Guid? after, int limit, CancellationToken ct)
+    {
+        if (limit is < 1 or > 100) throw new Fault(400, "invalid_stock_search", "Choose a page size from 1 to 100.");
+        object[] Parameters() => Filters(query, itemType, locationId, positionId);
+        await using var connection = await db.OpenConnectionAsync(ct);
+        await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
+        await using (var mode = Query(connection, tx, "SET TRANSACTION READ ONLY"))
+            await mode.ExecuteNonQueryAsync(ct);
+        await Migration.CheckWithin(connection, tx, ct);
+
+        var totals = await Rows(connection, tx, "SELECT transaction_timestamp(),count(*),coalesce(sum(p.quantity),0) " + Filtered,
+            r => (AsOf: r.GetDateTime(0), Count: r.GetInt64(1), Units: r.GetInt64(2)), ct, Parameters());
+        var rows = await Rows(connection, tx, "SELECT " + PositionRows.RegisterSelect + " " + Filtered +
             " AND ($6::uuid IS NULL OR p.id>$6) ORDER BY p.id LIMIT $7", PositionRows.ReadRegister,
-            ct, [.. Filters(), Nullable(NpgsqlDbType.Uuid, after), limit + 1]);
+            ct, [.. Parameters(), Nullable(NpgsqlDbType.Uuid, after), limit + 1]);
         Guid? next = null;
         if (rows.Count > limit)
         {

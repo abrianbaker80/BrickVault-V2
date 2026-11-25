@@ -33,6 +33,7 @@ try
     var holds = new BuildHolds(db);
     var adjustmentReviews = new StockAdjustmentReviews(db);
     var stockLosses = new StockLosses(db);
+    var recounts = new Recounts(db);
     var bins = new BinStock(db);
     var inventory = new StockRegister(db);
     var positionTimelines = new StockPositionTimelines(db);
@@ -151,6 +152,20 @@ try
     api.MapPost("/receiving/deliveries", (HttpContext c, CancellationToken ct) => Save<DeliveryCommand>(c, receiving.Save, ct));
     api.MapPost("/receiving/putaway", (HttpContext c, CancellationToken ct) => Save<PutawayCommand>(c, receiving.Save, ct));
     api.MapPost("/receiving/offers", (HttpContext c, CancellationToken ct) => Save<OfferCommand>(c, receiving.Save, ct));
+    var recount = api.MapGroup("/inventory/recounts");
+    recount.MapPost("/previews", async (HttpContext c, CancellationToken ct) =>
+    {
+        ((Session)c.Items[typeof(Session)]!).RequireWorkspace(c.Request.Headers);
+        AllowBody(c, 1024 * 1024);
+        if (!c.Request.HasJsonContentType()) throw new Fault(415, "json_required", "Use the application/json content type.");
+        var request = await c.Request.ReadFromJsonAsync<RecountPreviewRequest>(Wire.Json, ct) ?? throw new Fault(400, "invalid_recount", "Choose a recount scope.");
+        return await recounts.Freeze(request, ct);
+    });
+    recount.MapGet("/previews/{id:guid}", (Guid id, Guid? after, int? limit, CancellationToken ct) => recounts.Preview(id, after, limit ?? 25, ct));
+    recount.MapPost("/batches", (HttpContext c, CancellationToken ct) => Save<RecountCommand>(c, recounts.Confirm, ct));
+    recount.MapGet("/batches/{id:guid}", (Guid id, Guid? after, int? limit, CancellationToken ct) => recounts.Batch(id, after, limit ?? 25, ct));
+    recount.MapGet("/batches", (Guid? after, int? limit, CancellationToken ct) => recounts.Batches(after, limit ?? 25, ct));
+    recount.MapGet("/queue", (Guid? after, int? limit, CancellationToken ct) => recounts.Queue(after, limit ?? 25, ct));
     api.MapGet("/diagnostics", async (CancellationToken ct) =>
     {
         await using var conn = await db.OpenConnectionAsync(ct);
@@ -188,18 +203,20 @@ catch (Exception e)
     return 1;
 }
 
+static void AllowBody(HttpContext c, int limit)
+{
+    if (c.Request.ContentLength > limit)
+        throw new BadHttpRequestException("Request body too large.", StatusCodes.Status413PayloadTooLarge);
+    var size = c.Features.Get<IHttpMaxRequestBodySizeFeature>() ??
+        throw new InvalidOperationException("The server does not expose a request body limit.");
+    size.MaxRequestBodySize = limit;
+}
+
 static async Task<Receipt> Save<T>(HttpContext c, Func<T, Guid, CancellationToken, Task<Receipt>> write,
     CancellationToken ct, int? bodyLimit = null) where T : class
 {
     ((Session)c.Items[typeof(Session)]!).RequireWorkspace(c.Request.Headers);
-    if (bodyLimit is int limit)
-    {
-        if (c.Request.ContentLength > limit)
-            throw new BadHttpRequestException("Request body too large.", StatusCodes.Status413PayloadTooLarge);
-        var size = c.Features.Get<IHttpMaxRequestBodySizeFeature>() ??
-            throw new InvalidOperationException("The server does not expose a request body limit.");
-        size.MaxRequestBodySize = limit;
-    }
+    if (bodyLimit is int limit) AllowBody(c, limit);
     if (!c.Request.HasJsonContentType()) throw new Fault(415, "json_required", "Use the application/json content type.");
     var request = await c.Request.ReadFromJsonAsync<T>(Wire.Json, ct) ?? throw Fault.Invalid();
     var receipt = await write(request, (Guid)c.Items[typeof(Guid)]!, ct);
