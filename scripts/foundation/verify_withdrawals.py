@@ -11,6 +11,37 @@ from verify_receiving import post, purchase_row
 WITHDRAW = "inventory/draft-backing-withdrawals"
 
 
+def verify_legacy_allocation(client):
+    _, item = post(client, "catalog", 0, itemType="part", itemNumber="DRAFT-LEGACY", variant=None,
+                   name="Training brick", colorId=0, colorState="known", condition="new", completeness="complete",
+                   source="Fictional fixture", license="operator-owned", mapping="confirmed")
+    _, bin_row = post(client, "locations", 0, code="LEGACY-01", name="Training bin")
+    _, buy = post(client, "receiving/purchases", 0, reference="Draft client check", source="Fictional purchase",
+                  currency="USD", orderedQuantity=2, pendingChargeMinor=None)
+    _, delivery = post(client, "receiving/deliveries", buy["revision"], purchaseId=buy["entityId"],
+                       reference="Training delivery", catalogId=item["entityId"], quantity=2, itemCostMinor=11)
+    where = dict(purchaseId=buy["entityId"], locationId=bin_row["entityId"], confirmedLocationCode="LEGACY-01")
+    _, position = post(client, "receiving/putaway", delivery["revision"], **where, deliveryId=delivery["entityId"],
+                       catalogId=item["entityId"], quantity=2)
+    _, offer = post(client, "receiving/offers", position["revision"], purchaseId=buy["entityId"],
+                    catalogId=item["entityId"], unitPriceMinor=175,
+                    backing=[{"placementId": position["entityId"], "quantity": 2}])
+    target = dict(**where, positionId=position["entityId"], offerId=offer["entityId"], quantity=1)
+    _, partial = post(client, WITHDRAW, offer["revision"], **target, reason="Withdraw one piece")
+    older = ("receiving", "receiving/current", "receiving/current?holds=true")
+    for route in older:
+        row, = client.call(route)["purchases"]
+        allocation, = row["offers"][0]["backing"]
+        assert allocation["quantity"] == row["offers"][0]["backedQuantity"] == 1
+    post(client, WITHDRAW, partial["revision"], **target, reason="Withdraw the final piece")
+    for route in older:
+        assert client.call(route, expected=426)["code"] == "receiving_client_upgrade_required"
+    retained, = purchase_row(client, buy["entityId"])["offers"]
+    assert (retained["id"], retained["unitPriceMinor"], retained["backedQuantity"], retained["backing"]) == (
+        offer["entityId"], 175, 0, [])
+    print("Earlier Receiving clients can read partial withdrawals and receive an upgrade response for a zero-backed offer.", flush=True)
+
+
 def verify_purchase(client, purchase, cost, expected_backed):
     row = purchase_row(client, purchase)
     balances = row["balances"]
