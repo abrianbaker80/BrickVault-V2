@@ -74,7 +74,7 @@ public sealed class BuildHoldTests
             holds.Snapshot(bin.EntityId, origin.EntityId, after, limit, token, exact);
         async Task<string> Reject(Func<Task> write) => (await Assert.ThrowsAsync<Fault>(write)).Code;
         async Task<LossPurchaseRow> ReadPurchase() =>
-            Assert.Single((await receiving.LossSnapshot(token)).Purchases, p => p.Id == order.EntityId);
+            Assert.Single((await receiving.LossSnapshot(token, recoveries: true)).Purchases, p => p.Id == order.EntityId);
         var original = await ReadPurchase();
         Assert.Equal(0, original.Balances.Reserved);
         var first = new StockHoldCommand

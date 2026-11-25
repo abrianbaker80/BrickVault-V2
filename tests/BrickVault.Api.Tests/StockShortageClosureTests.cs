@@ -92,7 +92,7 @@ public sealed class StockShortageClosureTests
         Task<BinCountSnapshot> ReadCount(Guid observationId, bool include = true) =>
             counts.Snapshot(a.Id, token, position.EntityId, observationId: observationId, closures: include);
         async Task<LossPurchaseRow> PurchaseState() =>
-            Assert.Single((await receiving.LossSnapshot(token, quarantine: true)).Purchases, row => row.Id == purchase.EntityId);
+            Assert.Single((await receiving.LossSnapshot(token, quarantine: true, recoveries: true)).Purchases, row => row.Id == purchase.EntityId);
 
         var opening = await Witness(quarantined.Revision, position, a, 6);
         var command = new StockShortageClosureCommand

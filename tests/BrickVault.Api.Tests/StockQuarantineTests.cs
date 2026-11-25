@@ -116,7 +116,7 @@ public sealed class StockQuarantineTests
         var activeLot = await lots.Read(zero.EntityId, null, null, 25, 25, token, quarantine: true);
         Assert.Equal((8, 2, 3, 2, 1), (activeLot.CurrentOnHandQuantity, activeLot.QuarantinedQuantity,
             activeLot.OfferBackedQuantity, activeLot.HeldQuantity, activeLot.FreeToBackQuantity));
-        var purchaseState = Assert.Single((await receiving.LossSnapshot(token, true)).Purchases, p => p.Id == purchase.EntityId);
+        var purchaseState = Assert.Single((await receiving.LossSnapshot(token, quarantine: true, recoveries: true)).Purchases, p => p.Id == purchase.EntityId);
         Assert.Equal(2, purchaseState.Balances.Unavailable);
         Assert.Equal(2, purchaseState.Balances.Reserved);
         Assert.Equal(3, Assert.Single(purchaseState.Offers).BackedQuantity);

@@ -894,6 +894,14 @@
               "type": "boolean"
             },
             "description": "Include per-delivery quarantine quantities when losses=true."
+          },
+          {
+            "name": "recoveries",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include recorded stock recovery quantities, basis or evidence for this scope."
           }
         ]
       }
@@ -1805,6 +1813,14 @@
               "default": 25
             },
             "description": "Maximum quarantine attribution rows per page."
+          },
+          {
+            "name": "recoveries",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include recorded stock recovery quantities, basis or evidence for this scope."
           }
         ],
         "responses": {
@@ -1871,8 +1887,8 @@
             "required": false,
             "schema": {
               "type": "string",
-              "maxLength": 84,
-              "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release|offer-withdrawal|shortage-closure)\\.[0-9a-f]{32}$"
+              "maxLength": 85,
+              "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release|offer-withdrawal|shortage-closure|stock-loss-recovery)\\.[0-9a-f]{32}$"
             }
           },
           {
@@ -1909,6 +1925,14 @@
               "type": "boolean"
             },
             "description": "Include recorded exact-recount closure events."
+          },
+          {
+            "name": "recoveries",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include recorded stock recovery quantities, basis or evidence for this scope."
           }
         ],
         "responses": {
@@ -2302,7 +2326,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "maxLength": 128
+              "maxLength": 129
             }
           },
           {
@@ -2350,6 +2374,14 @@
               "type": "boolean"
             },
             "description": "Include recorded exact-recount closure events."
+          },
+          {
+            "name": "recoveries",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include recorded stock recovery quantities, basis or evidence for this scope."
           }
         ],
         "responses": {
@@ -2445,6 +2477,14 @@
               "type": "boolean"
             },
             "description": "Include the lost quantity for each named quarantine receipt. Required when this position has attributed quarantine losses."
+          },
+          {
+            "name": "recoveries",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include recorded stock recovery quantities, basis or evidence for this scope."
           }
         ],
         "responses": {
@@ -2510,6 +2550,14 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "recoveries",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include recorded stock recovery quantities, basis or evidence for this scope."
           }
         ],
         "responses": {
@@ -2525,6 +2573,16 @@
           },
           "default": {
             "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Update Workbench to read recovered stock and retained evidence in this scope.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3019,6 +3077,248 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/receiving/stock-loss-recoveries": {
+      "post": {
+        "operationId": "recordStockLossRecovery",
+        "parameters": [
+          {
+            "name": "X-Workspace-Id",
+            "in": "header",
+            "required": true,
+            "description": "The authenticated workspaceId captured when the operator prepared the command. Use that same value for every retry. A missing or mismatched workspace returns 409 workspace_mismatch.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockLossRecoveryCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockLossRecoveryReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Restore physically identified pieces from a named posted loss and record inspected or quarantined disposition for each source."
+      }
+    },
+    "/api/v1/receiving/bins/{locationId}/positions/{positionId}/posted-loss/{postingId}/recovery-review": {
+      "get": {
+        "operationId": "getStockLossRecoveryReview",
+        "parameters": [
+          {
+            "name": "locationId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "positionId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "postingId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 76,
+              "pattern": "^[0-9a-f]{32}\\.[1-9][0-9]{0,9}\\.[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "historyAfter",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "historyLimit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockLossRecoveryReview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/receiving/bins/{locationId}/positions/{positionId}/posted-loss/{postingId}/recovery-receipt": {
+      "get": {
+        "operationId": "getStockLossRecoveryEvidence",
+        "parameters": [
+          {
+            "name": "locationId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "positionId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "postingId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "recoveryId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "commandId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 65,
+              "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockLossRecoveryEvidence"
                 }
               }
             }
@@ -3569,7 +3869,8 @@
               "quarantine",
               "quarantine-release",
               "offer-withdrawal",
-              "shortage-closure"
+              "shortage-closure",
+              "stock-loss-recovery"
             ]
           },
           "correlationId": {
@@ -6730,6 +7031,13 @@
             "maxLength": 65,
             "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{32}$",
             "description": "Present when another attribution page is available."
+          },
+          "priorDeliveryLossQuantityMode": {
+            "type": "string",
+            "enum": [
+              "cumulative",
+              "active"
+            ]
           }
         },
         "required": [
@@ -6934,6 +7242,9 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 1000000
+          },
+          "recoveryTotals": {
+            "$ref": "#/components/schemas/DeliveryRecoveryTotals"
           }
         },
         "required": [
@@ -7067,7 +7378,8 @@
               "quarantine",
               "quarantine-release",
               "offer-withdrawal",
-              "shortage-closure"
+              "shortage-closure",
+              "stock-loss-recovery"
             ]
           },
           "id": {
@@ -7209,6 +7521,11 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 2147483647
+          },
+          "quarantineDelta": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
           }
         },
         "required": [
@@ -7277,8 +7594,8 @@
               "string",
               "null"
             ],
-            "maxLength": 84,
-            "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release|offer-withdrawal|shortage-closure)\\.[0-9a-f]{32}$"
+            "maxLength": 85,
+            "pattern": "^[0-9a-f]{32}\\.(putaway|transfer-in|transfer-out|count|hold|hold-release|stock-loss|offer-backing|quarantine|quarantine-release|offer-withdrawal|shortage-closure|stock-loss-recovery)\\.[0-9a-f]{32}$"
           },
           "events": {
             "type": "array",
@@ -8071,12 +8388,15 @@
               "string",
               "null"
             ],
-            "maxLength": 128
+            "maxLength": 129
           },
           "quarantinedQuantity": {
             "type": "integer",
             "minimum": 0,
             "maximum": 1000000
+          },
+          "recoveryTotals": {
+            "$ref": "#/components/schemas/DeliveryRecoveryTotals"
           }
         },
         "required": [
@@ -8333,6 +8653,10 @@
             "minimum": 0,
             "maximum": 1000000,
             "description": "Quantity consumed by attributed posted losses. Included with lossAttribution=true. Released quantity only counts passed inspection releases."
+          },
+          "recoveryPostingId": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -8532,6 +8856,10 @@
           "recordedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "recoveryPostingId": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -9372,6 +9700,605 @@
           "offerBackedQuantity",
           "reason",
           "recordedAt"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossRecoveryCommand": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "postingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalogRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "confirmedIdentity": {
+            "type": "boolean",
+            "const": true
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "allocations": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1000000,
+            "items": {
+              "$ref": "#/components/schemas/StockLossRecoverySelection"
+            }
+          }
+        },
+        "required": [
+          "commandId",
+          "purchaseId",
+          "expectedRevision",
+          "positionId",
+          "locationId",
+          "confirmedLocationCode",
+          "postingId",
+          "catalogId",
+          "catalogRevision",
+          "confirmedIdentity",
+          "reason",
+          "allocations"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossRecoverySelection": {
+        "type": "object",
+        "properties": {
+          "quarantineId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "saleableQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "quarantineQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "quarantineId",
+          "saleableQuantity",
+          "quarantineQuantity"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossRecoveryReceipt": {
+        "type": "object",
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "kind": {
+            "type": "string",
+            "const": "stock-loss-recovery"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "commandId",
+          "entityId",
+          "revision",
+          "kind",
+          "correlationId"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossRecoverySource": {
+        "type": "object",
+        "properties": {
+          "quarantineId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "originalQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "recoveredQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "remainingQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "originalItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "restoredItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "remainingItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "originalQuarantineReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "quarantineId",
+          "originalQuantity",
+          "recoveredQuantity",
+          "remainingQuantity",
+          "originalItemCostMinor",
+          "restoredItemCostMinor",
+          "remainingItemCostMinor",
+          "originalQuarantineReason"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossRecoveryHistory": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "saleableQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "quarantineQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "restoredItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "recoveredQuarantineId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "commandId",
+          "recordedAt",
+          "saleableQuantity",
+          "quarantineQuantity",
+          "restoredItemCostMinor",
+          "recoveredQuarantineId"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossRecoveryReview": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "stock-loss-recovery-review"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "postingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "purchaseRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "position": {
+            "$ref": "#/components/schemas/StockRegisterRow"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/AdjustmentReceiptEvidence"
+          },
+          "hasOpenShortage": {
+            "type": "boolean"
+          },
+          "originalLostQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "recoveredQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "remainingQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "originalAllocatedItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "restoredItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "remainingLostItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "originalReason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "originalPostedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sources": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/StockLossRecoverySource"
+            }
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 76,
+            "pattern": "^[0-9a-f]{32}\\.[1-9][0-9]{0,9}\\.[0-9a-f]{32}$"
+          },
+          "recoveries": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/StockLossRecoveryHistory"
+            }
+          },
+          "nextHistoryAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "postingId",
+          "purchaseRevision",
+          "position",
+          "receipt",
+          "hasOpenShortage",
+          "originalLostQuantity",
+          "recoveredQuantity",
+          "remainingQuantity",
+          "originalAllocatedItemCostMinor",
+          "restoredItemCostMinor",
+          "remainingLostItemCostMinor",
+          "originalReason",
+          "originalPostedAt",
+          "sources",
+          "nextAfter",
+          "recoveries",
+          "nextHistoryAfter"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossRecoveryAllocation": {
+        "type": "object",
+        "properties": {
+          "quarantineId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "saleableQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "quarantineQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "restoredItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          }
+        },
+        "required": [
+          "quarantineId",
+          "saleableQuantity",
+          "quarantineQuantity",
+          "restoredItemCostMinor"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossRecoveryEvidence": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "const": "stock-loss-recovery"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "purchaseId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "postingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRow"
+          },
+          "confirmedLocationCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "recordedCatalog": {
+            "$ref": "#/components/schemas/CatalogRow"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/AdjustmentReceiptEvidence"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "saleableQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "quarantineQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "restoredItemCostMinor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100000000
+          },
+          "recoveredQuarantineId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "allocations": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/StockLossRecoveryAllocation"
+            }
+          },
+          "nextAfter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 65,
+            "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{32}$"
+          }
+        },
+        "required": [
+          "scope",
+          "asOf",
+          "complete",
+          "id",
+          "commandId",
+          "correlationId",
+          "revision",
+          "purchaseId",
+          "positionId",
+          "postingId",
+          "location",
+          "confirmedLocationCode",
+          "recordedCatalog",
+          "receipt",
+          "reason",
+          "recordedAt",
+          "saleableQuantity",
+          "quarantineQuantity",
+          "restoredItemCostMinor",
+          "recoveredQuarantineId",
+          "allocations",
+          "nextAfter"
+        ],
+        "additionalProperties": false
+      },
+      "DeliveryRecoveryTotals": {
+        "type": "object",
+        "properties": {
+          "grossLostQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "recoveredQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "format": "int64"
+          },
+          "grossAllocatedItemCostMinor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
+          "restoredItemCostMinor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": [
+          "grossLostQuantity",
+          "recoveredQuantity",
+          "grossAllocatedItemCostMinor",
+          "restoredItemCostMinor"
         ],
         "additionalProperties": false
       }

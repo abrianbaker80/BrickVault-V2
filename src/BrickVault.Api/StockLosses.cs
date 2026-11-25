@@ -85,7 +85,7 @@ internal sealed class StockLosses(NpgsqlDataSource db)
 
     public async Task<StockLossSnapshot> Read(Guid locationId, Guid positionId, Guid? caseId, Guid? observationId,
         Guid? postingId, Guid? commandId, string? after, int limit, CancellationToken token,
-        bool quarantine = false, string? quarantineAfter = null, int quarantineLimit = 25)
+        bool quarantine = false, string? quarantineAfter = null, int quarantineLimit = 25, bool recoveries = false)
     {
         var selectors = new[] { caseId, observationId, postingId, commandId }.Count(id => id.HasValue);
         if (selectors != 1 || limit is < 1 or > 100 || quarantineLimit is < 1 or > 100 ||
@@ -118,8 +118,10 @@ internal sealed class StockLosses(NpgsqlDataSource db)
                 d.id,d.reference,d.quantity,d.item_cost_minor,buy.currency,p.origin_placement_id,p.catalog_id,p.catalog_revision,
                 COALESCE((SELECT sum(r.quantity) FROM brickvault.stock_loss_offer_reductions r WHERE r.loss_id=l.id),0)::integer,
                 q.quarantined_quantity_before,
-                COALESCE((SELECT sum(qa.quantity) FROM brickvault.stock_loss_quarantine_attributions qa WHERE qa.loss_id=l.id),0)::integer
+                COALESCE((SELECT sum(qa.quantity) FROM brickvault.stock_loss_quarantine_attributions qa WHERE qa.loss_id=l.id),0)::integer,
+                COALESCE(basis.had_prior_recovery,false)
             FROM brickvault.stock_loss_postings l JOIN brickvault.commands c ON c.command_id=l.command_id
+            LEFT JOIN brickvault.stock_loss_basis_assignments basis ON basis.loss_id=l.id
             LEFT JOIN brickvault.stock_loss_quarantine_reviews q ON q.loss_id=l.id
             JOIN brickvault.audit a ON a.command_id=l.command_id
             JOIN brickvault.locations loc ON loc.id=l.location_id
@@ -134,12 +136,13 @@ internal sealed class StockLosses(NpgsqlDataSource db)
                 Loss: r.GetInt32(15), Protected: r.GetInt32(16), BackedBefore: r.GetInt32(17), PriorLoss: r.GetInt32(18),
                 AllocatedCost: Optional<int>(r,19), RemainingCost: Optional<int>(r,20),
                 Receipt: new AdjustmentReceiptEvidence(r.GetGuid(21), r.GetString(22), r.GetInt32(23), Optional<int>(r,24),
-                    r.GetString(25), r.GetGuid(26), r.GetGuid(27), r.GetInt32(28)), Reduction: r.GetInt32(29), QuarantineBefore: Optional<int>(r,30), QuarantineLoss: r.GetInt32(31)),
+                    r.GetString(25), r.GetGuid(26), r.GetGuid(27), r.GetInt32(28)), Reduction: r.GetInt32(29), QuarantineBefore: Optional<int>(r,30), QuarantineLoss: r.GetInt32(31), PriorRecovery: r.GetBoolean(32)),
             token, locationId, positionId, selector);
         if (postings.Count == 0)
             throw new Fault(404, "unknown_stock_loss", "No matching posted stock loss belongs to this receipt position and bin.");
         var row = postings.Single();
         if (!quarantine && row.QuarantineBefore > 0) throw StockQuarantines.Upgrade();
+        if (!recoveries && row.PriorRecovery) throw StockLossRecoveries.Upgrade();
         var reviewed = (await Rows(connection, tx, StockCounts.ObservationProjection + " WHERE n.id=$1",
             StockCounts.ReadObservation, token, row.Observation)).Single();
 
@@ -189,7 +192,8 @@ internal sealed class StockLosses(NpgsqlDataSource db)
             row.Reason, row.At, row.LedgerBefore, row.LedgerBefore-row.Loss, row.Loss, row.Protected, row.BackedBefore,
             row.BackedBefore-row.Reduction, row.PriorLoss, row.AllocatedCost, row.RemainingCost, reductions, next,
             quarantine ? row.QuarantineBefore.HasValue : null, quarantine ? row.QuarantineBefore ?? 0 : null,
-            quarantine ? (row.QuarantineBefore ?? 0)-row.QuarantineLoss : null, attributions, nextQuarantine);
+            quarantine ? (row.QuarantineBefore ?? 0)-row.QuarantineLoss : null, attributions, nextQuarantine,
+            recoveries ? row.PriorRecovery ? "active" : "cumulative" : null);
     }
 
     private static async Task<Guid?> CheckCursor(NpgsqlConnection connection, NpgsqlTransaction tx,
