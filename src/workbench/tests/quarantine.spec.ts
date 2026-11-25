@@ -216,5 +216,7 @@ test('incomplete, wrong-position and offline reads fence drafts; a later catalog
   await expect(view.getByRole('button',{name:/Inspect and release/})).toBeDisabled()
   await page.goto('/'+lossCaseLink(f.a.id,f.positionId,observation))
   await expect(page.getByText(/The count does not identify which pieces are missing/)).toBeVisible()
+  await expect(page.getByText('Pending identification of missing pieces')).toBeVisible()
+  await expect(page.getByText(/Reduce exactly .* units of backing/)).toHaveCount(0)
   await expect(page.getByRole('button',{name:'Post stock loss and selected reductions'})).toBeDisabled()
 })

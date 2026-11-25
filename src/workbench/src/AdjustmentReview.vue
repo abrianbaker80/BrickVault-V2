@@ -81,7 +81,7 @@ function retryRead() {
           <dt>Loss under review</dt><dd>{{ page.candidateLossQuantity }}</dd>
           <dt>Remaining after proposed loss</dt><dd>{{ page.postLossLedgerQuantity }}</dd>
           <dt>Reserved for builds</dt><dd>{{ page.protectedProjectQuantity }}</dd>
-          <dt>Capacity for offers after loss</dt><dd>{{ page.offerCapacityAfterLoss }}</dd>
+          <dt>Capacity for offers after loss</dt><dd>{{ page.offerCapacityAfterLoss ?? 'Pending identification of missing pieces' }}</dd>
           <dt>Currently backing offers</dt><dd>{{ page.offerBackedQuantity }}</dd>
           <dt>Whole delivery cost ({{ page.receipt.deliveryQuantity }} units)</dt>
           <dd>{{ money(page.receipt.itemCostMinor, page.receipt.currency) }}<template v-if="page.receipt.itemCostMinor === null"> ({{ page.receipt.currency }})</template></dd>

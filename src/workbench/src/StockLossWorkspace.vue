@@ -120,7 +120,7 @@ async function post() {
         <a :href="countReceiptLink(location.id,page.latestObservation.id)">Latest witnessed count</a>
         <dl class="details"><dt>Current ledger</dt><dd>{{ page.ledgerQuantity }}</dd><dt>Observed quantity</dt><dd>{{ page.latestObservation.countedQuantity }}</dd>
           <dt>Loss to post</dt><dd>{{ page.candidateLossQuantity }}</dd><dt>Ledger after posting</dt><dd>{{ page.postLossLedgerQuantity }}</dd>
-          <dt>Protected build holds</dt><dd>{{ page.protectedProjectQuantity }}</dd><dt>Capacity for offers after loss</dt><dd>{{ page.offerCapacityAfterLoss }}</dd>
+          <dt>Protected build holds</dt><dd>{{ page.protectedProjectQuantity }}</dd><dt>Capacity for offers after loss</dt><dd>{{ page.offerCapacityAfterLoss ?? 'Pending identification of missing pieces' }}</dd>
           <dt>Currently backed here</dt><dd>{{ page.offerBackedQuantity }}</dd></dl>
         <a v-if="page.protectedProjectQuantity" :href="holdPositionLink(location.id,position)">Inspect named build holds</a>
         <p v-if="page.quarantineBlocksLoss" class="warning">{{ page.quarantinedQuantity }} quarantined in this position. The count does not identify which pieces are missing. Loss posting is blocked.</p>
@@ -128,7 +128,7 @@ async function post() {
         <p v-if="!page.candidateLossQuantity" class="warning">The latest witnessed count supports no stock loss.</p>
         <form @submit.prevent="post">
           <h3 ref="heading" tabindex="-1">Choose offer reductions</h3>
-          <p>Reduce exactly {{ page.minimumOfferBackingReduction }} units of backing on this position. Enter 0 or leave a field blank to keep that offer’s backing.</p>
+          <p v-if="page.minimumOfferBackingReduction !== null">Reduce exactly {{ page.minimumOfferBackingReduction }} units of backing on this position. Enter 0 or leave a field blank to keep that offer’s backing.</p>
           <ul v-if="page.offers.length" class="receipt-lines" aria-label="Offer backing on this position">
             <li v-for="offer in page.offers" :key="offer.id">
               <strong>{{ money(offer.unitPriceMinor,offer.currency) }} per unit · {{ offer.backedQuantity }} backed here</strong>
@@ -143,7 +143,7 @@ async function post() {
             <button type="button" :disabled="!ready || !page.nextAfter" @click="page.nextAfter && (requested=[...displayed,page.nextAfter])">More offers</button>
           </nav>
           <section class="decision" aria-label="Selected offer reductions"><h3>Selected reductions</h3>
-            <p aria-live="polite">{{ chosen }} of {{ page.minimumOfferBackingReduction }} units selected</p>
+            <p v-if="page.minimumOfferBackingReduction !== null" aria-live="polite">{{ chosen }} of {{ page.minimumOfferBackingReduction }} units selected</p>
             <ul v-if="selected.length"><li v-for="entry in selected" :key="entry.offer.id">
               {{ entry.quantity }} of {{ entry.offer.backedQuantity }} · {{ money(entry.offer.unitPriceMinor,entry.offer.currency) }}
               <small>Offer {{ entry.offer.id }}</small>

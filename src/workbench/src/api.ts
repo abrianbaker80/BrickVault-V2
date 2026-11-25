@@ -261,8 +261,11 @@ export const api = {
     if (after) params.set('after', after)
     const result = await read('receiving/bins/' + encodeURIComponent(binId) + '/positions/' +
       encodeURIComponent(positionId) + '/shortages/' + encodeURIComponent(caseId) + '/adjustment-review?' + params, valid.StockAdjustmentReview)
+    const needsAttribution = (result.quarantinedQuantity ?? 0) > 0 && result.candidateLossQuantity > 0
     if (result.location.id !== binId || result.positionId !== positionId || result.caseId !== caseId ||
-        (result.complete && (result.quarantinedQuantity === undefined || result.quarantineBlocksLoss === undefined)) ||
+        (result.complete && (result.quarantinedQuantity === undefined || result.quarantineBlocksLoss === undefined ||
+          (result.offerCapacityAfterLoss === null) !== needsAttribution ||
+          (result.minimumOfferBackingReduction === null) !== needsAttribution)) ||
         result.latestObservation.positionId !== positionId || result.latestObservation.purchaseId !== result.purchaseId ||
         result.latestObservation.locationId !== binId) throw new ContractFailure()
     return result
