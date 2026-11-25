@@ -7,14 +7,21 @@ export const quarantineLink = (bin: string, position: string, receipt?: string) 
   '#locations/' + bin + '/positions/' + position + '/quarantine' + (receipt ? '/' + receipt : '')
 export const lossCaseLink = (bin: string, position: string, id: string) => '#locations/' + bin + '/positions/' + position + '/loss-review/' + id
 export const lossReceiptLink = (bin: string, position: string, id: string) => '#locations/' + bin + '/positions/' + position + '/posted-loss/' + id
+export const closureLink = (bin:string,position:string,caseId:string,mode:'review'|'receipt',id:string) =>
+  '#locations/'+bin+'/positions/'+position+'/shortages/'+caseId+'/'+mode+'/'+id
 export type CountLink = { binId: string; receiptId?: string; positionId?: string; holdPositionId?: string;
   quarantinePositionId?: string; quarantineReceiptId?: string; draftPositionId?: string; draftOfferId?: string; withdrawalId?: string;
+  closure?: {position:string; caseId:string; mode:'review'|'receipt'; id:string};
   lossCaseId?: string; lossPositionId?: string; lossReceiptId?: string } | undefined
 export function readCountLink(hash: string): CountLink {
   const [page, binId, kind, id, action, ...extra] = hash.slice(1).split('/')
   if (page !== 'locations' || !binId) return
   const uuid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i
   if (!uuid.test(binId)) return
+  if (kind === 'positions' && uuid.test(id) && action === 'shortages' && extra.length===3 &&
+      uuid.test(extra[0]) && (extra[1]==='review' || extra[1]==='receipt') && uuid.test(extra[2])) {
+    return {binId:binId.toLowerCase(),closure:{position:id.toLowerCase(),caseId:extra[0].toLowerCase(),mode:extra[1],id:extra[2].toLowerCase()}}
+  }
   if (kind === 'positions' && uuid.test(id) && action === 'draft-backing') {
     const scope = { binId: binId.toLowerCase(), draftPositionId: id.toLowerCase() }
     if (!extra.length) return scope

@@ -3,7 +3,7 @@ import CountPostingLink from './CountPostingLink.vue'
 import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, ContractFailure, explain } from './api'
 import type { Catalog, CountPosition, CountSnapshot, Location, TransferControls } from './api'
-import { countPositionLink, countReceiptLink, holdPositionLink } from './countLinks'
+import { closureLink, countPositionLink, countReceiptLink, holdPositionLink } from './countLinks'
 import { itemLabel } from './receiving'
 import { time } from './presentation'
 import AdjustmentReview from './AdjustmentReview.vue'
@@ -28,6 +28,7 @@ const warning = ref('')
 const attempted = ref(false)
 const sending = ref(false)
 const position = computed(() => snapshot.value?.positions[0])
+const witnessed = computed(() => new Map(snapshot.value?.observations.map(row=>[row.id,row])))
 const item = computed(() => props.catalog.find(row => row.id === position.value?.catalogId))
 const stale = computed(() => !!baseline.value && (!position.value || baseline.value.position.purchaseRevision !== position.value.purchaseRevision ||
   baseline.value.code !== props.location.code || snapshot.value?.location.code !== props.location.code))
@@ -50,7 +51,7 @@ watch(() => [props.asOf, props.location.revision, props.connected, requested.val
     try {
       const query = props.receiptId ? { observationId: props.receiptId } :
         { positionId: props.positionId, limit: '10', ...(cursors.at(-1) ? { after: cursors.at(-1) } : {}) }
-      const result = await api.binCounts(props.location.id, query)
+      const result = await api.binCounts(props.location.id, query, true)
       if (!active) return
       if (result.location.revision < revision) throw new ContractFailure()
       partial.value = !result.complete
@@ -108,12 +109,27 @@ async function submit() {
         <p v-if="item && position">{{ itemLabel([item], item.id) }}
           <small v-if="item.revision !== position.catalogRevision">Placed at catalog revision {{ position.catalogRevision }}. Item details show current revision {{ item.revision }}.</small></p>
         <section v-for="c in snapshot.shortages" :key="c.id" class="case-note" aria-label="Open shortage">
-          <strong>Open shortage</strong><p>{{ c.openingMissingQuantity }} missing at opening · {{ c.latestObservedMissingQuantity }} missing on latest count</p>
+          <strong>Open shortage</strong><small>Case {{ c.id }}</small><p>{{ c.openingMissingQuantity }} missing at opening · {{ c.latestObservedMissingQuantity }} missing on latest count</p>
           <p>Transfers and new offer backing are blocked for this position. Existing holds keep their priority until the owner selects a hold and quantity to release.</p>
           <a :href="holdPositionLink(location.id, c.positionId)">Review build holds for this shortage</a>
           <a :href="countReceiptLink(location.id, c.openingObservationId)">Opening count receipt</a>
+          <p v-if="c.latestObservedMissingQuantity">Record a later witnessed count to check the shortage. An exact recount can support closure without posting a loss.</p>
+          <template v-else-if="c.latestObservationId!==c.openingObservationId && witnessed.get(c.latestObservationId)?.unidentifiedSurplusQuantity">
+            <p>The latest recount found a surplus. An exact count matching the current ledger is required to close this shortage.</p>
+          </template>
+          <template v-else-if="c.latestObservationId!==c.openingObservationId && witnessed.get(c.latestObservationId)?.countedQuantity===position?.ledgerQuantity && position && !c.latestObservedMissingQuantity">
+            <p>The latest recount matches the ledger. The shortage remains open until an operator confirms closure.</p>
+            <a v-if="connected && !partial && !loading && !error && snapshot.complete" :href="closureLink(location.id,c.positionId,c.id,'review',c.latestObservationId)">Review exact recount and close shortage</a>
+          </template>
+          <a v-else-if="c.latestObservationId!==c.openingObservationId && !witnessed.has(c.latestObservationId)" :href="countReceiptLink(location.id,c.latestObservationId)">View latest witnessed count</a>
           <AdjustmentReview :key="c.id" :bin="location.id" :position="c.positionId" :case-id="c.id" :witness-id="c.latestObservationId"
             :as-of="snapshot.asOf" :connected="connected" @refresh-count="attempt++" @failure="emit('failure', $event)" />
+        </section>
+        <section v-if="snapshot.closures?.length" aria-label="Shortage closures">
+          <h3>Shortage closed after exact recount</h3>
+          <p v-for="c in snapshot.closures" :key="c.id">
+            <template v-if="receipt">{{ receipt.id===c.recountObservationId ? 'The operator used this witnessed recount to close the shortage.' : 'A later witnessed recount supported closure of the shortage for this observation.' }}</template>
+            <a :href="closureLink(location.id,c.positionId,c.caseId,'receipt',c.id)">View shortage closure receipt</a></p>
         </section>
         <template v-if="receipt">
           <h3>Observed quantities</h3>
@@ -122,7 +138,7 @@ async function submit() {
             <dt>Unidentified surplus</dt><dd>{{ receipt.unidentifiedSurplusQuantity }}</dd></dl>
           <p v-if="receipt.unidentifiedSurplusQuantity">Surplus units await identification before they can enter stock.</p>
           <p><strong>{{ receipt.reason }}</strong><br>{{ time(receipt.observedAt) }} · Witnessed in {{ receipt.locationCode }}</p>
-          <CountPostingLink :key="receipt.id" :bin="location.id" :position="receipt.positionId" :observation="receipt.id"
+          <CountPostingLink v-if="snapshot.complete && !partial && !error && !loading && connected && !snapshot.closures?.length" :key="receipt.id" :bin="location.id" :position="receipt.positionId" :observation="receipt.id"
             :as-of="asOf" :connected="connected" @failure="emit('failure', $event)" />
           <details><summary>Receipt identifiers</summary><small>Observation {{ receipt.id }}</small><small>Position {{ receipt.positionId }}</small>
             <small>Command {{ receipt.commandId }}</small><small>Correlation ID {{ receipt.correlationId }}</small></details>

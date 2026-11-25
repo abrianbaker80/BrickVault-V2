@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, explain, type Catalog, type Location, type QuarantineSnapshot, type TransferControls } from './api'
-import { countReceiptLink, holdPositionLink, lossReceiptLink } from './countLinks'
+import { closureLink, countReceiptLink, holdPositionLink, lossReceiptLink } from './countLinks'
 import { itemLabel, money } from './receiving'
 import { label, time } from './presentation'
 import StockLossReceipt from './StockLossReceipt.vue'
@@ -32,12 +32,13 @@ const attempted = ref(false)
 const sending = ref(false)
 const retry = ref(0)
 const resolved = ref('')
+const closedWithoutLoss = ref('')
 const selected = computed(() => Object.values(selections.value))
 const validQuantity = (entry: {offer: Offer; quantity: string}) => /^[0-9]+$/.test(entry.quantity) &&
   Number(entry.quantity) > 0 && Number(entry.quantity) <= entry.offer.backedQuantity
 const chosen = computed(() => selected.value.reduce((total, row) => total + (validQuantity(row) ? Number(row.quantity) : 0),0))
 const ready = computed(() => props.connected && props.controls.enabled && !sending.value && !loading.value &&
-  !error.value && !stale.value && !resolved.value && !!page.value)
+  !error.value && !stale.value && !resolved.value && !closedWithoutLoss.value && !!page.value)
 const needsAttribution = computed(() => Boolean(page.value?.quarantinedQuantity && page.value.candidateLossQuantity))
 const attributed = computed(() => {
   if (!needsAttribution.value || mode.value === 'none') return 0
@@ -109,7 +110,19 @@ watch(() => [props.caseId, props.asOf, props.connected, requested.value, quarant
       try {
         const known = await api.postedLoss(props.location.id,props.position,{caseId},'',1)
         if (active && known.complete) { resolved.value = known.postingId; return }
-      } catch (lookup) { if (active) emit('failure', lookup) }
+      } catch (lookup) {
+        if (!active) return
+        if (lookup instanceof ApiFailure && lookup.status===404 && lookup.detail?.code==='unknown_stock_loss') {
+          try {
+            const closed=await api.closure(props.location.id,props.position,caseId)
+            if (!active) return
+            if (!closed.complete) {error.value='Incomplete shortage closure receipt.';return}
+            closedWithoutLoss.value=closed.id
+            return
+          } catch (e) {if(active) {error.value=explain(e);emit('failure',e)};return}
+        }
+        error.value=explain(lookup);emit('failure',lookup);return
+      }
     }
     if (active) { error.value = explain(failure); emit('failure',failure) }
   } finally { if (active) loading.value = false }
@@ -151,6 +164,8 @@ async function post() {
       @failure="emit('failure',$event)" />
     <div v-else class="loss-body">
       <p><strong>{{ location.code }} · {{ location.name }}</strong><small>Position ID {{ position }}</small></p>
+      <p v-if="closedWithoutLoss && caseId" role="status">The shortage was closed after an exact recount.
+        <a :href="closureLink(location.id,position,caseId,'receipt',closedWithoutLoss)">View shortage closure receipt</a></p>
       <p v-if="resolved" class="notice" role="status">The loss for this case has been posted.
         <a :href="lossReceiptLink(location.id,position,resolved)">View posted stock loss</a></p>
       <p v-if="stale" class="warning" role="alert">The count or purchase changed. Review current quantities and choose reductions again.
@@ -159,7 +174,7 @@ async function post() {
         {{ page ? 'Showing the last confirmed review.' : 'Loss review unavailable.' }}
         <button v-if="connected" :disabled="loading" @click="retry++">Retry loss review</button></p>
       <p v-else-if="loading" role="status">Reading stock and offer backing…</p>
-      <template v-if="page && !resolved">
+      <template v-if="page && !resolved && !closedWithoutLoss">
         <p><strong>{{ page.receipt.deliveryReference }}</strong> · Purchase revision {{ page.purchaseRevision }}
           <small>{{ label(catalog.find(item=>item.id===page!.receipt.catalogId)?.itemType || 'Item') }} · {{ itemLabel(catalog,page.receipt.catalogId,page.receipt.catalogRevision) }}</small>
           <small>Read {{ time(page.asOf) }}</small></p>
