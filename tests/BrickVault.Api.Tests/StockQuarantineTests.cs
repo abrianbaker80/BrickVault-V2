@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Npgsql;
 using Xunit;
 
@@ -206,15 +207,28 @@ public sealed class StockQuarantineTests
         Assert.Equal("used", nextEvidence.RecordedCatalog.Condition);
         Assert.Equal(item.Revision, (await Snapshot()).Position.Layer.CatalogRevision);
 
-        var count = await new StockCounts(db).Save(new StockCountCommand
+        var counts = new StockCounts(db);
+        var observation = new StockCountCommand
         {
             CommandId = Guid.NewGuid(), PurchaseId = purchase.EntityId, ExpectedRevision = inspected.Revision,
-            PositionId = origin.EntityId, LocationId = a.Id, ConfirmedLocationCode = a.Code, CountedQuantity = 7,
+            PositionId = origin.EntityId, LocationId = a.Id, ConfirmedLocationCode = a.Code, CountedQuantity = 6,
             Reason = "Aggregate witness does not identify quarantine pieces"
-        }, Guid.NewGuid(), token);
-        var preview = await new StockAdjustmentReviews(db).Read(a.Id, origin.EntityId, count.EntityId, null, 25, token, true);
+        };
+        var count = await counts.Save(observation, Guid.NewGuid(), token);
+        var adjustments = new StockAdjustmentReviews(db);
+        Task<StockAdjustmentReview> Review(bool includeQuarantine = true) =>
+            adjustments.Read(a.Id, origin.EntityId, count.EntityId, null, 25, token, includeQuarantine);
+        var preview = await Review();
         Assert.True(preview.QuarantineBlocksLoss);
-        Assert.Equal(2, preview.QuarantinedQuantity);
+        Assert.Equal((8, 6, 2, 2, 3, 2), (preview.LedgerQuantity, preview.LatestObservation.CountedQuantity,
+            preview.CandidateLossQuantity, preview.ProtectedProjectQuantity, preview.OfferBackedQuantity,
+            preview.QuarantinedQuantity));
+        Assert.Null(preview.OfferCapacityAfterLoss);
+        Assert.Null(preview.MinimumOfferBackingReduction);
+        var wire = JsonSerializer.SerializeToElement(preview, Wire.Json);
+        Assert.Equal(JsonValueKind.Null, wire.GetProperty("offerCapacityAfterLoss").ValueKind);
+        Assert.Equal(JsonValueKind.Null, wire.GetProperty("minimumOfferBackingReduction").ValueKind);
+        Assert.Equal("quarantine_client_upgrade_required", await Reject(() => Review(false)));
         Assert.Equal("stock_loss_quarantine_unresolved", await Reject(() => new StockLosses(db).Save(new StockLossCommand
         {
             CommandId = Guid.NewGuid(), PurchaseId = purchase.EntityId, ExpectedRevision = count.Revision,
@@ -229,5 +243,18 @@ public sealed class StockQuarantineTests
         var stillPresent = await Snapshot();
         Assert.Equal((8, 2, 2, 3, 0), (stillPresent.OnHandQuantity, stillPresent.QuarantinedQuantity,
             stillPresent.HeldQuantity, stillPresent.OfferBackedQuantity, stillPresent.AvailableToQuarantineQuantity));
+
+        var revision = count.Revision;
+        foreach (var quantity in new[] { 8, 9 })
+        {
+            var recount = await counts.Save(observation with
+            {
+                CommandId = Guid.NewGuid(), ExpectedRevision = revision, CountedQuantity = quantity
+            }, Guid.NewGuid(), token);
+            revision = recount.Revision;
+            var noLoss = await Review();
+            Assert.Equal((quantity, 0, 4, 0), (noLoss.LatestObservation.CountedQuantity, noLoss.CandidateLossQuantity,
+                noLoss.OfferCapacityAfterLoss, noLoss.MinimumOfferBackingReduction));
+        }
     }
 }
