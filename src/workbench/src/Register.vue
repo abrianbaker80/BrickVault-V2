@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import BinStock from './BinStock.vue'
+import StockQuarantine from './StockQuarantine.vue'
 import DraftBacking from './DraftBacking.vue'
 import BuildHolds from './BuildHolds.vue'
 import StockLossWorkspace from './StockLossWorkspace.vue'
@@ -38,7 +39,7 @@ function inspect(row: Catalog | Location, event: MouseEvent) {
 watch(() => props.confirmedSourceId, id => {
   if (id && !inspectedId.value && props.page === 'locations') inspectedId.value = id
 })
-const separateDialog = computed(() => props.countLink?.holdPositionId || props.countLink?.lossPositionId || props.countLink?.draftPositionId)
+const separateDialog = computed(() => props.countLink?.holdPositionId || props.countLink?.lossPositionId || props.countLink?.quarantinePositionId || props.countLink?.draftPositionId)
 watch([inspectedId, compact, separateDialog], async () => {
   await nextTick()
   if (separateDialog.value) return
@@ -138,6 +139,11 @@ onBeforeUnmount(() => {
   <StockLossWorkspace v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.lossPositionId"
     :key="countLink.binId + '/' + countLink.lossPositionId + '/' + (countLink.lossReceiptId ? 'posting/' + countLink.lossReceiptId : 'case/' + countLink.lossCaseId)" :location="inspected" :position="countLink.lossPositionId"
     :catalog="workspace.catalog" :case-id="countLink.lossCaseId" :posting="countLink.lossReceiptId" :as-of="workspace.asOf" :connected="connected" :controls="transfers"
+    @failure="emit('failure', $event)" @recover="close" @close="inspectBin(inspected.id)" />
+  <StockQuarantine v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.quarantinePositionId"
+    :key="[countLink.binId, countLink.quarantinePositionId, countLink.quarantineReceiptId].join('/')"
+    :location="inspected" :position-id="countLink.quarantinePositionId" :receipt-id="countLink.quarantineReceiptId"
+    :as-of="workspace.asOf" :connected="connected" :controls="transfers"
     @failure="emit('failure', $event)" @recover="close" @close="inspectBin(inspected.id)" />
   <DraftBacking v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.draftPositionId"
     :key="[countLink.binId,countLink.draftPositionId,countLink.draftOfferId,countLink.withdrawalId].join('/')"

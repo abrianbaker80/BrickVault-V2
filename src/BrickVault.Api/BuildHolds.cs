@@ -43,11 +43,12 @@ internal sealed class BuildHolds(NpgsqlDataSource db)
             return receipt;
         }
         catch (PostgresException ex) when (ex.ConstraintName is "hold_revision" or "hold_position" or "hold_bin" or
-            "hold_catalog" or "hold_quantity" or "hold_shortage_frontier" or "stock_shortage_open")
+            "hold_catalog" or "hold_quantity" or "hold_shortage_frontier" or "stock_shortage_open" or "quarantine_capacity_unavailable")
         {
             throw ex.ConstraintName switch
             {
                 "hold_revision" => StalePurchase(),
+                "quarantine_capacity_unavailable" => StockQuarantines.ProtectedCapacity(),
                 "hold_position" => new Fault(409, "hold_position_mismatch", "Select a hold or identified receipt position from this purchase and bin."),
                 "hold_bin" => new Fault(409, "hold_bin_confirmation_mismatch", "Confirm the current code of the selected registered bin."),
                 "hold_catalog" => new Fault(409, "hold_catalog_ineligible", "Select a position with current, eligible identification."),
@@ -62,7 +63,7 @@ internal sealed class BuildHolds(NpgsqlDataSource db)
         new(409, "revision_conflict", "This purchase has changed. Reload the selected position and confirm the hold action.");
 
     public async Task<StockHoldPositionSnapshot> Snapshot(Guid locationId, Guid positionId, Guid? after, int limit,
-        CancellationToken token, Guid? commandId = null)
+        CancellationToken token, Guid? commandId = null, bool quarantine = false)
     {
         RequirePage(limit, after, commandId);
         await using var connection = await db.OpenConnectionAsync(token);
@@ -76,7 +77,8 @@ internal sealed class BuildHolds(NpgsqlDataSource db)
                 (SELECT n.id FROM brickvault.stock_count_observations n WHERE n.position_id=p.id AND s.id IS NOT NULL
                  ORDER BY n.expected_purchase_revision DESC LIMIT 1),
                 buy.reference,d.reference,p.catalog_revision,c.id,c.revision,c.item_type,c.item_number,c.variant,c.name,
-                c.color_id,c.color_state,c.condition,c.completeness,c.source,c.license,c.mapping,c.integration_eligible
+                c.color_id,c.color_state,c.condition,c.completeness,c.source,c.license,c.mapping,c.integration_eligible,
+                COALESCE((SELECT q.quantity FROM brickvault.current_position_quarantine q WHERE q.position_id=p.id),0)
             FROM brickvault.current_placement_stock p
             JOIN brickvault.locations l ON l.id=p.location_id
             JOIN brickvault.purchases buy ON buy.id=p.purchase_id
@@ -87,7 +89,8 @@ internal sealed class BuildHolds(NpgsqlDataSource db)
             """, r => (AsOf: r.GetDateTime(0), Location: new LocationRow(r.GetGuid(1), r.GetInt32(2), r.GetString(3), r.GetString(4)),
                 Purchase: r.GetGuid(5), Revision: r.GetInt32(6), Ledger: r.GetInt32(7), Backed: r.GetInt32(8),
                 Reserved: r.GetInt32(9), Eligible: r.GetBoolean(10), Shortage: Optional<Guid>(r, 11), Latest: Optional<Guid>(r, 12),
-                PurchaseRef: r.GetString(13), DeliveryRef: r.GetString(14), CatalogRevision: r.GetInt32(15), CurrentCatalog: References.ReadCatalog(r, 16)),
+                PurchaseRef: r.GetString(13), DeliveryRef: r.GetString(14), CatalogRevision: r.GetInt32(15), CurrentCatalog: References.ReadCatalog(r, 16),
+                Quarantined: r.GetInt32(30)),
             token, positionId, locationId);
         if (positions.Count == 0)
             throw new Fault(404, "unknown_hold_position", "No receipt position with that identifier belongs to this bin.");
@@ -108,13 +111,14 @@ internal sealed class BuildHolds(NpgsqlDataSource db)
                 r.GetInt32(5), r.GetInt32(6), r.GetInt32(7), r.GetDateTime(8), r.GetInt32(9), r.GetString(10)),
             token, positionId, Nullable(NpgsqlDbType.Integer, cursor), limit + 1, Nullable(NpgsqlDbType.Uuid, commandId));
         RequireMatch(holds.Count, commandId);
+        if (!quarantine && position.Quarantined > 0) throw StockQuarantines.Upgrade();
         var next = Next(holds, limit, h => h.Id);
-        var free = position.Ledger - position.Reserved;
+        var free = position.Ledger - position.Reserved - position.Quarantined;
         var available = position.Eligible && position.Shortage is null ? free - position.Backed : 0;
         return new StockHoldPositionSnapshot("position-holds", position.AsOf, true, position.Location,
             positionId, position.Purchase, position.Revision, position.PurchaseRef, position.DeliveryRef, position.CatalogRevision,
             position.CurrentCatalog, position.Ledger, position.Backed, position.Reserved,
-            free, available, position.Shortage, position.Latest, holds, next);
+            free, available, position.Shortage, position.Latest, holds, next, quarantine ? position.Quarantined : null);
     }
 
     public async Task<StockHoldReleasePage> Releases(Guid locationId, Guid positionId, Guid holdId, Guid? after,

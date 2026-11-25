@@ -1,5 +1,6 @@
 using System.Data;
 using System.Globalization;
+using System.Text.Json.Serialization;
 using Npgsql;
 using NpgsqlTypes;
 using static BrickVault.Api.Database;
@@ -16,12 +17,13 @@ internal sealed record StockReceiptLot(string Scope, DateTime AsOf, bool Complet
     int ReceivedQuantity, int UnplacedQuantity, int PositionedQuantity, int CurrentOnHandQuantity, int LostQuantity,
     int PositionCount, int OfferBackedQuantity, int HeldQuantity, int FreeToBackQuantity, bool HasUndatedEvents,
     IReadOnlyList<StockRegisterRow> Positions, IReadOnlyList<StockReceiptLotEvent> Events,
-    string? NextPositionAfter, string? NextEventAfter);
+    string? NextPositionAfter, string? NextEventAfter,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null);
 
 internal sealed class StockReceiptLots(NpgsqlDataSource db)
 {
     public async Task<StockReceiptLot> Read(Guid deliveryId, string? positionAfter, string? eventAfter, int positionLimit,
-        int eventLimit, CancellationToken token, bool withdrawals = false)
+        int eventLimit, CancellationToken token, bool withdrawals = false, bool quarantine = false)
     {
         if (positionLimit is < 1 or > 100 || eventLimit is < 1 or > 100)
             throw new Fault(400, "invalid_lot_page", "Choose page sizes from 1 to 100.");
@@ -91,15 +93,18 @@ internal sealed class StockReceiptLots(NpgsqlDataSource db)
             SELECT count(*)::integer, COALESCE(sum(s.quantity),0)::integer, COALESCE(sum(b.quantity),0)::integer,
                 COALESCE(sum(h.quantity),0)::integer,
                 COALESCE(sum(CASE WHEN c.integration_eligible AND c.revision=s.catalog_revision AND sc.id IS NULL
-                    THEN s.quantity-COALESCE(b.quantity,0)-COALESCE(h.quantity,0) ELSE 0 END),0)::integer
+                    THEN s.quantity-COALESCE(b.quantity,0)-COALESCE(h.quantity,0)-COALESCE(q.quantity,0) ELSE 0 END),0)::integer,
+                COALESCE(sum(q.quantity),0)::integer
             FROM stock s JOIN brickvault.catalog c ON c.id=s.catalog_id
             LEFT JOIN brickvault.stock_shortage_cases sc ON sc.position_id=s.id AND sc.resolved_by_command_id IS NULL
             LEFT JOIN backing b ON b.placement_id=s.id LEFT JOIN held h ON h.position_id=s.id
+            LEFT JOIN brickvault.current_position_quarantine q ON q.position_id=s.id
             """, r => (Positions: r.GetInt32(0), Positioned: r.GetInt32(1), Backed: r.GetInt32(2),
-                Held: r.GetInt32(3), Free: r.GetInt32(4)), token, deliveryId)).Single();
+                Held: r.GetInt32(3), Free: r.GetInt32(4), Quarantined: r.GetInt32(5)), token, deliveryId)).Single();
         var positions = await Rows(connection, tx, "SELECT " + PositionRows.RegisterSelect + "\n" +
             PositionRows.RegisterFrom + "\nWHERE p.delivery_id=$1 AND ($2::uuid IS NULL OR p.id>$2) ORDER BY p.id LIMIT $3",
-            PositionRows.ReadRegister, token, deliveryId, Nullable(NpgsqlDbType.Uuid, previousPosition), positionLimit + 1);
+            r => PositionRows.ReadRegister(r, quarantine), token, deliveryId,
+            Nullable(NpgsqlDbType.Uuid, previousPosition), positionLimit + 1);
         var events = await StockPositionTimelines.ReadEvents(connection, tx, deliveryId, true, previousEvent?.Revision, previousEvent?.Kind,
             previousEvent?.EventId, previousEvent?.PositionId, eventLimit + 1, token);
 
@@ -118,8 +123,10 @@ internal sealed class StockReceiptLots(NpgsqlDataSource db)
         }
         var history = (await Rows(connection, tx, StockPositionTimelines.ScopedEvents(true) + "\n" + """
             SELECT EXISTS (SELECT 1 FROM events WHERE occurred_at IS NULL),
+                EXISTS (SELECT 1 FROM events WHERE kind IN ('quarantine','quarantine-release')),
                 EXISTS (SELECT 1 FROM events WHERE kind='offer-withdrawal')
-            """, r => (Undated: r.GetBoolean(0), HasWithdrawals: r.GetBoolean(1)), token, deliveryId)).Single();
+            """, r => (Undated: r.GetBoolean(0), HasQuarantine: r.GetBoolean(1), HasWithdrawals: r.GetBoolean(2)), token, deliveryId)).Single();
+        if (!quarantine && history.HasQuarantine) throw StockQuarantines.Upgrade();
         if (!withdrawals && history.HasWithdrawals) throw DraftBackingWithdrawals.Upgrade();
         var hasUndated = evidence.ReceivedAt is null || history.Undated;
         var onHand = evidence.Received - evidence.Lost;
@@ -134,7 +141,8 @@ internal sealed class StockReceiptLots(NpgsqlDataSource db)
             events.Select(row => row.Event.Kind == "transfer-out"
                 ? new StockReceiptLotEvent(row.PositionId, -row.Event.OfferBackedDelta,
                     row.Event with { PhysicalDelta = 0, OfferBackedDelta = 0 })
-                : new StockReceiptLotEvent(row.PositionId, 0, row.Event)).ToList(), nextPosition, nextEvent);
+                : new StockReceiptLotEvent(row.PositionId, 0, row.Event)).ToList(), nextPosition, nextEvent,
+            quarantine ? totals.Quarantined : null);
     }
 
     private static string[]? ScopedCursor(string? cursor, Guid deliveryId, int revision, int size)

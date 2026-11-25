@@ -1,6 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import { api, ApiFailure, commandLabel, explain, forget, InvalidCommand, readJournal, remember } from './api'
-import { countReceiptLink, draftBackingLink, lossReceiptLink } from './countLinks'
+import { countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink } from './countLinks'
 import { recoverStockLoss } from './stockLoss'
 import type { CatalogInput, Command, Held, LocationInput, ReceivingWorkspace, Session, Workspace } from './api'
 
@@ -12,7 +12,7 @@ export function useWorkbench(page: Ref<string>) {
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
   const error = ref('')
-  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string; recountLink?: string; withdrawalLink?: string } | null>(null)
+  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string; recountLink?: string; quarantineReceipt?: string; withdrawalLink?: string } | null>(null)
   const pending = shallowRef<Command[]>([])
   const held = shallowRef<Held[]>([])
   const journalError = ref('')
@@ -152,7 +152,22 @@ export function useWorkbench(page: Ref<string>) {
         let lossLink: string | undefined
         let recountLink: string | undefined
         let withdrawalLink: string | undefined
-        if (command.kind === 'offer-withdrawal') {
+        let quarantineReceipt: string | undefined
+        if (command.kind === 'quarantine' || command.kind === 'quarantine-release') {
+          const body = command.body
+          try {
+            const row = await api.quarantineReceipt(body.locationId, body.positionId, { commandId:body.commandId })
+            if (!row.complete || row.kind !== command.kind || row.purchaseId !== body.purchaseId ||
+                row.revision !== body.expectedRevision + 1 || row.confirmedLocationCode !== body.confirmedLocationCode ||
+                row.catalogId !== body.catalogId || row.catalogRevision !== body.catalogRevision || row.quantity !== body.quantity ||
+                row.reason !== body.reason || (command.kind === 'quarantine-release' &&
+                (row.quarantineId !== command.body.quarantineId || row.inspectionResult !== command.body.inspectionResult))) throw new Error('Quarantine receipt mismatch')
+            committed = row
+            quarantineReceipt = quarantineLink(body.locationId, body.positionId, row.id)
+          } catch (failure) {
+            if (!(failure instanceof ApiFailure && failure.status === 404 && failure.detail?.code === 'unknown_quarantine_receipt')) throw failure
+          }
+        } else if (command.kind === 'offer-withdrawal') {
           const body = command.body
           try {
             const row = await api.withdrawalReceipt(body.locationId,body.positionId,{commandId:body.commandId})
@@ -225,7 +240,7 @@ export function useWorkbench(page: Ref<string>) {
           forget(command)
           loadPending()
           notice.value = { message: 'Confirmed the original ' + commandLabel(command) + '.',
-            correlationId: committed.correlationId, countLink, lossLink, recountLink, withdrawalLink, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
+            correlationId: committed.correlationId, countLink, lossLink, recountLink, quarantineReceipt, withdrawalLink, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
           await refresh()
           return
         }
@@ -252,6 +267,7 @@ export function useWorkbench(page: Ref<string>) {
       forget(command)
       loadPending()
       notice.value = { message: 'Saved ' + commandLabel(command) + ' · revision ' + receipt.revision + '.',
+        quarantineReceipt: command.kind === 'quarantine' || command.kind === 'quarantine-release' ? quarantineLink(command.body.locationId, command.body.positionId, receipt.entityId) : undefined,
         withdrawalLink: command.kind === 'offer-withdrawal' ? draftBackingLink(command.body.locationId,command.body.positionId,'receipts',receipt.entityId) : undefined,
         recountLink: command.kind === 'recount' ? '#inventory/recounts/' + receipt.entityId : undefined,
         correlationId: receipt.correlationId, lossLink: command.kind === 'stock-loss' ? lossReceiptLink(command.body.locationId,command.body.positionId,receipt.entityId) : undefined,
@@ -267,7 +283,8 @@ export function useWorkbench(page: Ref<string>) {
         await refresh()
         error.value = 'The workspace changed. The original command is held for its issuing workspace.'
       } else if (reason instanceof ApiFailure && reason.detail &&
-          ['invalid_draft_backing_withdrawal','draft_backing_bin_conflict','draft_backing_position_mismatch','draft_backing_offer_mismatch',
+          ['invalid_quarantine','unknown_quarantine_receipt','quarantine_position_mismatch','quarantine_bin_conflict','quarantine_catalog_conflict',
+            'quarantine_shortage_open','quarantine_quantity_unavailable','quarantine_capacity_unavailable','stock_loss_quarantine_unresolved','invalid_draft_backing_withdrawal','draft_backing_bin_conflict','draft_backing_position_mismatch','draft_backing_offer_mismatch',
             'draft_backing_authority_unverified','draft_backing_quantity_unavailable','invalid_recount', 'empty_recount_preview', 'recount_preview_used', 'unknown_recount_preview',
             'invalid_reference', 'duplicate_reference', 'invalid_receiving', 'duplicate_receiving_reference',
             'revision_conflict', 'command_mismatch', 'catalog_ineligible', 'catalog_reconfirmation_required', 'bin_confirmation_mismatch',
@@ -277,7 +294,7 @@ export function useWorkbench(page: Ref<string>) {
             'hold_bin_confirmation_mismatch', 'hold_catalog_ineligible', 'hold_quantity_unavailable', 'hold_shortage_frontier_conflict',
             'reserved_stock_unavailable','invalid_stock_loss','stock_loss_position_mismatch','stock_loss_bin_confirmation_mismatch',
             'stock_loss_case_conflict','stock_loss_observation_conflict','stock_loss_no_loss','stock_loss_protected_shortfall',
-            'stock_loss_offer_reduction_mismatch'].includes(reason.detail.code)) {
+            'stock_loss_offer_reduction_mismatch','stock_loss_quarantine_attribution_mismatch'].includes(reason.detail.code)) {
         forget(command)
         loadPending()
         if (reason.status === 409) await refresh()

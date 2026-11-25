@@ -101,6 +101,10 @@ def stage_upgrade(source, output, release=RELEASE):
                         projections += ("current_build_holds",)
                     if "recount_batches" in before:
                         projections += ("recount_tasks",)
+                    if "draft_backing_withdrawals" in before:
+                        projections += ("offer_backing_ledger", "internal_draft_offers")
+                    if "stock_quarantines" in before:
+                        projections += ("current_stock_quarantines", "current_position_quarantine")
                     opening = None
                     if "placement_positions" in before:
                         opening = row_signatures(candidate, candidate.database, projections)

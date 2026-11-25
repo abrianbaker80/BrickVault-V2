@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, shallowRef } from 'vue'
 import { api, ApiFailure, ContractFailure } from './api'
 import type { DraftBackingPage, DraftOfferHistory, Location, TransferControls, WithdrawalEvidence } from './api'
-import { draftBackingLink } from './countLinks'
+import { draftBackingLink, quarantineLink } from './countLinks'
 import { itemLabel, money } from './receiving'
 import { time } from './presentation'
 import { usePositionPage, type PositionReadState } from './usePositionPage'
@@ -122,6 +122,7 @@ async function save() {
         </section>
         <dl class="details" aria-label="Position balances">
           <dt>Physical on hand</dt><dd>{{ snapshot.physicalOnHand }}</dd><dt>Held for builds</dt><dd>{{ snapshot.heldQuantity }}</dd>
+          <dt>In quarantine</dt><dd>{{ snapshot.unavailableQuantity }}</dd>
           <dt>Saleable</dt><dd>{{ snapshot.sellableQuantity }}</dd><dt>Offer-backed</dt><dd>{{ snapshot.offerBackedQuantity }}</dd>
           <dt>Withheld from offers</dt><dd>{{ snapshot.withheldQuantity }}</dd><dt>Available for new backing</dt><dd>{{ snapshot.freeToBackQuantity }}</dd></dl>
         <small>Read {{ time(snapshot.asOf) }} · Purchase revision {{ snapshot.purchaseRevision }}</small>
@@ -174,7 +175,8 @@ async function save() {
           <span>Page {{ confirmed.length }}</span>
           <button :disabled="loading || !connected || confirmed.length===1" @click="requested=confirmed.slice(0,-1)">Previous page</button>
           <button :disabled="loading || !connected || partial || !!error || !snapshot.nextAfter" @click="snapshot.nextAfter && (requested=[...confirmed,snapshot.nextAfter])">Next page</button></nav>
-        <nav v-if="!frozen" aria-label="Position references"><a :href="'#inventory/'+position">Position timeline</a>
+        <nav v-if="!frozen" aria-label="Position references"><a :href="quarantineLink(bin.id,position)">Inspect position quarantine</a>
+          <a :href="'#inventory/'+position">Position timeline</a>
           <a :href="'#inventory/lot/'+snapshot.position.layer.deliveryId">Receipt lot</a></nav>
       </template>
     </div>

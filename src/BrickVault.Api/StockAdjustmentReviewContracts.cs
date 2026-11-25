@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace BrickVault.Api;
 
 internal sealed record AdjustmentReceiptEvidence(Guid DeliveryId, string DeliveryReference, int DeliveryQuantity,
@@ -9,5 +11,7 @@ internal sealed record StockAdjustmentReview(string Scope, DateTime AsOf, bool C
     Guid PositionId, Guid CaseId, Guid PurchaseId, int PurchaseRevision, AdjustmentReceiptEvidence Receipt,
     StockCountObservation LatestObservation, int LedgerQuantity, int CandidateLossQuantity, int PostLossLedgerQuantity,
     int ProtectedProjectQuantity, int ProtectedProjectShortfall, int OfferBackedQuantity, int OfferCount,
-    int OfferCapacityAfterLoss, int MinimumOfferBackingReduction, IReadOnlyList<AdjustmentOfferBacking> Offers,
-    string? NextAfter);
+    int? OfferCapacityAfterLoss, int? MinimumOfferBackingReduction, IReadOnlyList<AdjustmentOfferBacking> Offers,
+    string? NextAfter,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? QuarantineBlocksLoss = null);

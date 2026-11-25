@@ -208,7 +208,7 @@ onBeforeUnmount(() => {
               <small class="receipt-short">{{ layer.purchaseReference }} · {{ layer.deliveryReference }}</small>
               <small v-if="layer.catalogRevision !== layer.currentCatalog.revision" class="identity-note">Catalog revision changed</small></td>
             <td class="bin-col">{{ location.code }}</td><td class="receipt-col">{{ layer.purchaseReference }}<small>{{ layer.deliveryReference }}</small></td>
-            <td><strong>{{ layer.quantity }} on hand</strong><small>{{ layer.backedQuantity }} backed</small></td>
+            <td><strong>{{ layer.quantity }} on hand</strong><small>{{ layer.backedQuantity }} backed</small><small v-if="layer.quarantinedQuantity">{{ layer.quarantinedQuantity }} quarantined</small></td>
           </tr></tbody></table>
       </div>
       <div v-else-if="result && !lastRead && result.complete" class="empty">

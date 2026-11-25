@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { api, ApiFailure, explain, type Catalog, type Location, type TransferControls } from './api'
+import { api, ApiFailure, explain, type Catalog, type Location, type QuarantineSnapshot, type TransferControls } from './api'
 import { countReceiptLink, holdPositionLink, lossReceiptLink } from './countLinks'
 import { itemLabel, money } from './receiving'
 import { label, time } from './presentation'
 import StockLossReceipt from './StockLossReceipt.vue'
+import LossAttribution from './LossAttribution.vue'
 
 const props = defineProps<{ location: Location; catalog: Catalog[]; position: string; caseId?: string; posting?: string;
   asOf: string; connected: boolean; controls: TransferControls }>()
@@ -17,6 +18,11 @@ const page = shallowRef<Review>()
 const displayed = shallowRef<string[]>([''])
 const requested = shallowRef<string[]>([''])
 const selections = ref<Record<string,{offer: Offer; quantity: string}>>({})
+const stock = shallowRef<QuarantineSnapshot>()
+const quarantineCursors = shallowRef<string[]>([''])
+const shownQuarantineCursors = shallowRef<string[]>([''])
+const mode = ref<''|'none'|'records'>('')
+const entries = ref<Record<string,{row:QuarantineSnapshot['quarantines'][number]; amount:string}>>({})
 const code = ref('')
 const reason = ref('')
 const loading = ref(false)
@@ -32,14 +38,33 @@ const validQuantity = (entry: {offer: Offer; quantity: string}) => /^[0-9]+$/.te
 const chosen = computed(() => selected.value.reduce((total, row) => total + (validQuantity(row) ? Number(row.quantity) : 0),0))
 const ready = computed(() => props.connected && props.controls.enabled && !sending.value && !loading.value &&
   !error.value && !stale.value && !resolved.value && !!page.value)
-const permitted = computed(() => ready.value && !!page.value?.candidateLossQuantity && !page.value.protectedProjectShortfall)
+const needsAttribution = computed(() => Boolean(page.value?.quarantinedQuantity && page.value.candidateLossQuantity))
+const attributed = computed(() => {
+  if (!needsAttribution.value || mode.value === 'none') return 0
+  const rows = Object.values(entries.value)
+  if (mode.value !== 'records' || !rows.length || rows.some(({row,amount}) =>
+      !/^[0-9]+$/.test(amount) || Number(amount)<1 || Number(amount)>row.remainingQuantity)) return null
+  return rows.reduce((sum,entry) => sum+Number(entry.amount),0)
+})
+const projection = computed(() => {
+  const review = page.value, lostFromQuarantine = attributed.value
+  if (!review || lostFromQuarantine === null || review.quarantinedQuantity === undefined) return
+  const ordinaryLoss = review.candidateLossQuantity-lostFromQuarantine
+  const unavailableAfter = review.quarantinedQuantity-lostFromQuarantine
+  if (ordinaryLoss<0 || ordinaryLoss>review.ledgerQuantity-review.quarantinedQuantity || unavailableAfter<0) return
+  const ordinaryAfter=review.postLossLedgerQuantity-unavailableAfter
+  const holdShortfall=Math.max(0,review.protectedProjectQuantity-ordinaryAfter)
+  const capacity=Math.max(0,ordinaryAfter-review.protectedProjectQuantity)
+  return {ordinaryLoss,unavailableAfter,ordinaryAfter,holdShortfall,capacity,reduction:Math.max(0,review.offerBackedQuantity-capacity)}
+})
+const permitted = computed(() => ready.value && !!page.value?.candidateLossQuantity && projection.value?.holdShortfall === 0)
 const canPost = computed(() => permitted.value && page.value && selected.value.every(validQuantity) &&
-  chosen.value === page.value.minimumOfferBackingReduction && code.value === page.value.location.code && reason.value.trim() !== '')
+  chosen.value === projection.value?.reduction && code.value === page.value.location.code && reason.value.trim() !== '')
 let mounted = true
 onBeforeUnmount(() => { mounted = false })
 onMounted(() => dialog.value?.showModal())
 
-watch(() => [props.caseId, props.asOf, props.connected, requested.value, retry.value] as const, async ([caseId,,online,cursors],_,cleanup) => {
+watch(() => [props.caseId, props.asOf, props.connected, requested.value, quarantineCursors.value, retry.value] as const, async ([caseId,,online,cursors,qCursors],_,cleanup) => {
   let active = true
   cleanup(() => {active=false})
   loading.value = !!caseId && online
@@ -54,7 +79,26 @@ watch(() => [props.caseId, props.asOf, props.connected, requested.value, retry.v
       stale.value = true
       return
     }
+    let paired:QuarantineSnapshot | undefined
+    if (value.quarantinedQuantity && value.candidateLossQuantity) {
+      paired=await api.quarantine(props.location.id,props.position,qCursors.at(-1))
+      if (!active) return
+      if (!paired.complete) {error.value='Incomplete quarantine records. Refresh before posting.'; return}
+      if (paired.purchaseRevision!==value.purchaseRevision || !paired.hasOpenShortage || paired.position.location.code!==value.location.code ||
+          paired.position.layer.purchaseId!==value.purchaseId || paired.position.layer.deliveryId!==value.receipt.deliveryId ||
+          paired.quarantinedQuantity!==value.quarantinedQuantity || paired.onHandQuantity!==value.ledgerQuantity ||
+          paired.heldQuantity!==value.protectedProjectQuantity || paired.offerBackedQuantity!==value.offerBackedQuantity) {
+        stale.value=true
+        return
+      }
+    }
+    if ((value.nextAfter && cursors.includes(value.nextAfter)) || (paired?.nextAfter && qCursors.includes(paired.nextAfter))) {
+      error.value='The loss review returned a repeated page. Refresh before posting.'
+      return
+    }
     const moved = cursors.length !== displayed.value.length
+    stock.value=paired
+    shownQuarantineCursors.value=qCursors
     page.value = value
     displayed.value = cursors
     if (moved) { await nextTick(); if(active) heading.value?.focus() }
@@ -72,6 +116,7 @@ watch(() => [props.caseId, props.asOf, props.connected, requested.value, retry.v
 }, {immediate:true})
 function restart() {
   selections.value = {}; code.value = ''; reason.value = ''; attempted.value = false
+  stock.value=undefined; mode.value=''; entries.value={}; quarantineCursors.value=['']; shownQuarantineCursors.value=['']
   page.value = undefined; stale.value = false; displayed.value = ['']; requested.value = ['']; ++retry.value
 }
 function edit(offer: Offer, event: Event) {
@@ -88,6 +133,7 @@ async function post() {
     const result = await props.controls.dispatch({kind:'stock-loss',workspaceId:props.controls.workspaceId,body:{
       commandId:crypto.randomUUID(),expectedRevision:current.purchaseRevision,purchaseId:current.purchaseId,positionId:props.position,
       locationId:props.location.id,confirmedLocationCode:code.value,caseId:current.caseId,expectedObservationId:current.latestObservation.id,
+      ...(needsAttribution.value ? {quarantineAttributions:Object.values(entries.value).map(({row,amount})=>({quarantineId:row.id,quantity:Number(amount)}))} : {}),
       reason:reason.value.trim(),offerReductions:selected.value.map(s=>({offerId:s.offer.id,quantity:Number(s.quantity)}))
     }})
     if (!mounted) return
@@ -120,14 +166,23 @@ async function post() {
         <a :href="countReceiptLink(location.id,page.latestObservation.id)">Latest witnessed count</a>
         <dl class="details"><dt>Current ledger</dt><dd>{{ page.ledgerQuantity }}</dd><dt>Observed quantity</dt><dd>{{ page.latestObservation.countedQuantity }}</dd>
           <dt>Loss to post</dt><dd>{{ page.candidateLossQuantity }}</dd><dt>Ledger after posting</dt><dd>{{ page.postLossLedgerQuantity }}</dd>
-          <dt>Protected build holds</dt><dd>{{ page.protectedProjectQuantity }}</dd><dt>Capacity for offers after loss</dt><dd>{{ page.offerCapacityAfterLoss }}</dd>
+          <dt>Protected build holds</dt><dd>{{ page.protectedProjectQuantity }}</dd><dt>Capacity for offers after loss</dt><dd>{{ projection?.capacity ?? 'Pending identification of missing pieces' }}</dd>
           <dt>Currently backed here</dt><dd>{{ page.offerBackedQuantity }}</dd></dl>
         <a v-if="page.protectedProjectQuantity" :href="holdPositionLink(location.id,position)">Inspect named build holds</a>
-        <p v-if="page.protectedProjectShortfall" class="warning">Build holds exceed remaining stock by {{ page.protectedProjectShortfall }}. Review the named holds before posting.</p>
+        <p v-if="projection?.holdShortfall" class="warning">Build holds exceed remaining stock by {{ projection.holdShortfall }}. Review the named holds before posting.</p>
         <p v-if="!page.candidateLossQuantity" class="warning">The latest witnessed count supports no stock loss.</p>
         <form @submit.prevent="post">
+          <template v-if="needsAttribution && stock">
+            <p>{{ page.quarantinedQuantity }} of the {{ page.ledgerQuantity }} pieces are in quarantine.</p>
+            <LossAttribution :stock="stock" :enabled="ready" :page-number="shownQuarantineCursors.length" v-model:mode="mode" v-model:entries="entries"
+              @previous="quarantineCursors=shownQuarantineCursors.slice(0,-1)" @next="stock.nextAfter && (quarantineCursors=[...shownQuarantineCursors,stock.nextAfter])" />
+            <dl v-if="projection" class="details" aria-label="Loss attribution preview" aria-live="polite">
+              <dt>Missing from quarantine</dt><dd>{{ attributed }}</dd><dt>Missing outside quarantine</dt><dd>{{ projection.ordinaryLoss }}</dd>
+              <dt>Remaining in quarantine</dt><dd>{{ projection.unavailableAfter }}</dd><dt>Remaining outside quarantine</dt><dd>{{ projection.ordinaryAfter }}</dd></dl>
+            <p v-else-if="mode==='none' || Object.keys(entries).length" class="warning">The selected quantities must fit each record, the units outside quarantine and the total loss of {{ page.candidateLossQuantity }}.</p>
+          </template>
           <h3 ref="heading" tabindex="-1">Choose offer reductions</h3>
-          <p>Reduce exactly {{ page.minimumOfferBackingReduction }} units of backing on this position. Enter 0 or leave a field blank to keep that offer’s backing.</p>
+          <p v-if="projection && !projection.holdShortfall">Reduce exactly {{ projection.reduction }} {{ projection.reduction===1 ? 'unit' : 'units' }} of backing on this position. Enter 0 or leave a field blank to keep that offer’s backing.</p>
           <ul v-if="page.offers.length" class="receipt-lines" aria-label="Offer backing on this position">
             <li v-for="offer in page.offers" :key="offer.id">
               <strong>{{ money(offer.unitPriceMinor,offer.currency) }} per unit · {{ offer.backedQuantity }} backed here</strong>
@@ -142,7 +197,7 @@ async function post() {
             <button type="button" :disabled="!ready || !page.nextAfter" @click="page.nextAfter && (requested=[...displayed,page.nextAfter])">More offers</button>
           </nav>
           <section class="decision" aria-label="Selected offer reductions"><h3>Selected reductions</h3>
-            <p aria-live="polite">{{ chosen }} of {{ page.minimumOfferBackingReduction }} units selected</p>
+            <p v-if="projection && !projection.holdShortfall" aria-live="polite">{{ chosen }} of {{ projection.reduction }} {{ projection.reduction===1 ? 'unit' : 'units' }} selected</p>
             <ul v-if="selected.length"><li v-for="entry in selected" :key="entry.offer.id">
               {{ entry.quantity }} of {{ entry.offer.backedQuantity }} · {{ money(entry.offer.unitPriceMinor,entry.offer.currency) }}
               <small>Offer {{ entry.offer.id }}</small>
@@ -152,6 +207,8 @@ async function post() {
           <small v-if="code && code !== page.location.code" class="warning">Enter the code on the selected bin.</small>
           <label>Reason for posting<input v-model="reason" required maxlength="200" :disabled="!permitted" /></label>
           <p v-if="attempted && controls.feedback" class="warning" role="alert">{{ controls.feedback }}</p>
+          <p v-if="needsAttribution && projection" aria-label="Posting summary">Posting {{ page.candidateLossQuantity }} missing {{ page.candidateLossQuantity===1 ? 'piece' : 'pieces' }}.
+            {{ attributed }} from {{ Object.keys(entries).length }} quarantine {{ Object.keys(entries).length===1 ? 'record' : 'records' }} and {{ projection.ordinaryLoss }} from outside quarantine.</p>
           <div class="actions"><button class="primary" :disabled="!canPost">Post stock loss and selected reductions</button></div>
         </form>
       </template>

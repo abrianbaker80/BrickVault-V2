@@ -353,6 +353,15 @@ class Instance:
                     GRANT INSERT (id,command_id,purchase_id,position_id,offer_id,location_id,location_code,
                         expected_purchase_revision,quantity,reason) ON brickvault.draft_backing_withdrawals TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 10 THEN
+                    GRANT INSERT (loss_id) ON brickvault.stock_loss_quarantine_reviews TO bv_api;
+                    GRANT INSERT (loss_id,quarantine_id,quantity) ON brickvault.stock_loss_quarantine_attributions TO bv_api;
+                    GRANT INSERT (id,command_id,purchase_id,position_id,location_id,location_code,catalog_id,
+                        catalog_revision,expected_purchase_revision,quantity,reason) ON brickvault.stock_quarantines TO bv_api;
+                    GRANT INSERT (id,command_id,purchase_id,position_id,location_id,location_code,catalog_id,
+                        catalog_revision,expected_purchase_revision,quantity,reason,quarantine_id,inspection_result)
+                        ON brickvault.stock_quarantine_releases TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,

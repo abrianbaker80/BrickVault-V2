@@ -43,6 +43,14 @@ In Inventory, select individual positions or use all matches for the active filt
 
 Open the recount queue to locate a position, verify its bin and record the witnessed quantity through the existing stock-count workflow. The receipt links the queued position to that observation. If all units move out before anyone counts them, the task leaves the pending queue. Its batch receipt identifies the depleted position and links to its history. Queuing a task preserves physical stock, offer backing and build holds. [Recount and lot qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/31)
 
+## Quarantine pieces found after putaway
+
+Open the affected receipt position and confirm its physical bin, item, quantity and reason. Quarantine keeps the pieces in that bin and removes them from the quantity available for new offers, project holds and ordinary transfers. The receipt identifies the original delivery and the catalog revision used by the operator.
+
+For example, a bin contains eight pieces from one delivery. Two are reserved for a build and three back an unpublished offer. Quarantining two of the remaining pieces leaves eight physically present, two unavailable and two reserved. Four are eligible for sale, including the three already allocated to the draft offer. That leaves one piece for a new commitment.
+
+After inspecting one of the two pieces, reopen its quarantine record, confirm its identity and bin, and release the one that passed. One piece stays in quarantine and two are now available for a new commitment. Both events remain in the position timeline and receipt-lot history. The original delivery quantity, currency and cost basis stay attached to the pieces. [Quarantine and inspection](https://github.com/abrianbaker80/BrickVault-V2/issues/33)
+
 ## Withdraw backing from a draft offer
 
 Choose the receipt position and the internal draft offer that uses its pieces. Check the current allocation and the amount it would retain. Confirm the physical bin, enter the quantity to withdraw, and record a reason. The receipt identifies the offer, the position and the units withdrawn.
@@ -82,6 +90,10 @@ For example, if a receipt position has six units, one reserved for a project and
 
 ## Post a witnessed stock loss
 
+If the position has quarantined pieces, identify how many missing pieces came from each quarantine record, or confirm that all missing pieces were ordinary stock. Leave the shortage open when their condition is unknown. Check the quantities that will remain available and the proposed changes to any draft offers before confirming. Reopen the loss receipt to see the recorded choice.
+
+For example, a receipt position holds six pieces. Two are quarantined, one is held for a build, and three back a draft offer. You count four. If one missing piece was quarantined, one stays in quarantine. After the build hold, the bin supports two pieces for the offer. If both missing pieces were quarantined, all three pieces backing the offer can stay allocated. In either case the physical loss is two. [Owner decision](https://github.com/abrianbaker80/BrickVault-V2/issues/33#issuecomment-7155121127)
+
 Open **Review stock adjustment** from the witnessed count. Compare the physical bin, receipt layer, latest count and project reservations. If project reservations by themselves exceed the pieces counted, first release the exact quantity you choose from the named hold. Return to the loss screen and review the new quantities.
 
 Enter a reduction for each draft offer you want to change. Leave other offers at zero. For example, two listings backed by three and two blue plates need one unit of reduction after a count of four. Reducing the second listing by one leaves their backing at three and one. If there is enough stock for all existing offers, the required reduction is zero. Confirm the physical bin and enter the reason. One confirmation posts the loss, applies those choices and closes that physical shortage. A competing count or stock change requires a fresh review.
@@ -103,4 +115,4 @@ For a systemd-managed guest, stop its Workbench unit before staging. An explicit
 
 ## Repeat verification
 
-Run `python scripts/foundation/manage.py verify` after a clean build. The qualification uses the normal private HTTPS API, PostgreSQL and Workbench. The restore check compares the purchase and both deliveries, their placements, offer backing, reference audit and original command receipts. A schema-2 backup still requires its archived release. Schema-3 backups also fingerprint the five receiving tables. Schema-4 backups add position identities, transfer events and transferred offer backing. Schema 5 adds count observations and shortage cases. Schema 6 adds named build holds and their release history. Schema 7 adds posted stock losses and the chosen offer reductions. Schema 8 adds frozen recount previews, their target positions, queued batches and per-target receipts. Schema 9 records voluntary withdrawals from internal draft-offer backing. Each archive requires its matching release. [Setup and recovery](m2-foundation.md)
+Run `python scripts/foundation/manage.py verify` after a clean build. The qualification uses the normal private HTTPS API, PostgreSQL and Workbench. The restore check compares the purchase and both deliveries, their placements, offer backing, reference audit and original command receipts. A schema-2 backup still requires its archived release. Schema-3 backups also fingerprint the five receiving tables. Schema-4 backups add position identities, transfer events and transferred offer backing. Schema 5 adds count observations and shortage cases. Schema 6 adds named build holds and their release history. Schema 7 adds posted stock losses and the chosen offer reductions. Schema 8 adds frozen recount previews, their target positions, queued batches and per-target receipts. Schema 9 records voluntary withdrawals from internal draft-offer backing. Schema 10 adds quarantine, inspected releases and the operator’s allocation of missing pieces to quarantine records. Each archive requires its matching release. [Setup and recovery](m2-foundation.md)

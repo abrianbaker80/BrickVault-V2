@@ -9,7 +9,7 @@ namespace BrickVault.Api;
 internal sealed class StockAdjustmentReviews(NpgsqlDataSource db)
 {
     public async Task<StockAdjustmentReview> Read(Guid locationId, Guid positionId, Guid caseId, string? after,
-        int limit, CancellationToken token)
+        int limit, CancellationToken token, bool quarantine = false)
     {
         if (limit is < 1 or > 100)
             throw new Fault(400, "invalid_adjustment_page", "Choose an offer page size from 1 to 100.");
@@ -24,7 +24,8 @@ internal sealed class StockAdjustmentReviews(NpgsqlDataSource db)
                 d.id,d.reference,d.quantity,d.item_cost_minor,buy.currency,p.origin_placement_id,p.catalog_id,p.catalog_revision,
                 sc.id, COALESCE((SELECT sum(h.remaining_quantity) FROM brickvault.current_build_holds h
                     WHERE h.position_id=p.id),0)::integer,
-                offers.backed,offers.entries
+                offers.backed,offers.entries,
+                COALESCE((SELECT q.quantity FROM brickvault.current_position_quarantine q WHERE q.position_id=p.id),0)
             FROM brickvault.current_placement_stock p
             JOIN brickvault.locations l ON l.id=p.location_id
             JOIN brickvault.purchases buy ON buy.id=p.purchase_id
@@ -40,13 +41,15 @@ internal sealed class StockAdjustmentReviews(NpgsqlDataSource db)
                 Purchase: r.GetGuid(5), Revision: r.GetInt32(6), Ledger: r.GetInt32(7),
                 Receipt: new AdjustmentReceiptEvidence(r.GetGuid(8), r.GetString(9), r.GetInt32(10), Optional<int>(r, 11),
                     r.GetString(12), r.GetGuid(13), r.GetGuid(14), r.GetInt32(15)),
-                Case: Optional<Guid>(r, 16), Protected: r.GetInt32(17), Backed: r.GetInt32(18), OfferCount: r.GetInt32(19)),
+                Case: Optional<Guid>(r, 16), Protected: r.GetInt32(17), Backed: r.GetInt32(18), OfferCount: r.GetInt32(19),
+                Quarantined: r.GetInt32(20)),
             token, positionId, locationId, caseId);
         if (rows.Count == 0)
             throw new Fault(404, "unknown_adjustment_position", "No receipt position with that identifier belongs to this bin.");
         var position = rows.Single();
         if (position.Case is null)
             throw new Fault(404, "unknown_open_shortage", "No open shortage with that identifier belongs to this receipt position.");
+        if (!quarantine && position.Quarantined > 0) throw StockQuarantines.Upgrade();
 
         var latest = (await Rows(connection, tx, StockCounts.ObservationProjection + "\n" + """
             WHERE n.position_id=$1
@@ -70,11 +73,16 @@ internal sealed class StockAdjustmentReviews(NpgsqlDataSource db)
 
         var loss = Math.Max(0, position.Ledger - latest.CountedQuantity);
         var afterLoss = position.Ledger - loss;
-        var capacity = Math.Max(0, afterLoss - position.Protected);
+        var hasQuarantine = position.Quarantined > 0;
+        // An aggregate shortage cannot show how many quarantined units would remain after posting.
+        int? capacity = hasQuarantine && loss > 0 ? null :
+            Math.Max(0, afterLoss - position.Protected - position.Quarantined);
+        int? minimumReduction = capacity is int knownCapacity ? Math.Max(0, position.Backed - knownCapacity) : null;
         return new StockAdjustmentReview("stock-adjustment-review", position.AsOf, true, position.Location,
             positionId, caseId, position.Purchase, position.Revision, position.Receipt, latest, position.Ledger,
             loss, afterLoss, position.Protected, Math.Max(0, position.Protected - afterLoss), position.Backed,
-            position.OfferCount, capacity, Math.Max(0, position.Backed - capacity), offers, next);
+            position.OfferCount, capacity, minimumReduction, offers, next,
+            quarantine ? position.Quarantined : null, quarantine ? hasQuarantine : null);
     }
 
     private static async Task<Guid?> CheckCursor(NpgsqlConnection connection, NpgsqlTransaction tx,

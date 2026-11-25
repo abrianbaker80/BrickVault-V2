@@ -54,7 +54,7 @@ watch(() => [props.positionId, props.location.id, props.connected, props.asOf, r
     try {
       const next = await api.positionHolds(bin, position, cursors.at(-1))
       if (!active) return
-      if (next.location.revision < props.location.revision || Boolean(next.shortageId) !== Boolean(next.latestObservationId))
+      if (next.quarantinedQuantity === undefined || next.location.revision < props.location.revision || Boolean(next.shortageId) !== Boolean(next.latestObservationId))
         throw new ContractFailure()
       partial.value = !next.complete
       if (partial.value && snapshot.value?.complete) return
@@ -148,6 +148,7 @@ async function save() {
         <dl class="details"><dt>Ledger quantity</dt><dd>{{ snapshot.ledgerQuantity }}</dd>
           <dt>Backed by offers</dt><dd>{{ snapshot.offerBackedQuantity }}</dd>
           <dt>Reserved for builds</dt><dd>{{ snapshot.reservedQuantity }}</dd>
+          <template v-if="snapshot.quarantinedQuantity"><dt>Quarantined in bin</dt><dd>{{ snapshot.quarantinedQuantity }}</dd></template>
           <dt>Available for a new hold</dt><dd>{{ snapshot.availableToHoldQuantity }}</dd></dl>
         <section v-if="snapshot.shortageId" class="warning" aria-label="Shortage evidence">
           <strong>This position has an open shortage.</strong>

@@ -2,6 +2,7 @@ using System.Data;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Npgsql;
 using NpgsqlTypes;
 using static BrickVault.Api.Database;
@@ -46,7 +47,8 @@ internal sealed record DraftBackingOfferRow(Guid OfferId, int UnitPriceMinor, st
 internal sealed record DraftBackingSnapshot(string Scope, DateTime AsOf, bool Complete, StockRegisterRow Position,
     int PurchaseRevision, bool HasOpenShortage, int PhysicalOnHand, int HeldQuantity, int SellableQuantity,
     int OfferBackedQuantity, int WithheldQuantity, int FreeToBackQuantity, IReadOnlyList<DraftBackingOfferRow> Offers,
-    string? NextAfter);
+    string? NextAfter,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? UnavailableQuantity = null);
 
 internal sealed record DraftBackingContribution(Guid Id, Guid CommandId, Guid CorrelationId, int Revision,
     DateTime? RecordedAt, string Kind, int BackingDelta, Guid? RelatedPositionId, string? Reason);
@@ -54,7 +56,8 @@ internal sealed record DraftBackingContribution(Guid Id, Guid CommandId, Guid Co
 internal sealed record DraftBackingHistory(string Scope, DateTime AsOf, bool Complete, StockRegisterRow Position,
     int PurchaseRevision, bool HasOpenShortage, int PhysicalOnHand, int HeldQuantity, int SellableQuantity,
     int OfferBackedQuantity, int WithheldQuantity, int FreeToBackQuantity, DraftBackingOfferRow Offer,
-    IReadOnlyList<DraftBackingContribution> Contributions, string? NextAfter);
+    IReadOnlyList<DraftBackingContribution> Contributions, string? NextAfter,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? UnavailableQuantity = null);
 
 internal sealed record DraftBackingWithdrawalEvidence(string Scope, DateTime AsOf, bool Complete, Guid Id, Guid CommandId,
     Guid CorrelationId, int Revision, Guid PurchaseId, Guid PositionId, Guid OfferId, LocationRow Location,
@@ -106,10 +109,10 @@ internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
         }
     }
 
-    private sealed record PositionContext(DateTime AsOf, StockRegisterRow Position, int Revision, bool Open, int Held)
+    private sealed record PositionContext(DateTime AsOf, StockRegisterRow Position, int Revision, bool Open, int Held, int Unavailable)
     {
         internal BinStockLayer Layer => Position.Layer;
-        internal int Sellable => Layer.Quantity - Held;
+        internal int Sellable => Layer.Quantity - Held - Unavailable;
         internal int Withheld => Sellable - Layer.BackedQuantity;
     }
 
@@ -131,12 +134,14 @@ internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
     }
 
     private static async Task<PositionContext> ReadPosition(NpgsqlConnection connection, NpgsqlTransaction tx,
-        Guid positionId, CancellationToken token)
+        Guid positionId, CancellationToken token, bool quarantine)
     {
         var rows = await Rows(connection, tx, "SELECT " + PositionRows.RegisterSelect + ",transaction_timestamp()\n" +
-            PositionRows.RegisterFrom + "\nWHERE p.id=$1", r => new PositionContext(r.GetDateTime(38),
-                PositionRows.ReadRegister(r), r.GetInt32(29), r.GetBoolean(31), r.GetInt32(32)), token, positionId);
-        return rows.SingleOrDefault() ?? throw new Fault(404, "unknown_position", "No stock position has that identifier.");
+            PositionRows.RegisterFrom + "\nWHERE p.id=$1", r => new PositionContext(r.GetDateTime(39),
+                PositionRows.ReadRegister(r, quarantine), r.GetInt32(29), r.GetBoolean(31), r.GetInt32(32), r.GetInt32(33)), token, positionId);
+        var position = rows.SingleOrDefault() ?? throw new Fault(404, "unknown_position", "No stock position has that identifier.");
+        if (!quarantine && position.Unavailable > 0) throw StockQuarantines.Upgrade();
+        return position;
     }
 
     private static Task<List<DraftBackingOfferRow>> ReadOffers(NpgsqlConnection connection, NpgsqlTransaction tx,
@@ -165,13 +170,13 @@ internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
                     internalOnly ? "internal-unpublished" : "unverified-origin", internalOnly && amount > 0 && !open);
             }, token, positionId, Nullable(NpgsqlDbType.Uuid, offerId), Nullable(NpgsqlDbType.Uuid, after), limit);
 
-    public async Task<DraftBackingSnapshot> Snapshot(Guid positionId, string? after, int limit, CancellationToken token)
+    public async Task<DraftBackingSnapshot> Snapshot(Guid positionId, string? after, int limit, CancellationToken token, bool quarantine = false)
     {
         CheckLimit(limit);
         await using var connection = await db.OpenConnectionAsync(token);
         await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
         await BeginRead(connection, tx, token);
-        var p = await ReadPosition(connection, tx, positionId, token);
+        var p = await ReadPosition(connection, tx, positionId, token, quarantine);
         Guid? anchor = null;
         if (after is not null)
         {
@@ -191,16 +196,16 @@ internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
             next = FormattableString.Invariant($"{positionId:N}.{p.Revision}.{rows[^1].OfferId:N}");
         }
         return new DraftBackingSnapshot("position-draft-backing", p.AsOf, true, p.Position, p.Revision, p.Open,
-            p.Layer.Quantity, p.Held, p.Sellable, p.Layer.BackedQuantity, p.Withheld, p.Layer.FreeToBackQuantity, rows, next);
+            p.Layer.Quantity, p.Held, p.Sellable, p.Layer.BackedQuantity, p.Withheld, p.Layer.FreeToBackQuantity, rows, next, quarantine ? p.Unavailable : null);
     }
 
-    public async Task<DraftBackingHistory> History(Guid positionId, Guid offerId, string? after, int limit, CancellationToken token)
+    public async Task<DraftBackingHistory> History(Guid positionId, Guid offerId, string? after, int limit, CancellationToken token, bool quarantine = false)
     {
         CheckLimit(limit);
         await using var connection = await db.OpenConnectionAsync(token);
         await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
         await BeginRead(connection, tx, token);
-        var p = await ReadPosition(connection, tx, positionId, token);
+        var p = await ReadPosition(connection, tx, positionId, token, quarantine);
         var offer = (await ReadOffers(connection, tx, positionId, offerId, null, 1, p.Open, token)).SingleOrDefault() ??
             throw new Fault(404, "unknown_draft_backing_offer", "No offer backing history belongs to this position and offer.");
         int? precedingRevision = null;
@@ -237,7 +242,7 @@ internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
             next = FormattableString.Invariant($"{positionId:N}.{p.Revision}.{offerId:N}.{rows[^1].Id:N}.{rows[^1].Kind}");
         }
         return new DraftBackingHistory("position-draft-backing-history", p.AsOf, true, p.Position, p.Revision, p.Open,
-            p.Layer.Quantity, p.Held, p.Sellable, p.Layer.BackedQuantity, p.Withheld, p.Layer.FreeToBackQuantity, offer, rows, next);
+            p.Layer.Quantity, p.Held, p.Sellable, p.Layer.BackedQuantity, p.Withheld, p.Layer.FreeToBackQuantity, offer, rows, next, quarantine ? p.Unavailable : null);
     }
 
     private static string[] ScopeCursor(string after, Guid positionId, int revision, int size)

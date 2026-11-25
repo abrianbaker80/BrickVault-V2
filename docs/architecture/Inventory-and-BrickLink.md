@@ -30,6 +30,8 @@ Under D09, distinguish the observation from an authorized stock adjustment and f
 
 Under D10, a proposed stock loss shows how much unpublished offer backing the selected position can still support after project reservations. The operator explicitly assigns the required reduction across the offers that draw from that position. Confirming the loss records one transaction and receipt. The selected bin, witness, before and after quantities, costs and individual offer decisions remain traceable. A release from a project hold has its own receipt. [Stock count and loss decisions](https://github.com/abrianbaker80/BrickVault-V2/issues/22)
 
+Under D11, when the counted position contains quarantined pieces, the operator confirms which quarantine records lost pieces. Confirming zero is an explicit choice. The remaining unavailable quantity equals the opening quarantine quantity less the chosen loss from those records. The remaining pieces can support offers only after deducting this unavailable quantity and existing reservations from the witnessed physical count. The loss receipt preserves the selected records and quantities. An inspection release keeps its own receipt. [Quarantined stock loss](https://github.com/abrianbaker80/BrickVault-V2/issues/33#issuecomment-7155121127)
+
 ## Proposed relational design
 
 | Aggregate and relationships | Fields and rules that matter |

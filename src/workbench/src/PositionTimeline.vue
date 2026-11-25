@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { api, ApiFailure } from './api'
 import type { PositionTimelinePage, TimelineEvent } from './api'
 import StockPositionDetails from './StockPositionDetails.vue'
-import { countReceiptLink, draftBackingLink, lossReceiptLink } from './countLinks'
+import { countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink } from './countLinks'
 import { time } from './presentation'
 import { usePositionPage, type PositionReadState } from './usePositionPage'
 
@@ -22,7 +22,9 @@ const { page, confirmed, requested, attempt, loading, partial, error, heading, r
 const titles: Record<TimelineEvent['kind'], string> = {
   'putaway': 'Put away', 'transfer-in': 'Transferred in', 'transfer-out': 'Transferred out',
   'count': 'Count witnessed', 'hold': 'Build hold placed', 'hold-release': 'Build hold released',
-  'offer-withdrawal': 'Draft offer backing withdrawn', 'stock-loss': 'Stock loss posted', 'offer-backing': 'Offer backing added',
+  'quarantine': 'Quarantined in bin', 'quarantine-release': 'Released after inspection',
+  'offer-withdrawal': 'Draft offer backing withdrawn',
+  'stock-loss': 'Stock loss posted', 'offer-backing': 'Offer backing added',
 }
 function signed(value: number) { return value > 0 ? '+' + value : String(value) }
 </script>
@@ -60,6 +62,10 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
           <p v-else-if="event.locationCodeAtEvent">Recorded bin {{ event.locationCodeAtEvent }}</p>
           <p v-if="event.holdPurpose">Build · {{ event.holdPurpose }}</p>
           <p v-if="event.reason">{{ event.reason }}</p>
+          <template v-if="event.kind === 'quarantine' || event.kind === 'quarantine-release'">
+            <p>{{ event.quantity }} {{ event.kind === 'quarantine' ? 'made unavailable in this bin' : 'released from quarantine after inspection' }}</p>
+            <a :href="quarantineLink(event.locationId, page.positionId, event.id)">View quarantine receipt</a>
+          </template>
           <a v-if="event.kind === 'offer-withdrawal'" :href="draftBackingLink(event.locationId,page.positionId,'receipts',event.id)">View withdrawal receipt</a>
           <a v-if="event.kind === 'count' && event.observationId" :href="countReceiptLink(event.locationId, event.observationId)">View count receipt</a>
           <a v-if="event.kind === 'stock-loss' && event.postingId" :href="lossReceiptLink(event.locationId, page.positionId, event.postingId)">View posted loss receipt</a>

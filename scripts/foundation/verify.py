@@ -229,6 +229,16 @@ def migration_test(s):
         "An interrupted withdrawal upgrade changed the recount database.",
     )
     s.sql("DROP TABLE brickvault.draft_backing_withdrawals;", db, "bv_migrator")
+    s.migrate(db, to=9)
+    s.sql("CREATE TABLE brickvault.stock_quarantine_releases(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "9"
+        and s.sql("SELECT to_regclass('brickvault.stock_quarantines') IS NULL", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted quarantine upgrade changed the draft-withdrawal database.",
+    )
+    s.sql("DROP TABLE brickvault.stock_quarantine_releases;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -242,11 +252,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "9",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "10",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v9, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v10, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -287,13 +297,16 @@ def qualify_staged_upgrade(lab, port, source_version):
                     from verify_recounts import seed_prior_recount
                     seed_prior_recount(original, records[1])
                 seed_previous_count(original, fixture, records[0], records[1], revision=6 if source_version >= 6 else 5)
+                if source_version >= 9:
+                    from verify_withdrawals import seed_prior_withdrawal
+                    prior_withdrawal = seed_prior_withdrawal(original, records[0], records[2])
         expected_failure(lambda: stage_upgrade(original, output))
         require(not output.exists(), "Running source created a staged directory.")
     finally:
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "9"), (original, str(source_version))):
+    for inst, schema in ((candidate, "10"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -310,6 +323,18 @@ def qualify_staged_upgrade(lab, port, source_version):
                     inst.sql("SELECT count(*) FROM brickvault.recount_tasks WHERE observation_id IS NOT NULL") == "1",
                     "Upgrade lost the witnessed count attached to the queued position.",
                 )
+            if source_version >= 9:
+                require(inst.sql(f"""
+                    SELECT w.prior_backed_quantity=1 AND w.prior_total_offer_backed_quantity=2
+                        AND b.backing_delta=-1 AND c.revision=w.expected_purchase_revision+1
+                        AND NOT EXISTS (SELECT 1 FROM brickvault.current_offer_backing v
+                            WHERE v.offer_id=w.offer_id AND v.placement_id=w.position_id)
+                    FROM brickvault.draft_backing_withdrawals w JOIN brickvault.offer_backing_ledger b
+                        ON b.event_id=w.id AND b.kind='offer-withdrawal'
+                    JOIN brickvault.commands c ON c.command_id=w.command_id
+                    JOIN brickvault.audit a ON a.command_id=c.command_id
+                    WHERE w.id='{prior_withdrawal}'
+                """) == "t", "Upgrade lost the original withdrawal receipt or restored its withdrawn backing.")
         finally:
             inst.pg_stop()
     print(
@@ -629,7 +654,7 @@ def verify(port):
     qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in (2, 3, 4, 5, 6, 7, 8):
+        for source_version in (2, 3, 4, 5, 6, 7, 8, 9):
             qualify_staged_upgrade(lab, port, source_version)
         from verify_withdrawals import verify_legacy_allocation
         legacy = init(lab / "legacy-withdrawal", lab / "legacy-keys", port)
@@ -917,6 +942,8 @@ def verify(port):
             from verify_timeline import verify_timeline
             from verify_receipt_lots import verify_receipt_lots
             from verify_recounts import qualify_recounts, verify_recovered_recounts
+            from verify_quarantine import qualify_quarantine, verify_recovered_quarantine
+            from verify_quarantine_losses import qualify_quarantine_losses, verify_recovered_quarantine_losses
             from verify_withdrawals import qualify_withdrawals, verify_recovered_withdrawals
 
             receiving = qualify_receiving(s, first, rec["entityId"])
@@ -928,6 +955,8 @@ def verify(port):
             timeline = verify_timeline(first, loss)
             lots = verify_receipt_lots(first, receiving, transfer, loss)
             recounts = qualify_recounts(first, rec["entityId"])
+            quarantines = qualify_quarantine(first, rec["entityId"])
+            attributed_losses = qualify_quarantine_losses(first, rec["entityId"])
             withdrawals = qualify_withdrawals(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
@@ -1092,6 +1121,8 @@ def verify(port):
                 require(verify_receipt_lots(recovered, receiving, transfer, loss) == lots,
                         "Restored receipt-lot history, costs or positions differed.")
                 verify_recovered_recounts(recovered, recounts)
+                verify_recovered_quarantine(recovered, quarantines)
+                verify_recovered_quarantine_losses(recovered, attributed_losses)
                 verify_recovered_withdrawals(recovered, withdrawals)
                 require(
                     all(

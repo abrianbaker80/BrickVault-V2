@@ -73,11 +73,13 @@ internal sealed class Receiving(NpgsqlDataSource db)
         }
         catch (PostgresException ex) when (ex.ConstraintName is
             "receiving_quantity" or "receiving_catalog" or "receiving_catalog_reconfirmation" or
-            "receiving_delivery" or "receiving_bin" or "receiving_backing" or "stock_shortage_open" or "reserved_stock_unavailable")
+            "receiving_delivery" or "receiving_bin" or "receiving_backing" or "stock_shortage_open" or "reserved_stock_unavailable" or
+            "quarantine_capacity_unavailable")
         {
             throw ex.ConstraintName switch
             {
                 "stock_shortage_open" => Fault.StockShortageOpen(),
+                "quarantine_capacity_unavailable" => StockQuarantines.ProtectedCapacity(),
                 "reserved_stock_unavailable" => Rejected("reserved_stock_unavailable", "Choose units that are free of build holds and other backing."),
                 "receiving_quantity" => Rejected("quantity_unavailable", "There are fewer units available for this action."),
                 "receiving_catalog" => Rejected("catalog_ineligible", "Confirm a matching, eligible catalog identity and condition."),
@@ -144,7 +146,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
                 p.Deliveries.Select(d => new DeliveryRow(d.Id, d.Reference, d.Quantity, d.CatalogId, d.CatalogRevision,
                     d.ItemCostMinor, d.IntakeQuantity, d.Placements)).ToList(), p.Offers, p.Balances)).ToList());
 
-    public async Task<LossReceivingWorkspace> LossSnapshot(CancellationToken token)
+    public async Task<LossReceivingWorkspace> LossSnapshot(CancellationToken token, bool quarantine = false)
     {
         await using var connection = await db.OpenConnectionAsync(token);
         await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
@@ -163,7 +165,8 @@ internal sealed class Receiving(NpgsqlDataSource db)
                 COALESCE((SELECT sum(b.quantity) FROM brickvault.current_offer_backing b WHERE b.placement_id=p.id),0)::integer,
                 c.integration_eligible AND c.revision=p.catalog_revision
                     AND NOT EXISTS (SELECT 1 FROM brickvault.stock_shortage_cases sc WHERE sc.position_id=p.id AND sc.resolved_by_command_id IS NULL),
-                COALESCE((SELECT sum(h.remaining_quantity) FROM brickvault.current_build_holds h WHERE h.position_id=p.id),0)::integer
+                COALESCE((SELECT sum(h.remaining_quantity) FROM brickvault.current_build_holds h WHERE h.position_id=p.id),0)::integer,
+                COALESCE((SELECT q.quantity FROM brickvault.current_position_quarantine q WHERE q.position_id=p.id),0)
             FROM brickvault.current_placement_stock p JOIN brickvault.catalog c ON c.id=p.catalog_id
             WHERE p.quantity > 0
             ORDER BY p.location_code,p.id
@@ -172,9 +175,10 @@ internal sealed class Receiving(NpgsqlDataSource db)
             var quantity = r.GetInt32(6);
             var backed = r.GetInt32(7);
             var reserved = r.GetInt32(9);
-            return (DeliveryId: r.GetGuid(0), Reserved: reserved, Value: new PlacementRow(r.GetGuid(1),
+            var unavailable = r.GetInt32(10);
+            return (DeliveryId: r.GetGuid(0), Reserved: reserved, Quarantined: unavailable, Value: new PlacementRow(r.GetGuid(1),
                 r.GetGuid(2), r.GetInt32(3), r.GetGuid(4), r.GetString(5), quantity, backed,
-                r.GetBoolean(8) ? quantity - backed - reserved : 0));
+                r.GetBoolean(8) ? quantity - backed - reserved - unavailable : 0));
         }, token)).ToLookup(r => r.DeliveryId);
         var deliveries = (await Rows(connection, tx, """
             SELECT d.purchase_id,d.id,d.reference,d.quantity,d.catalog_id,d.catalog_revision,d.item_cost_minor,
@@ -193,7 +197,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
             var positions = placements[r.GetGuid(1)];
             var values = positions.Select(p => p.Value).ToList();
             var lost = r.GetInt32(7);
-            return (PurchaseId: r.GetGuid(0), Reserved: positions.Sum(p => p.Reserved),
+            return (PurchaseId: r.GetGuid(0), Reserved: positions.Sum(p => p.Reserved), Quarantined: positions.Sum(p => p.Quarantined),
                 Value: new LossDeliveryRow(r.GetGuid(1), r.GetString(2), quantity, Optional<Guid>(r,4), Optional<int>(r,5),
                     Optional<int>(r,6), quantity - lost - values.Sum(p => p.Quantity), values, lost,
                     Optional<int>(r,8), Optional<int>(r,9)));
@@ -217,22 +221,22 @@ internal sealed class Receiving(NpgsqlDataSource db)
         return new LossReceivingWorkspace("receiving", asOf, true, purchases.Select(p =>
         {
             var layers = deliveries[p.Id];
-            var received = layers.Select(d => d.Value).ToList();
+            var received = layers.Select(d => quarantine ? d.Value with { QuarantinedQuantity = d.Quarantined } : d.Value).ToList();
             return new LossPurchaseRow(p.Id, p.Revision, p.Reference, p.Source, p.Currency, p.Ordered, p.Charge,
-                received, offers[p.Id].ToList(), Balance(received, layers.Sum(d => d.Reserved),
-                    layers.Where(d => d.Value.ItemCostMinor.HasValue).Sum(d => d.Reserved), p.Charge));
+                received, offers[p.Id].ToList(), Balance(received, layers.Sum(d => d.Reserved), layers.Sum(d => d.Quarantined),
+                    layers.Where(d => d.Value.ItemCostMinor.HasValue).Sum(d => d.Reserved + d.Quarantined), p.Charge));
         }).ToList());
     }
 
-    private static StockBalances Balance(IReadOnlyList<LossDeliveryRow> deliveries, int reserved, int knownReserved,
+    private static StockBalances Balance(IReadOnlyList<LossDeliveryRow> deliveries, int reserved, int quarantined, int knownBlocked,
         int? pendingChargeMinor)
     {
         var onHand = deliveries.Sum(d => d.Quantity - d.LostQuantity);
-        var unavailable = deliveries.Sum(d => d.IntakeQuantity);
+        var unavailable = deliveries.Sum(d => d.IntakeQuantity) + quarantined;
         var free = onHand - unavailable - reserved;
         var backed = deliveries.SelectMany(d => d.Placements).Sum(p => p.BackedQuantity);
         var documented = deliveries.Where(d => d.ItemCostMinor.HasValue).ToList();
-        var knownFree = documented.Sum(d => d.Quantity - d.LostQuantity - d.IntakeQuantity) - knownReserved;
+        var knownFree = documented.Sum(d => d.Quantity - d.LostQuantity - d.IntakeQuantity) - knownBlocked;
         long? known = documented.Count == 0 ? null : documented.Sum(d => (long)d.ItemCostMinor!.Value);
         long? components = known.HasValue || pendingChargeMinor.HasValue
             ? known.GetValueOrDefault() + pendingChargeMinor.GetValueOrDefault() : null;

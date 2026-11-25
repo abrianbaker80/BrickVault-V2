@@ -110,7 +110,8 @@ internal sealed record ReceivingWorkspace(string Scope, DateTime AsOf, bool Comp
 
 internal sealed record LossDeliveryRow(Guid Id, string Reference, int Quantity, Guid? CatalogId, int? CatalogRevision,
     int? ItemCostMinor, int IntakeQuantity, IReadOnlyList<PlacementRow> Placements, int LostQuantity,
-    int? AllocatedLostItemCostMinor, int? RemainingItemCostMinor);
+    int? AllocatedLostItemCostMinor, int? RemainingItemCostMinor,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null);
 internal sealed record LossPurchaseRow(Guid Id, int Revision, string Reference, string Source, string Currency,
     int OrderedQuantity, int? PendingChargeMinor, IReadOnlyList<LossDeliveryRow> Deliveries,
     IReadOnlyList<OfferRow> Offers, StockBalances Balances);
@@ -122,4 +123,5 @@ internal sealed record BinStockSnapshot(string Scope, DateTime AsOf, bool Comple
 internal sealed record BinStockLayer(Guid PlacementId, Guid PurchaseId, string PurchaseReference, Guid DeliveryId,
     string DeliveryReference, Guid ReceiptCommandId, Guid ReceiptCorrelationId, int ReceiptQuantity,
     int? ReceiptItemCostMinor, string Currency, Guid CatalogId, int CatalogRevision, CatalogRow CurrentCatalog,
-    string LocationCodeAtPutaway, int Quantity, int BackedQuantity, int UnbackedQuantity, int FreeToBackQuantity);
+    string LocationCodeAtPutaway, int Quantity, int BackedQuantity, int UnbackedQuantity, int FreeToBackQuantity,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null);

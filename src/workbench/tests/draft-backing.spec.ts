@@ -2,7 +2,7 @@ import { expect, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { test } from './trusted'
 import { audit, fixture, purchases, signIn } from './bin-fixture'
-import { draftBackingLink } from '../src/countLinks'
+import { draftBackingLink, quarantineLink } from '../src/countLinks'
 import type { DraftBackingPage, DraftOfferHistory } from '../src/api'
 
 const view = (p:Page) => p.getByRole('dialog',{name:'Draft offer backing',exact:true})
@@ -32,7 +32,7 @@ test('selected draft backing can be partially and fully withdrawn without losing
   const chosen=page.getByRole('list',{name:'Unpublished offers'}).getByRole('listitem').filter({hasText:f.offer})
   await chosen.getByRole('link',{name:'Review draft offer '+f.offer+' at position '+f.position}).click()
   const dialog=view(page), published=proof(page)
-  await expect(dialog.getByLabel('Position balances').locator('dd')).toHaveText(['8','2','6','3','3','3'])
+  await expect(dialog.getByLabel('Position balances').locator('dd')).toHaveText(['8','2','0','6','3','3','3'])
   const start=dialog.getByRole('button',{name:'Withdraw backing',exact:true})
   await start.focus(); await page.keyboard.press('Enter')
   await expect(dialog.getByRole('heading',{name:'Withdraw draft backing'})).toBeFocused()
@@ -58,7 +58,7 @@ test('selected draft backing can be partially and fully withdrawn without losing
   await page.reload()
   await expect(published).toContainText(f.offer)
   await published.getByRole('link',{name:'Review this offer at this position'}).click()
-  await expect(dialog.getByLabel('Position balances').locator('dd')).toHaveText(['8','2','6','2','4','4'])
+  await expect(dialog.getByLabel('Position balances').locator('dd')).toHaveText(['8','2','0','6','2','4','4'])
   await start.click(); await fill(page,f.a.code,2,'Withdraw the remaining draft backing'); await save.click()
   await expect(published).toContainText('2 units withdrawn')
   const final=page.url().split('/').at(-1)!
@@ -234,6 +234,53 @@ test('paged offer history restarts after a competing revision and two operators 
     expect(current.offer).toMatchObject({backedQuantity:0,totalOfferBackedQuantity:0,unitPriceMinor:225})
     expect(current.contributions.filter(row=>row.reason?.startsWith('Request for the last unit'))).toHaveLength(1)
   } finally {await other.close()}
+})
+
+test('quarantine and withdrawal use the same physical position and leave protected pieces in place',async ({page})=>{
+  const f=await eight(page)
+  const reason='Two cracked pieces awaiting inspection'
+  const quarantineId=await f.write('inventory/quarantines',5,{
+    purchaseId:f.purchaseId,positionId:f.position,locationId:f.a.id,confirmedLocationCode:f.a.code,
+    catalogId:f.catalogId,catalogRevision:1,quantity:2,reason
+  })
+  await page.goto('/'+quarantineLink(f.a.id,f.position))
+  const quarantine=page.getByRole('dialog',{name:'Position quarantine',exact:true})
+  await expect(quarantine.locator('dd')).toHaveText(['8','2','2','4','3','1','1'])
+  await quarantine.getByRole('link',{name:'Review draft offer backing'}).click()
+  const d=view(page)
+  await expect(d.getByLabel('Position balances').locator('dd')).toHaveText(['8','2','2','4','3','1','1'])
+  await d.getByRole('link',{name:'Review offer '+f.offer,exact:true}).click()
+  const begin=d.getByRole('button',{name:'Withdraw backing',exact:true})
+  await expect(begin).toBeEnabled()
+  await page.route(url=>url.pathname===path(f.position)+'/'+f.offer+'/history',async route=>{
+    const response=await route.fetch()
+    const body=await response.json()
+    delete body.unavailableQuantity
+    await route.fulfill({response,json:body})
+    await response.dispose()
+  },{times:1})
+  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
+  await expect(d.getByRole('button',{name:'Retry backing read'})).toBeVisible()
+  await expect(begin).toBeDisabled()
+  await d.getByRole('button',{name:'Retry backing read'}).click()
+  await begin.click()
+  await fill(page,f.a.code,1,'Free one sound piece for another offer')
+  await d.getByRole('button',{name:'Confirm withdrawal'}).click()
+  const receipt=proof(page)
+  await expect(receipt).toContainText('1 unit withdrawn')
+  const withdrawalId=page.url().split('/').at(-1)!
+  await receipt.getByRole('link',{name:'Review this offer at this position'}).click()
+  await expect(d.getByLabel('Position balances').locator('dd')).toHaveText(['8','2','2','4','2','2','2'])
+  await d.getByRole('link',{name:'Inspect position quarantine'}).click()
+  await expect(quarantine.locator('dd')).toHaveText(['8','2','2','4','2','2','2'])
+  await quarantine.getByRole('link',{name:'Position timeline'}).click()
+  const timeline=page.getByRole('region',{name:'Position timeline'})
+  await expect(timeline.getByRole('link',{name:'View quarantine receipt'})).toHaveAttribute('href',quarantineLink(f.a.id,f.position,quarantineId))
+  await expect(timeline.getByRole('link',{name:'View withdrawal receipt'})).toHaveAttribute('href',draftBackingLink(f.a.id,f.position,'receipts',withdrawalId))
+  await page.goto('/#inventory/lot/'+f.deliveryId)
+  const lot=page.getByRole('region',{name:'Receipt lot activity'})
+  await expect(lot.getByRole('link',{name:'View quarantine receipt'})).toHaveAttribute('href',quarantineLink(f.a.id,f.position,quarantineId))
+  await expect(lot.getByRole('link',{name:'View withdrawal receipt'})).toHaveAttribute('href',draftBackingLink(f.a.id,f.position,'receipts',withdrawalId))
 })
 
 test('keyboard withdrawal preparation survives workspace entry and repeated history refreshes',async ({page})=>{

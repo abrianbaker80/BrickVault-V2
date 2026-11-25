@@ -6,18 +6,18 @@ namespace BrickVault.Api;
 
 internal sealed class BinStock(NpgsqlDataSource db)
 {
-    public async Task<BinStockSnapshot> Snapshot(Guid locationId, CancellationToken token)
+    public async Task<BinStockSnapshot> Snapshot(Guid locationId, CancellationToken token, bool quarantine = false)
     {
-        var bin = await Read(locationId, includeMovements: false, token);
+        var bin = await Read(locationId, includeMovements: false, token, quarantine);
         return new BinStockSnapshot("bin-stock", bin.AsOf, bin.Complete, bin.Location,
             bin.PhysicalOnHand, bin.BackedQuantity, bin.UnbackedQuantity, bin.FreeToBackQuantity,
             bin.Positions.Select(p => p.Layer).ToList());
     }
 
-    public Task<BinTransferSnapshot> Movements(Guid locationId, CancellationToken token) =>
-        Read(locationId, includeMovements: true, token);
+    public Task<BinTransferSnapshot> Movements(Guid locationId, CancellationToken token, bool quarantine = false) =>
+        Read(locationId, includeMovements: true, token, quarantine);
 
-    private async Task<BinTransferSnapshot> Read(Guid locationId, bool includeMovements, CancellationToken token)
+    private async Task<BinTransferSnapshot> Read(Guid locationId, bool includeMovements, CancellationToken token, bool quarantine)
     {
         await using var connection = await db.OpenConnectionAsync(token);
         await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
@@ -38,7 +38,12 @@ internal sealed class BinStock(NpgsqlDataSource db)
             {PositionRows.From}
             WHERE p.location_id=$1 AND p.quantity > 0
             ORDER BY p.catalog_id,p.catalog_revision,buy.reference,d.reference,p.id
-            """, r => new TransferPosition(PositionRows.ReadLayer(r), r.GetInt32(29), r.GetString(30), []), token, locationId);
+            """, r => new TransferPosition(PositionRows.ReadLayer(r, quarantine || includeMovements), r.GetInt32(29), r.GetString(30), []), token, locationId);
+        if (!quarantine && includeMovements)
+        {
+            if (layers.Any(row => row.Layer.QuarantinedQuantity > 0)) throw StockQuarantines.Upgrade();
+            layers = layers.Select(row => row with { Layer = row.Layer with { QuarantinedQuantity = null } }).ToList();
+        }
 
         List<TransferMovement> movements = [];
         if (includeMovements)
