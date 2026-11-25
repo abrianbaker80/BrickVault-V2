@@ -43,13 +43,36 @@ CREATE INDEX stock_quarantines_position ON brickvault.stock_quarantines(position
 CREATE INDEX stock_quarantine_releases_receipt ON brickvault.stock_quarantine_releases(quarantine_id);
 CREATE INDEX stock_quarantine_releases_position ON brickvault.stock_quarantine_releases(position_id);
 
+-- The review row records affirmative attribution, including an explicit zero quantity.
+-- Prior v7-v9 physical-loss facts retain their original schema and data.
+CREATE TABLE brickvault.stock_loss_quarantine_reviews (
+    loss_id uuid PRIMARY KEY REFERENCES brickvault.stock_loss_postings(id),
+    quarantined_quantity_before integer NOT NULL CHECK (quarantined_quantity_before BETWEEN 0 AND 1000000)
+);
+
+CREATE TABLE brickvault.stock_loss_quarantine_attributions (
+    loss_id uuid NOT NULL REFERENCES brickvault.stock_loss_quarantine_reviews(loss_id),
+    quarantine_id uuid NOT NULL REFERENCES brickvault.stock_quarantines(id),
+    quantity integer NOT NULL CHECK (quantity BETWEEN 1 AND 1000000),
+    prior_remaining_quantity integer NOT NULL CHECK (prior_remaining_quantity BETWEEN quantity AND 1000000),
+    PRIMARY KEY (loss_id,quarantine_id)
+);
+
+CREATE INDEX stock_loss_quarantine_attributions_receipt
+    ON brickvault.stock_loss_quarantine_attributions(quarantine_id);
+
 CREATE VIEW brickvault.current_stock_quarantines AS
-SELECT q.*,inspected.quantity AS released_quantity,q.quantity-inspected.quantity AS remaining_quantity
+SELECT q.*,inspected.quantity AS released_quantity,
+    q.quantity-inspected.quantity-lost.quantity AS remaining_quantity,lost.quantity AS lost_quantity
 FROM brickvault.stock_quarantines q
 CROSS JOIN LATERAL (
     SELECT COALESCE(sum(r.quantity),0)::integer AS quantity
     FROM brickvault.stock_quarantine_releases r WHERE r.quarantine_id=q.id
-) inspected;
+) inspected
+CROSS JOIN LATERAL (
+    SELECT COALESCE(sum(a.quantity),0)::integer AS quantity
+    FROM brickvault.stock_loss_quarantine_attributions a WHERE a.quarantine_id=q.id
+) lost;
 
 CREATE VIEW brickvault.current_position_quarantine AS
 SELECT position_id,sum(remaining_quantity)::integer AS quantity
@@ -155,15 +178,104 @@ CREATE CONSTRAINT TRIGGER require_quarantine_capacity_on_offer AFTER INSERT ON b
 CREATE CONSTRAINT TRIGGER require_quarantine_capacity_on_transfer AFTER INSERT ON brickvault.placement_transfers
     DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION brickvault.require_quarantine_capacity();
 
--- Aggregate counts have no evidence locating a discrepancy within quarantined versus ordinary units.
-CREATE FUNCTION brickvault.guard_quarantined_stock_loss() RETURNS trigger LANGUAGE plpgsql AS $$
+-- The loss insertion already advances and locks the purchase. Quarantine changes at
+-- the open shortage's position remain fenced until this loss transaction completes.
+CREATE FUNCTION brickvault.capture_stock_loss_quarantine_review() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM brickvault.current_position_quarantine WHERE position_id=NEW.position_id) THEN
-        RAISE check_violation USING CONSTRAINT='stock_loss_quarantine_unresolved';
+    SELECT COALESCE(q.quantity,0) INTO NEW.quarantined_quantity_before
+    FROM brickvault.stock_loss_postings l
+    LEFT JOIN brickvault.current_position_quarantine q ON q.position_id=l.position_id
+    WHERE l.id=NEW.loss_id AND NOT EXISTS (
+        SELECT 1 FROM brickvault.commands c WHERE c.command_id=l.command_id);
+    IF NOT FOUND THEN RAISE check_violation USING CONSTRAINT='stock_loss_quarantine_attribution_mismatch'; END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER capture_stock_loss_quarantine_review BEFORE INSERT ON brickvault.stock_loss_quarantine_reviews
+    FOR EACH ROW EXECUTE FUNCTION brickvault.capture_stock_loss_quarantine_review();
+
+CREATE FUNCTION brickvault.capture_stock_loss_quarantine_attribution() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    SELECT q.remaining_quantity INTO NEW.prior_remaining_quantity
+    FROM brickvault.stock_loss_quarantine_reviews review
+    JOIN brickvault.stock_loss_postings l ON l.id=review.loss_id
+    JOIN brickvault.current_stock_quarantines q ON q.id=NEW.quarantine_id
+        AND q.position_id=l.position_id AND q.purchase_id=l.purchase_id
+    WHERE review.loss_id=NEW.loss_id AND NOT EXISTS (
+        SELECT 1 FROM brickvault.commands c WHERE c.command_id=l.command_id);
+    IF NOT FOUND OR NEW.quantity>NEW.prior_remaining_quantity THEN
+        RAISE check_violation USING CONSTRAINT='stock_loss_quarantine_attribution_mismatch';
     END IF;
     RETURN NEW;
 END;
 $$;
 
-CREATE TRIGGER guard_quarantined_stock_loss BEFORE INSERT ON brickvault.stock_loss_postings
-    FOR EACH ROW EXECUTE FUNCTION brickvault.guard_quarantined_stock_loss();
+CREATE TRIGGER capture_stock_loss_quarantine_attribution BEFORE INSERT ON brickvault.stock_loss_quarantine_attributions
+    FOR EACH ROW EXECUTE FUNCTION brickvault.capture_stock_loss_quarantine_attribution();
+
+CREATE OR REPLACE FUNCTION brickvault.require_stock_loss_completion() RETURNS trigger LANGUAGE plpgsql
+    SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE
+    required_reduction integer;
+    actual_reduction bigint;
+    prior_quarantine integer;
+    attributed_loss bigint;
+    remaining_quarantine integer;
+    saleable_capacity integer;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM brickvault.commands c JOIN brickvault.audit a USING (command_id)
+        WHERE c.command_id=NEW.command_id AND c.kind='stock-loss' AND c.entity_id=NEW.id
+          AND c.revision-1=NEW.expected_purchase_revision
+    ) THEN
+        RAISE check_violation USING CONSTRAINT='stock_loss_receipt_required';
+    END IF;
+
+    SELECT quarantined_quantity_before INTO prior_quarantine
+    FROM brickvault.stock_loss_quarantine_reviews WHERE loss_id=NEW.id;
+    IF NOT FOUND THEN
+        IF EXISTS (SELECT 1 FROM brickvault.current_position_quarantine WHERE position_id=NEW.position_id) THEN
+            RAISE check_violation USING CONSTRAINT='stock_loss_quarantine_unresolved';
+        END IF;
+        prior_quarantine := 0;
+    END IF;
+
+    SELECT COALESCE(sum(quantity),0) INTO attributed_loss
+    FROM brickvault.stock_loss_quarantine_attributions WHERE loss_id=NEW.id;
+    IF attributed_loss>NEW.lost_quantity OR attributed_loss>prior_quarantine
+        OR NEW.lost_quantity-attributed_loss>NEW.ledger_quantity_before-prior_quarantine THEN
+        RAISE check_violation USING CONSTRAINT='stock_loss_quarantine_attribution_mismatch';
+    END IF;
+    remaining_quarantine := prior_quarantine-attributed_loss;
+    saleable_capacity := NEW.ledger_quantity_before-NEW.lost_quantity-NEW.protected_project_quantity-remaining_quarantine;
+    IF saleable_capacity<0 THEN
+        RAISE check_violation USING CONSTRAINT='stock_loss_protected_shortfall';
+    END IF;
+
+    required_reduction := GREATEST(0,NEW.offer_backed_quantity_before-saleable_capacity);
+    SELECT COALESCE(sum(quantity),0) INTO actual_reduction
+    FROM brickvault.stock_loss_offer_reductions WHERE loss_id=NEW.id;
+    IF actual_reduction<>required_reduction THEN
+        RAISE check_violation USING CONSTRAINT='stock_loss_offer_reduction_mismatch';
+    END IF;
+
+    -- Read only the preceding purchase history. Later events in the same transaction cannot change the receipt.
+    UPDATE brickvault.stock_loss_offer_reductions r SET prior_backed_quantity=s.prior
+    FROM (
+        SELECT chosen.offer_id,
+            COALESCE(sum(b.backing_delta) FILTER (WHERE c.revision<=NEW.expected_purchase_revision),0)::integer AS prior
+        FROM brickvault.stock_loss_offer_reductions chosen
+        LEFT JOIN brickvault.offer_backing_ledger b
+            ON b.offer_id=chosen.offer_id AND b.placement_id=NEW.position_id
+        LEFT JOIN brickvault.commands c ON c.command_id=b.command_id
+        WHERE chosen.loss_id=NEW.id
+        GROUP BY chosen.offer_id
+    ) s WHERE r.loss_id=NEW.id AND r.offer_id=s.offer_id;
+
+    UPDATE brickvault.stock_shortage_cases SET resolved_by_command_id=NEW.command_id
+    WHERE id=NEW.case_id AND position_id=NEW.position_id AND resolved_by_command_id IS NULL;
+    IF NOT FOUND THEN RAISE check_violation USING CONSTRAINT='stock_loss_case_conflict'; END IF;
+    RETURN NULL;
+END;
+$$;

@@ -1768,6 +1768,35 @@
               "maximum": 100,
               "default": 25
             }
+          },
+          {
+            "name": "quarantine",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include recorded quarantine attribution and prior/remaining quantities. Required to read quarantine-affected postings."
+          },
+          {
+            "name": "quarantineAfter",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 65,
+              "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{32}$"
+            },
+            "description": "Continue the selected posting’s quarantine-attribution page. Requires quarantine=true."
+          },
+          {
+            "name": "quarantineLimit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            },
+            "description": "Maximum quarantine attribution rows per page."
           }
         ],
         "responses": {
@@ -1793,6 +1822,16 @@
           },
           "default": {
             "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "The retained client contract cannot represent this quarantine-affected posting.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2374,6 +2413,14 @@
               "maximum": 100,
               "default": 25
             }
+          },
+          {
+            "name": "lossAttribution",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include the lost quantity for each named quarantine receipt. Required when this position has attributed quarantine losses."
           }
         ],
         "responses": {
@@ -2389,6 +2436,16 @@
           },
           "default": {
             "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "The retained client contract cannot distinguish attributed losses from inspection releases here.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6277,6 +6334,17 @@
               "$ref": "#/components/schemas/StockLossOfferReduction"
             },
             "description": "Distinct, positive backing reductions at this position. The total must equal the reviewed minimum."
+          },
+          "quarantineAttributions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 1000000,
+            "items": {
+              "$ref": "#/components/schemas/StockLossQuarantineSelection"
+            },
+            "description": "Supply explicitly when active quarantine exists. An empty array confirms zero quarantined units are missing; omitted or null leaves attribution unknown."
           }
         },
         "required": [
@@ -6469,6 +6537,32 @@
             ],
             "maxLength": 65,
             "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{32}$"
+          },
+          "quarantineAttributionRecorded": {
+            "type": "boolean"
+          },
+          "quarantinedQuantityBefore": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "quarantinedQuantityAfter": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "quarantineAttributions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/StockLossQuarantineAttribution"
+            }
+          },
+          "nextQuarantineAfter": {
+            "type": "string",
+            "maxLength": 65,
+            "pattern": "^[0-9a-f]{32}\\.[0-9a-f]{32}$",
+            "description": "Present when another attribution page is available."
           }
         },
         "required": [
@@ -8065,6 +8159,12 @@
           "recordedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "lostQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "Quantity consumed by attributed posted losses. Included with lossAttribution=true. Released quantity only counts passed inspection releases."
           }
         },
         "required": [
@@ -8806,6 +8906,56 @@
           "currency",
           "reason",
           "recordedAt"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossQuarantineSelection": {
+        "type": "object",
+        "properties": {
+          "quarantineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "quarantineId",
+          "quantity"
+        ],
+        "additionalProperties": false
+      },
+      "StockLossQuarantineAttribution": {
+        "type": "object",
+        "properties": {
+          "quarantineId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "priorRemainingQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          },
+          "remainingQuantity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          }
+        },
+        "required": [
+          "quarantineId",
+          "quantity",
+          "priorRemainingQuantity",
+          "remainingQuantity"
         ],
         "additionalProperties": false
       }
