@@ -150,7 +150,7 @@ async function save() {
           <button ref="create" class="primary" :disabled="!ready || stock.hasOpenShortage || !stock.availableToQuarantineQuantity" @click="edit()">Quarantine pieces</button>
           <ul v-if="stock.quarantines.length" class="receipt-lines" aria-label="Quarantine records">
             <li v-for="q in stock.quarantines" :key="q.id"><strong>{{ q.reason }}</strong>
-              <p>{{ q.remainingQuantity }} still quarantined · {{ q.releasedQuantity }} released of {{ q.quantity }}</p>
+              <p>{{ q.remainingQuantity }} still quarantined · {{ q.releasedQuantity }} released<template v-if="q.lostQuantity"> · {{ q.lostQuantity }} lost</template> of {{ q.quantity }}</p>
               <small>Quarantine {{ q.id }} · {{ time(q.recordedAt) }}</small>
               <a :href="quarantineLink(location.id,positionId,q.id)">Original quarantine receipt</a>
               <button v-if="q.remainingQuantity" :data-inspect="q.id" :disabled="!ready || stock.hasOpenShortage || !layer.currentCatalog.integrationEligible"

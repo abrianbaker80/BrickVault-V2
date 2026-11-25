@@ -294,7 +294,7 @@ export function useWorkbench(page: Ref<string>) {
             'hold_bin_confirmation_mismatch', 'hold_catalog_ineligible', 'hold_quantity_unavailable', 'hold_shortage_frontier_conflict',
             'reserved_stock_unavailable','invalid_stock_loss','stock_loss_position_mismatch','stock_loss_bin_confirmation_mismatch',
             'stock_loss_case_conflict','stock_loss_observation_conflict','stock_loss_no_loss','stock_loss_protected_shortfall',
-            'stock_loss_offer_reduction_mismatch'].includes(reason.detail.code)) {
+            'stock_loss_offer_reduction_mismatch','stock_loss_quarantine_attribution_mismatch'].includes(reason.detail.code)) {
         forget(command)
         loadPending()
         if (reason.status === 409) await refresh()

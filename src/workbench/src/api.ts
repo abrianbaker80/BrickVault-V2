@@ -238,14 +238,14 @@ export const api = {
     return page
   },
   async quarantine(bin: string, position: string, after = '') {
-    const result = await read('inventory/positions/' + encodeURIComponent(position) + '/quarantine' + recountCursor(after), valid.StockQuarantineSnapshot)
+    const result = await read('inventory/positions/' + encodeURIComponent(position) + '/quarantine' + recountCursor(after) + '&lossAttribution=true', valid.StockQuarantineSnapshot)
     const layer = result.position.layer
     if (result.position.location.id !== bin || layer.placementId !== position || layer.currentCatalog.id !== layer.catalogId ||
         (result.complete && (result.onHandQuantity !== layer.quantity || result.offerBackedQuantity !== layer.backedQuantity ||
           result.sellableQuantity + result.heldQuantity + result.quarantinedQuantity !== result.onHandQuantity ||
           result.offerBackedQuantity > result.sellableQuantity ||
           result.availableToQuarantineQuantity > result.sellableQuantity - result.offerBackedQuantity ||
-          result.quarantines.some(q => q.quantity !== q.remainingQuantity + q.releasedQuantity)))) throw new ContractFailure()
+          result.quarantines.some(q => q.lostQuantity === undefined || q.quantity !== q.remainingQuantity + q.releasedQuantity + q.lostQuantity)))) throw new ContractFailure()
     return result
   },
   async quarantineReceipt(bin: string, position: string, selector: { receiptId:string } | { commandId:string }) {
@@ -314,14 +314,23 @@ export const api = {
         result.latestObservation.locationId !== binId) throw new ContractFailure()
     return result
   },
-  async postedLoss(bin: string, position: string, exact: { postingId: string } | { observationId: string } | { commandId: string } | { caseId: string }, after = '', limit = 25) {
-    const params = new URLSearchParams({ ...exact, limit: String(limit) })
+  async postedLoss(bin: string, position: string, exact: { postingId: string } | { observationId: string } | { commandId: string } | { caseId: string }, after = '', limit = 25, quarantineAfter = '', quarantineLimit = 25) {
+    const params = new URLSearchParams({ ...exact, limit: String(limit), quarantine: 'true', quarantineLimit: String(quarantineLimit) })
+    if (quarantineAfter) params.set('quarantineAfter', quarantineAfter)
     if (after) params.set('after', after)
     const result = await read('receiving/bins/' + encodeURIComponent(bin) + '/positions/' + encodeURIComponent(position) + '/posted-loss?' + params, valid.StockLossSnapshot)
     if (result.location.id !== bin || result.positionId !== position || result.reviewedObservation.positionId !== position ||
         result.reviewedObservation.purchaseId !== result.purchaseId || result.reviewedObservation.locationId !== bin ||
         ('postingId' in exact && result.postingId !== exact.postingId) || ('commandId' in exact && result.commandId !== exact.commandId) ||
         ('caseId' in exact && result.caseId !== exact.caseId)) throw new ContractFailure()
+    if (result.complete) {
+      const {quarantineAttributions:rows, quarantinedQuantityBefore:before, quarantinedQuantityAfter:afterLoss} = result
+      if (!rows || before === undefined || afterLoss === undefined || result.quarantineAttributionRecorded === undefined) throw new ContractFailure()
+      const lost = before-afterLoss
+      if (lost < 0 || lost > result.lostQuantity || rows.some(q=>q.quantity !== q.priorRemainingQuantity-q.remainingQuantity) ||
+          (!quarantineAfter && !result.nextQuarantineAfter && rows.reduce((n,q)=>n+q.quantity,0) !== lost) ||
+          (!result.quarantineAttributionRecorded && (lost || rows.length || result.nextQuarantineAfter))) throw new ContractFailure()
+    }
     return result
   },
   async positionHolds(binId: string, positionId: string, after = '', commandId = '') {
