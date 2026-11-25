@@ -123,7 +123,7 @@ async function post() {
           <dt>Protected build holds</dt><dd>{{ page.protectedProjectQuantity }}</dd><dt>Capacity for offers after loss</dt><dd>{{ page.offerCapacityAfterLoss ?? 'Pending identification of missing pieces' }}</dd>
           <dt>Currently backed here</dt><dd>{{ page.offerBackedQuantity }}</dd></dl>
         <a v-if="page.protectedProjectQuantity" :href="holdPositionLink(location.id,position)">Inspect named build holds</a>
-        <p v-if="page.quarantineBlocksLoss" class="warning">{{ page.quarantinedQuantity }} quarantined in this position. The count does not identify which pieces are missing. Loss posting is blocked.</p>
+        <p v-if="page.quarantineBlocksLoss && page.candidateLossQuantity > 0" class="warning">{{ page.quarantinedQuantity }} quarantined in this position. The count does not identify which pieces are missing. Loss posting is blocked.</p>
         <p v-if="page.protectedProjectShortfall" class="warning">Build holds exceed remaining stock by {{ page.protectedProjectShortfall }}. Review the named holds before posting.</p>
         <p v-if="!page.candidateLossQuantity" class="warning">The latest witnessed count supports no stock loss.</p>
         <form @submit.prevent="post">

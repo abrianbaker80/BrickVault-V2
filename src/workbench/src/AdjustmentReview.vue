@@ -86,7 +86,7 @@ function retryRead() {
           <dt>Whole delivery cost ({{ page.receipt.deliveryQuantity }} units)</dt>
           <dd>{{ money(page.receipt.itemCostMinor, page.receipt.currency) }}<template v-if="page.receipt.itemCostMinor === null"> ({{ page.receipt.currency }})</template></dd>
         </dl>
-        <p v-if="page.quarantineBlocksLoss" class="warning">{{ page.quarantinedQuantity }} quarantined in this position. The count does not identify which pieces are missing. Loss posting is blocked.</p>
+        <p v-if="page.quarantineBlocksLoss && page.candidateLossQuantity > 0" class="warning">{{ page.quarantinedQuantity }} quarantined in this position. The count does not identify which pieces are missing. Loss posting is blocked.</p>
         <p v-if="page.protectedProjectShortfall" class="warning">Build reservations exceed the proposed stock by {{ page.protectedProjectShortfall }}. Review the named holds.</p>
         <p v-if="page.minimumOfferBackingReduction" class="warning">At least {{ page.minimumOfferBackingReduction }} units of offer backing need review.</p>
         <p v-if="!page.candidateLossQuantity">The latest count supports no stock loss.</p>
