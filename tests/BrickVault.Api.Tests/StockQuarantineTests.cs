@@ -113,7 +113,7 @@ public sealed class StockQuarantineTests
         Assert.Equal("quarantine_client_upgrade_required", await Reject(() => timelines.Read(origin.EntityId, null, 25, token)));
         Assert.Equal("quarantine_client_upgrade_required", await Reject(() => lots.Read(zero.EntityId, null, null, 25, 25, token)));
         Assert.Equal(1, (await bins.Snapshot(a.Id, token)).FreeToBackQuantity);
-        var activeLot = await lots.Read(zero.EntityId, null, null, 25, 25, token, true);
+        var activeLot = await lots.Read(zero.EntityId, null, null, 25, 25, token, quarantine: true);
         Assert.Equal((8, 2, 3, 2, 1), (activeLot.CurrentOnHandQuantity, activeLot.QuarantinedQuantity,
             activeLot.OfferBackedQuantity, activeLot.HeldQuantity, activeLot.FreeToBackQuantity));
         var purchaseState = Assert.Single((await receiving.LossSnapshot(token, true)).Purchases, p => p.Id == purchase.EntityId);
@@ -122,9 +122,71 @@ public sealed class StockQuarantineTests
         Assert.Equal(3, Assert.Single(purchaseState.Offers).BackedQuantity);
         Assert.Equal(2, Assert.Single(purchaseState.Deliveries, d => d.Id == zero.EntityId).QuarantinedQuantity);
 
-        var release = new StockQuarantineReleaseCommand
+        var drafts = new DraftBackingWithdrawals(db);
+        Task<DraftBackingSnapshot> DraftSnapshot(bool quarantine = true) =>
+            drafts.Snapshot(origin.EntityId, null, 25, token, quarantine);
+        Task<DraftBackingHistory> DraftHistory(bool quarantine = true) =>
+            drafts.History(origin.EntityId, offer.EntityId, null, 25, token, quarantine);
+        var beforeWithdrawal = await DraftSnapshot();
+        Assert.Equal((8, 2, 2, 4, 3, 1), (beforeWithdrawal.PhysicalOnHand, beforeWithdrawal.HeldQuantity,
+            beforeWithdrawal.UnavailableQuantity, beforeWithdrawal.SellableQuantity, beforeWithdrawal.OfferBackedQuantity,
+            beforeWithdrawal.WithheldQuantity));
+        Assert.Equal(2, beforeWithdrawal.Position.Layer.QuarantinedQuantity);
+        Assert.Equal(3, Assert.Single(beforeWithdrawal.Offers).BackedQuantity);
+        Assert.Equal("quarantine_client_upgrade_required", await Reject(() => DraftSnapshot(false)));
+        Assert.Equal("quarantine_client_upgrade_required", await Reject(() => DraftHistory(false)));
+
+        var withdrawalRequest = new DraftBackingWithdrawalCommand
         {
             CommandId = Guid.NewGuid(), PurchaseId = purchase.EntityId, ExpectedRevision = receipt.Revision,
+            PositionId = origin.EntityId, OfferId = offer.EntityId, LocationId = a.Id, ConfirmedLocationCode = a.Code,
+            Quantity = 1, Reason = "Withdraw one draft unit while quarantine remains"
+        };
+        var withdrawal = await drafts.Save(withdrawalRequest, Guid.NewGuid(), token);
+        Assert.Equal(withdrawal, await drafts.Save(withdrawalRequest, Guid.NewGuid(), token));
+        var afterWithdrawal = await DraftSnapshot();
+        Assert.Equal((8, 2, 2, 4, 2, 2, 2), (afterWithdrawal.PhysicalOnHand, afterWithdrawal.HeldQuantity,
+            afterWithdrawal.UnavailableQuantity, afterWithdrawal.SellableQuantity, afterWithdrawal.OfferBackedQuantity,
+            afterWithdrawal.WithheldQuantity, afterWithdrawal.FreeToBackQuantity));
+        Assert.Equal((2, 0), (afterWithdrawal.Position.Layer.QuarantinedQuantity, afterWithdrawal.Position.Layer.ReceiptItemCostMinor));
+        Assert.Equal(withdrawal.Revision, afterWithdrawal.PurchaseRevision);
+        var backedHistory = await DraftHistory();
+        Assert.Equal(afterWithdrawal.Position, backedHistory.Position);
+        Assert.Equal((2, 2, 4, 2), (backedHistory.UnavailableQuantity, backedHistory.OfferBackedQuantity,
+            backedHistory.SellableQuantity, backedHistory.WithheldQuantity));
+        Assert.Equal(Assert.Single(afterWithdrawal.Offers), backedHistory.Offer);
+        Assert.Equal(new[] { -1, 3 }, backedHistory.Contributions.Select(row => row.BackingDelta));
+        var withdrawalEvidence = await drafts.Evidence(origin.EntityId, null, withdrawal.CommandId, token);
+        Assert.Equal((withdrawal.EntityId, offer.EntityId, "USD", 3, 2, 3, 2),
+            (withdrawalEvidence.Id, withdrawalEvidence.OfferId, withdrawalEvidence.Currency, withdrawalEvidence.PriorBackedQuantity,
+             withdrawalEvidence.RemainingBackedQuantity, withdrawalEvidence.PriorTotalOfferBackedQuantity,
+             withdrawalEvidence.RemainingTotalOfferBackedQuantity));
+        var quarantinedEvidence = await quarantines.Evidence(origin.EntityId, null, receipt.CommandId, token);
+        Assert.Equal((receipt.EntityId, zero.EntityId, 2), (quarantinedEvidence.Id, quarantinedEvidence.DeliveryId, quarantinedEvidence.Quantity));
+
+        Assert.Equal("draft_backing_client_upgrade_required", await Reject(() =>
+            timelines.Read(origin.EntityId, null, 25, token, quarantine: true)));
+        Assert.Equal("quarantine_client_upgrade_required", await Reject(() =>
+            timelines.Read(origin.EntityId, null, 25, token, withdrawals: true)));
+        Assert.Equal("draft_backing_client_upgrade_required", await Reject(() =>
+            lots.Read(zero.EntityId, null, null, 25, 25, token, quarantine: true)));
+        Assert.Equal("quarantine_client_upgrade_required", await Reject(() =>
+            lots.Read(zero.EntityId, null, null, 25, 25, token, withdrawals: true)));
+        var combinedTimeline = await timelines.Read(origin.EntityId, null, 1, token, withdrawals: true, quarantine: true);
+        var withdrawEvent = Assert.Single(combinedTimeline.Events);
+        Assert.Equal((withdrawal.EntityId, "offer-withdrawal", 0, 0, -1), (withdrawEvent.Id, withdrawEvent.Kind,
+            withdrawEvent.PhysicalDelta, withdrawEvent.ReservedDelta, withdrawEvent.OfferBackedDelta));
+        var nextEvent = await timelines.Read(origin.EntityId, combinedTimeline.NextAfter, 1, token, withdrawals: true, quarantine: true);
+        Assert.Equal((receipt.EntityId, "quarantine"), (Assert.Single(nextEvent.Events).Id, nextEvent.Events[0].Kind));
+        var combinedLot = await lots.Read(zero.EntityId, null, null, 25, 25, token, withdrawals: true, quarantine: true);
+        Assert.Equal((8, 2, 2, 2, 0), (combinedLot.CurrentOnHandQuantity, combinedLot.QuarantinedQuantity,
+            combinedLot.OfferBackedQuantity, combinedLot.HeldQuantity, combinedLot.ItemCostMinor));
+        Assert.Contains(combinedLot.Events, row => row.Event.Id == withdrawal.EntityId && row.Event.OfferBackedDelta == -1);
+        Assert.Contains(combinedLot.Events, row => row.Event.Id == receipt.EntityId && row.Event.PhysicalDelta == 0);
+
+        var release = new StockQuarantineReleaseCommand
+        {
+            CommandId = Guid.NewGuid(), PurchaseId = purchase.EntityId, ExpectedRevision = withdrawal.Revision,
             PositionId = origin.EntityId, LocationId = a.Id, ConfirmedLocationCode = a.Code, CatalogId = item.EntityId,
             CatalogRevision = item.Revision, Quantity = 1, QuarantineId = receipt.EntityId,
             InspectionResult = "passed", Reason = "Inspected one original piece"
@@ -150,11 +212,17 @@ public sealed class StockQuarantineTests
             Assert.Equal("quarantine_receipt_required", rejected.ConstraintName);
         }
         var partial = await Snapshot();
-        Assert.Equal((8, 1, 2, 3, 5, 2), (partial.OnHandQuantity, partial.QuarantinedQuantity, partial.HeldQuantity,
+        Assert.Equal((8, 1, 2, 2, 5, 3), (partial.OnHandQuantity, partial.QuarantinedQuantity, partial.HeldQuantity,
             partial.OfferBackedQuantity, partial.SellableQuantity, partial.AvailableToQuarantineQuantity));
         Assert.Equal(released.Revision, partial.PurchaseRevision);
         Assert.Equal(1, Assert.Single(partial.Quarantines).RemainingQuantity);
         Assert.Equal(released, await Save(release));
+        var afterRelease = await DraftHistory();
+        Assert.Equal((8, 1, 2, 5, 3), (afterRelease.PhysicalOnHand, afterRelease.UnavailableQuantity,
+            afterRelease.Offer.BackedQuantity, afterRelease.SellableQuantity, afterRelease.WithheldQuantity));
+        Assert.Equal(backedHistory.Contributions, afterRelease.Contributions);
+        var retainedWithdrawal = await drafts.Evidence(origin.EntityId, withdrawal.EntityId, null, token);
+        Assert.Equal(withdrawalEvidence with { AsOf = retainedWithdrawal.AsOf }, retainedWithdrawal);
 
         var rivals = Enumerable.Range(0, 2).Select(async _ =>
         {
@@ -178,6 +246,8 @@ public sealed class StockQuarantineTests
         Assert.Equal("invalid_quarantine_cursor",
             await Reject(() => quarantines.Snapshot(sibling.EntityId, first.NextAfter, 1, token)));
 
+        // A separate normal allocation uses the newly free unit, keeping the shortage example at three backed units.
+        var additionalOffer = await Offer(seized.Revision, 1);
         var edited = await references.Save(catalog with
         {
             CommandId = Guid.NewGuid(), Id = item.EntityId, ExpectedRevision = item.Revision,
@@ -194,13 +264,13 @@ public sealed class StockQuarantineTests
         Assert.Equal("original", evidence.RecordedCatalog.Variant);
         Assert.Equal("unknown_quarantine_receipt",
             await Reject(() => quarantines.Evidence(sibling.EntityId, null, release.CommandId, token)));
-        var timeline = await timelines.Read(origin.EntityId, null, 25, token, true);
+        var timeline = await timelines.Read(origin.EntityId, null, 25, token, withdrawals: true, quarantine: true);
         var physicalRelease = Assert.Single(timeline.Events, e => e.Id == released.EntityId);
         Assert.Equal("quarantine-release", physicalRelease.Kind);
         Assert.Equal((0, 0, 0), (physicalRelease.PhysicalDelta, physicalRelease.ReservedDelta, physicalRelease.OfferBackedDelta));
         var inspected = await Save(release with
         {
-            CommandId = Guid.NewGuid(), ExpectedRevision = seized.Revision, CatalogRevision = edited.Revision,
+            CommandId = Guid.NewGuid(), ExpectedRevision = additionalOffer.Revision, CatalogRevision = edited.Revision,
             Reason = "Inspected a piece from the second quarantine", QuarantineId = seized.EntityId
         });
         var nextEvidence = await quarantines.Evidence(origin.EntityId, null, inspected.CommandId, token);

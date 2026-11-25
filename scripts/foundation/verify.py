@@ -219,13 +219,24 @@ def migration_test(s):
     )
     s.sql("DROP TABLE brickvault.recount_results;", db, "bv_migrator")
     s.migrate(db, to=8)
-    s.sql("CREATE TABLE brickvault.stock_quarantine_releases(test boolean);", db, "bv_migrator")
+    s.sql("CREATE TABLE brickvault.draft_backing_withdrawals(test boolean);", db, "bv_migrator")
     expected_failure(lambda: s.migrate(db))
     require(
         s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "8"
+        and s.sql("""SELECT position('offer-withdrawal' in pg_get_constraintdef(oid)) = 0 FROM pg_constraint
+                     WHERE conrelid='brickvault.commands'::regclass AND conname='commands_kind_check'""", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted withdrawal upgrade changed the recount database.",
+    )
+    s.sql("DROP TABLE brickvault.draft_backing_withdrawals;", db, "bv_migrator")
+    s.migrate(db, to=9)
+    s.sql("CREATE TABLE brickvault.stock_quarantine_releases(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "9"
         and s.sql("SELECT to_regclass('brickvault.stock_quarantines') IS NULL", db) == "t"
         and s.sql(inspect, db) == expected,
-        "An interrupted quarantine upgrade changed the recount database.",
+        "An interrupted quarantine upgrade changed the draft-withdrawal database.",
     )
     s.sql("DROP TABLE brickvault.stock_quarantine_releases;", db, "bv_migrator")
     s.migrate(db)
@@ -241,11 +252,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "9",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "10",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v9, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v10, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -292,7 +303,7 @@ def qualify_staged_upgrade(lab, port, source_version):
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "9"), (original, str(source_version))):
+    for inst, schema in ((candidate, "10"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -628,7 +639,7 @@ def verify(port):
     qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in (2, 3, 4, 5, 6, 7, 8):
+        for source_version in (2, 3, 4, 5, 6, 7, 8, 9):
             qualify_staged_upgrade(lab, port, source_version)
         runtime_dir = lab / "runtime"
         runtime_dir.mkdir()
@@ -908,6 +919,7 @@ def verify(port):
             from verify_receipt_lots import verify_receipt_lots
             from verify_recounts import qualify_recounts, verify_recovered_recounts
             from verify_quarantine import qualify_quarantine, verify_recovered_quarantine
+            from verify_withdrawals import qualify_withdrawals, verify_recovered_withdrawals
 
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
@@ -919,6 +931,7 @@ def verify(port):
             lots = verify_receipt_lots(first, receiving, transfer, loss)
             recounts = qualify_recounts(first, rec["entityId"])
             quarantines = qualify_quarantine(first, rec["entityId"])
+            withdrawals = qualify_withdrawals(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -1083,6 +1096,7 @@ def verify(port):
                         "Restored receipt-lot history, costs or positions differed.")
                 verify_recovered_recounts(recovered, recounts)
                 verify_recovered_quarantine(recovered, quarantines)
+                verify_recovered_withdrawals(recovered, withdrawals)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]

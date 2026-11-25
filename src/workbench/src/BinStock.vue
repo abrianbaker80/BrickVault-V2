@@ -4,7 +4,7 @@ import { api, ContractFailure, explain } from './api'
 import type { BinTransferSnapshot, Catalog, Location, TransferControls, TransferPosition } from './api'
 import TransferForm from './TransferForm.vue'
 import CountWorkspace from './CountWorkspace.vue'
-import { countPositionLink, holdPositionLink, quarantineLink, type CountLink } from './countLinks'
+import { countPositionLink, holdPositionLink, draftBackingLink, quarantineLink, type CountLink } from './countLinks'
 import { itemLabel, money } from './receiving'
 import { time } from './presentation'
 
@@ -25,7 +25,7 @@ function closeCount() {
   window.location.hash = 'locations/' + props.location.id
 }
 watch(() => props.countLink, async (link, previous) => {
-  if (link?.binId === props.location.id && !link.positionId && !link.receiptId && !link.holdPositionId && !link.quarantinePositionId && (previous?.positionId || previous?.receiptId || previous?.holdPositionId || previous?.quarantinePositionId)) {
+  if (link?.binId === props.location.id && !link.positionId && !link.receiptId && !link.holdPositionId && !link.draftPositionId && !link.quarantinePositionId && (previous?.positionId || previous?.receiptId || previous?.holdPositionId || previous?.draftPositionId || previous?.quarantinePositionId)) {
     await nextTick()
     heading.value?.focus()
   }
@@ -73,7 +73,7 @@ async function closeTransfer() {
 const arrivals = computed(() => new Map(stock.value?.movements.map(move => [move.destinationPlacementId, move])))
 
 const binScope = () => [props.location.id, props.location.revision, props.asOf, props.connected,
-  inspectingCount.value || Boolean(props.countLink?.holdPositionId || props.countLink?.lossPositionId || props.countLink?.quarantinePositionId)] as const
+  inspectingCount.value || Boolean(props.countLink?.holdPositionId || props.countLink?.lossPositionId || props.countLink?.quarantinePositionId || props.countLink?.draftPositionId)] as const
 
 watch([binScope, retryShortages], async ([[id, revision, , connected, inspecting]], _, onCleanup) => {
   let current = true
@@ -167,6 +167,7 @@ watch(binScope,
             <a class="count-link" :href="countPositionLink(location.id, layer.placementId)" :aria-label="'Count stock for ' + layer.purchaseReference + ' · ' + layer.deliveryReference">Count stock</a>
             <a class="count-link" :href="holdPositionLink(location.id, layer.placementId)" :aria-label="'Build holds for ' + layer.purchaseReference + ' · ' + layer.deliveryReference + ' · Position ID ' + layer.placementId">Build holds</a>
             <a class="count-link" :href="quarantineLink(location.id,layer.placementId)" :aria-label="'Quarantine for ' + layer.purchaseReference + ' · ' + layer.deliveryReference + ' · Position ID ' + layer.placementId">Quarantine</a>
+            <a class="count-link" :href="draftBackingLink(location.id,layer.placementId)" :aria-label="'Draft offer backing for ' + layer.purchaseReference + ' · ' + layer.deliveryReference + ' · Position ' + layer.placementId">Draft offer backing</a>
             <small v-if="fenced.has(layer.placementId)" class="warning">Open shortage · transfers and new offer backing are blocked.</small>
           </li>
         </ul>

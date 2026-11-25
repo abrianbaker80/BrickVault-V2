@@ -350,7 +350,15 @@ class Instance:
                         brickvault.recount_batches, brickvault.recount_results TO bv_api;
                 END IF;
                 IF (SELECT max(version) FROM brickvault.schema_version) >= 9 THEN
-                    GRANT INSERT ON brickvault.stock_quarantines, brickvault.stock_quarantine_releases TO bv_api;
+                    GRANT INSERT (id,command_id,purchase_id,position_id,offer_id,location_id,location_code,
+                        expected_purchase_revision,quantity,reason) ON brickvault.draft_backing_withdrawals TO bv_api;
+                END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 10 THEN
+                    GRANT INSERT (id,command_id,purchase_id,position_id,location_id,location_code,catalog_id,
+                        catalog_revision,expected_purchase_revision,quantity,reason) ON brickvault.stock_quarantines TO bv_api;
+                    GRANT INSERT (id,command_id,purchase_id,position_id,location_id,location_code,catalog_id,
+                        catalog_revision,expected_purchase_revision,quantity,reason,quarantine_id,inspection_result)
+                        ON brickvault.stock_quarantine_releases TO bv_api;
                 END IF;
             END $grants$;
             COMMIT;

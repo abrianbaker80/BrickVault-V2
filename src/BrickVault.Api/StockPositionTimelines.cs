@@ -77,6 +77,11 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
             FROM brickvault.stock_loss_postings l JOIN scope_positions s ON s.id=l.position_id
 
             UNION ALL
+            SELECT w.position_id,'offer-withdrawal',w.id,w.command_id,NULL,w.quantity,0,0,-w.quantity,
+                w.location_id,w.location_code,w.reason,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,w.offer_id,NULL
+            FROM brickvault.draft_backing_withdrawals w JOIN scope_positions s ON s.id=w.position_id
+
+            UNION ALL
             SELECT b.placement_id,'offer-backing',o.id,o.command_id,NULL,b.quantity,0,0,b.quantity,
                 p.location_id,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,o.id,NULL
             FROM brickvault.offer_backing b JOIN brickvault.offers o ON o.id=b.offer_id
@@ -89,7 +94,7 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
         )
         """;
 
-    public async Task<StockPositionTimeline> Read(Guid positionId, string? after, int limit, CancellationToken token, bool quarantine = false)
+    public async Task<StockPositionTimeline> Read(Guid positionId, string? after, int limit, CancellationToken token, bool withdrawals = false, bool quarantine = false)
     {
         if (limit is < 1 or > 100)
             throw new Fault(400, "invalid_timeline_page", "Choose a timeline page size between 1 and 100.");
@@ -105,9 +110,11 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
             throw new Fault(404, "unknown_position", "No stock position has that identifier.");
         var metadata = (await Rows(connection, tx, ScopedEvents(false) + "\n" + """
             SELECT transaction_timestamp(),EXISTS (SELECT 1 FROM events WHERE occurred_at IS NULL),
-                EXISTS (SELECT 1 FROM events WHERE kind IN ('quarantine','quarantine-release'))
-            """, r => (AsOf: r.GetDateTime(0), HasUndatedEvents: r.GetBoolean(1), HasQuarantine: r.GetBoolean(2)), token, positionId)).Single();
+                EXISTS (SELECT 1 FROM events WHERE kind IN ('quarantine','quarantine-release')),
+                EXISTS (SELECT 1 FROM events WHERE kind='offer-withdrawal')
+            """, r => (AsOf: r.GetDateTime(0), HasUndatedEvents: r.GetBoolean(1), HasQuarantine: r.GetBoolean(2), HasWithdrawals: r.GetBoolean(3)), token, positionId)).Single();
         if (!quarantine && metadata.HasQuarantine) throw StockQuarantines.Upgrade();
+        if (!withdrawals && metadata.HasWithdrawals) throw DraftBackingWithdrawals.Upgrade();
 
         var cursor = await Cursor(connection, tx, positionId, after, token);
         var rows = await ReadEvents(connection, tx, positionId, false, cursor?.Revision, cursor?.Kind, cursor?.Id,
@@ -166,7 +173,7 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
         var parts = after.Split('.');
         if (parts.Length != 3 || !Guid.TryParseExact(parts[0],"N",out var scope) || scope != positionId ||
             parts[1] is not ("putaway" or "transfer-in" or "transfer-out" or "count" or "hold" or "hold-release" or
-            "stock-loss" or "offer-backing" or "quarantine" or "quarantine-release") ||
+            "stock-loss" or "offer-backing" or "quarantine" or "quarantine-release" or "offer-withdrawal") ||
             !Guid.TryParseExact(parts[2],"N",out var id)) throw InvalidCursor();
         await using var anchor = Query(connection, tx, ScopedEvents(false) + "\n" + """
             SELECT purchase_revision FROM events WHERE kind=$2 AND id=$3

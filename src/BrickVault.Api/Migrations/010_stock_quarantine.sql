@@ -1,7 +1,7 @@
 ALTER TABLE brickvault.commands DROP CONSTRAINT commands_kind_check;
 ALTER TABLE brickvault.commands ADD CONSTRAINT commands_kind_check CHECK (kind IN
     ('catalog','location','purchase','delivery','putaway','offer','transfer','count','hold','hold-release',
-     'stock-loss','recount','quarantine','quarantine-release'));
+     'stock-loss','recount','offer-withdrawal','quarantine','quarantine-release'));
 
 CREATE TABLE brickvault.stock_quarantines (
     id uuid PRIMARY KEY,

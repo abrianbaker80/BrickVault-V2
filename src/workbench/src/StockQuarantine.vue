@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, shallowRef } from 'vue'
 import { api, ContractFailure, explain } from './api'
 import type { Location, QuarantineEvidence, QuarantineSnapshot, TransferControls } from './api'
-import { quarantineLink } from './countLinks'
+import { draftBackingLink, quarantineLink } from './countLinks'
 import { itemLabel } from './receiving'
 import { time } from './presentation'
 import { usePositionPage } from './usePositionPage'
@@ -160,7 +160,8 @@ async function save() {
           <nav v-if="confirmed.length>1 || stock.nextAfter" aria-label="Quarantine record pages">
             <button :disabled="loading || !connected || confirmed.length===1" @click="requested=confirmed.slice(0,-1)">Newer records</button>
             <button :disabled="loading || !connected || partial || !!error || !stock.nextAfter" @click="stock.nextAfter && (requested=[...confirmed,stock.nextAfter])">Older records</button></nav>
-          <nav aria-label="Position references"><a :href="'#inventory/'+positionId">Position timeline</a><a :href="'#inventory/lot/'+layer.deliveryId">Receipt lot</a></nav>
+          <nav aria-label="Position references"><a :href="draftBackingLink(location.id,positionId)">Review draft offer backing</a>
+            <a :href="'#inventory/'+positionId">Position timeline</a><a :href="'#inventory/lot/'+layer.deliveryId">Receipt lot</a></nav>
         </template>
         <form v-else @submit.prevent="save">
           <h3 ref="formTitle" tabindex="-1">{{ draft.record ? 'Inspect and release pieces' : 'Quarantine pieces in this bin' }}</h3>

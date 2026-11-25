@@ -77,6 +77,8 @@ The first receiving workflow covers split and mixed deliveries, actual-bin confi
 
 For I02 and I06, post-putaway quarantine records pieces that remain physically in a bin while unavailable for sale. An inspected release identifies the original quarantine record and the quantity cleared. I02 and I06 retain their other acceptance criteria. [Quarantine and inspection](https://github.com/abrianbaker80/BrickVault-V2/issues/33)
 
+For I07 and I08, an operator can withdraw a chosen quantity of draft backing at a specific receipt position. A zero-backed offer keeps its original identity and price. [Voluntary withdrawal](https://github.com/abrianbaker80/BrickVault-V2/issues/35)
+
 ## M4 · Required BrickLink admission, inbound, shadow and nonproduction outbound
 
 | ID | Scope | Status | Depends on | Capability | Evidence required |

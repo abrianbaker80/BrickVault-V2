@@ -3,6 +3,7 @@
 ## M3 receiving
 
 - Added quarantine and inspected release for pieces already in a bin. Workbench preserves their receipt cost and shows how many pieces remain available for a new offer, hold or transfer. [Quarantine and inspection](https://github.com/abrianbaker80/BrickVault-V2/issues/33)
+- Added voluntary withdrawal of backing from unpublished draft offers. Operators choose the receipt position, offer and quantity, and can reopen the withdrawal receipt after the offer reaches zero backing. [Draft offer backing](https://github.com/abrianbaker80/BrickVault-V2/issues/35)
 
 - Added receipt-lot history across bins. A transfer shows the units and offer backing moved, and a delivery's cost appears once. [Inventory workflow](https://github.com/abrianbaker80/BrickVault-V2/issues/31)
 
