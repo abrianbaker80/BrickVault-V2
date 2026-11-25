@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, shallowRef } from 'vue'
-import { api, ContractFailure } from './api'
+import { api, ContractFailure, explain } from './api'
 import type { Location, QuarantineEvidence, QuarantineSnapshot, TransferControls } from './api'
 import { quarantineLink } from './countLinks'
 import { itemLabel } from './receiving'
@@ -23,15 +23,17 @@ const { page, confirmed, requested, attempt, loading, partial, error, heading, r
 const stock = computed(() => page.value?.scope === 'position-quarantine' && page.value.complete ? page.value : undefined)
 const receipt = computed(() => page.value?.scope === 'quarantine-receipt' && page.value.complete ? page.value : undefined)
 const layer = computed(() => stock.value?.position.layer)
-const draft = shallowRef<{ stock: QuarantineSnapshot; record?: QuarantineSnapshot['quarantines'][number]; workspaceId: string }>()
+const draft = shallowRef<{ stock: QuarantineSnapshot; record?: QuarantineSnapshot['quarantines'][number]; originalReceipt?: QuarantineEvidence; workspaceId: string }>()
 const bin = ref('')
 const quantity = ref<number | ''>('')
 const reason = ref('')
 const identity = ref(false)
 const passed = ref(false)
 const saving = ref(false)
+const opening = ref(false)
+const originalError = ref('')
 const message = ref('')
-const ready = computed(() => Boolean(props.connected && props.controls.enabled && !loading.value && !error.value && !partial.value && stock.value && !saving.value))
+const ready = computed(() => Boolean(props.connected && props.controls.enabled && !loading.value && !error.value && !partial.value && stock.value && !saving.value && !opening.value))
 const stale = computed(() => {
   const old = draft.value, now = stock.value
   if (!old || !now) return false
@@ -50,7 +52,24 @@ onMounted(() => dialog.value?.showModal())
 async function edit(record?: QuarantineSnapshot['quarantines'][number]) {
   if (!stock.value || !ready.value || stock.value.hasOpenShortage ||
       (record ? !record.remainingQuantity || !layer.value?.currentCatalog.integrationEligible : !stock.value.availableToQuarantineQuantity)) return
-  draft.value = { stock:stock.value, record, workspaceId:props.controls.workspaceId }
+  const reviewed = stock.value, workspaceId = props.controls.workspaceId, issuingRoute = window.location.hash
+  let originalReceipt: QuarantineEvidence | undefined
+  originalError.value = ''
+  if (record) {
+    opening.value = true
+    try {
+      originalReceipt = await api.quarantineReceipt(props.location.id,props.positionId,{receiptId:record.id})
+      if (!originalReceipt.complete || originalReceipt.kind !== 'quarantine' || originalReceipt.purchaseId !== reviewed.position.layer.purchaseId ||
+          originalReceipt.catalogId !== reviewed.position.layer.catalogId || originalReceipt.quantity !== record.quantity ||
+          originalReceipt.reason !== record.reason) throw new ContractFailure()
+    } catch (failure) {
+      originalError.value = 'Could not verify the original quarantine receipt. ' + explain(failure)
+      emit('failure',failure)
+      return
+    } finally { opening.value = false }
+  }
+  if (!dialog.value?.isConnected || window.location.hash !== issuingRoute || !ready.value) return
+  draft.value = { stock:reviewed, record, originalReceipt, workspaceId }
   bin.value = ''; quantity.value = ''; reason.value = ''; identity.value = false; passed.value = false; message.value = ''
   await nextTick()
   formTitle.value?.focus()
@@ -119,12 +138,15 @@ async function save() {
         <dl class="details" aria-label="Current position quantities">
           <dt>Physical on hand</dt><dd>{{ stock.onHandQuantity }}</dd><dt>Quarantined in bin</dt><dd>{{ stock.quarantinedQuantity }}</dd>
           <dt>Reserved for builds</dt><dd>{{ stock.heldQuantity }}</dd><dt>Free</dt><dd>{{ stock.sellableQuantity }}</dd>
-          <dt>Backed by offers</dt><dd>{{ stock.offerBackedQuantity }}</dd><dt>Available to quarantine</dt><dd>{{ stock.availableToQuarantineQuantity }}</dd>
+          <dt>Backed by offers</dt><dd>{{ stock.offerBackedQuantity }}</dd><dt>Available to back a new offer</dt><dd>{{ layer.freeToBackQuantity }}</dd><dt>Available to quarantine</dt><dd>{{ stock.availableToQuarantineQuantity }}</dd>
         </dl>
+        <p v-if="layer.catalogRevision !== layer.currentCatalog.revision && !layer.freeToBackQuantity" class="warning">The recorded catalog revision differs from the current identity. This position cannot back a new offer.</p>
         <small>Read {{ time(stock.asOf) }} · Purchase revision {{ stock.purchaseRevision }}</small>
         <p v-if="stock.hasOpenShortage" class="warning">An open shortage blocks quarantine and release for this position.</p>
         <p v-if="!layer.currentCatalog.integrationEligible" class="warning">The current catalog identity needs confirmation before an inspection release.</p>
         <template v-if="!draft">
+          <p v-if="opening" role="status">Reading the original quarantine receipt…</p>
+          <p v-if="originalError" class="warning" role="alert">{{ originalError }} Select the record to retry.</p>
           <button ref="create" class="primary" :disabled="!ready || stock.hasOpenShortage || !stock.availableToQuarantineQuantity" @click="edit()">Quarantine pieces</button>
           <ul v-if="stock.quarantines.length" class="receipt-lines" aria-label="Quarantine records">
             <li v-for="q in stock.quarantines" :key="q.id"><strong>{{ q.reason }}</strong>
@@ -144,6 +166,11 @@ async function save() {
           <h3 ref="formTitle" tabindex="-1">{{ draft.record ? 'Inspect and release pieces' : 'Quarantine pieces in this bin' }}</h3>
           <p v-if="draft.record"><strong>{{ draft.record.reason }}</strong><small>Quarantine {{ draft.record.id }} · {{ draft.record.remainingQuantity }} available for inspection</small></p>
           <p v-else>Pieces stay in this bin and become unavailable for offers, builds and transfers.</p>
+          <section v-if="draft.originalReceipt" aria-label="Inspection identity">
+            <p><strong>Recorded at quarantine</strong></p>
+            <p>{{ itemLabel([draft.originalReceipt.recordedCatalog],layer.catalogId) }} · Revision {{ draft.originalReceipt.catalogRevision }}</p>
+            <p><strong>Current identity to inspect</strong></p><p>{{ itemLabel([layer.currentCatalog],layer.catalogId) }} · Revision {{ layer.currentCatalog.revision }}</p>
+          </section>
           <p v-if="stale" role="alert" class="warning">The stock or catalog changed. Cancel and review the position again.</p>
           <fieldset :disabled="!ready || stale">
             <label>Confirm physical bin code<input v-model="bin" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
