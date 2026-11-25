@@ -365,7 +365,7 @@ export const api = {
     if (result.location.id!==bin || result.positionId!==position || result.caseId!==caseId ||
         (selector && ('receiptId' in selector ? selector.receiptId!==result.id : selector.commandId!==result.commandId)) ||
         [opening,exact].some(o=>o.locationId!==bin || o.positionId!==position || o.purchaseId!==result.purchaseId) ||
-        opening.id===exact.id || opening.missingQuantity<=0 || exact.expectedPurchaseRevision<=opening.expectedPurchaseRevision ||
+        opening.id!==caseId || opening.id===exact.id || opening.missingQuantity<=0 || exact.expectedPurchaseRevision<=opening.expectedPurchaseRevision ||
         exact.missingQuantity!==0 || exact.unidentifiedSurplusQuantity!==0 || exact.countedQuantity!==result.ledgerQuantity ||
         exact.ledgerQuantity!==result.ledgerQuantity || result.quarantinedQuantity+result.heldQuantity+result.offerBackedQuantity>result.ledgerQuantity)
       throw new ContractFailure()
@@ -378,7 +378,8 @@ export const api = {
     const scoped = Boolean(query.positionId || query.commandId || query.observationId)
     const wrongPosition = (id: string) => scoped && id !== result.positionId
     if (withClosures && result.complete && (!result.closures || result.closures.some(c=>wrongPosition(c.positionId) ||
-        c.openingObservationId===c.recountObservationId) || ((query.observationId || query.commandId) && result.closures.length>1))) throw new ContractFailure()
+        c.openingObservationId!==c.caseId || c.openingObservationId===c.recountObservationId) ||
+        ((query.observationId || query.commandId) && result.closures.length>1))) throw new ContractFailure()
     if (result.location.id !== binId || scoped !== Boolean(result.positionId) || (query.positionId && wrongPosition(query.positionId)) ||
         result.observations.some(o => o.locationId !== binId || wrongPosition(o.positionId) ||
           (query.observationId && o.id !== query.observationId) || (query.commandId && o.commandId !== query.commandId)) ||

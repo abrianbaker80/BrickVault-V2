@@ -75,10 +75,14 @@ test('an operator closes an exact later recount, with retained commitments and r
     await route.fulfill({status:413,json:{code:'request_too_large',message:'Request size exceeds the limit.',correlationId:randomUUID()}})
   })
   const lookup=(u:URL)=>u.pathname.endsWith('/shortages/'+f.opening+'/closure') && u.searchParams.has('commandId')
-  for (const change of [{complete:false},{reason:'Other operator evidence'}]) {
+  for (const mismatch of ['partial', 'reason', 'opening observation']) {
     await page.route(lookup,async route=>{
       const response=await route.fetch()
-      await route.fulfill({response,json:{...await response.json(),...change}});await response.dispose()
+      const receipt=await response.json()
+      if (mismatch==='partial') receipt.complete=false
+      else if (mismatch==='reason') receipt.reason='Other operator evidence'
+      else receipt.openingObservation.id=randomUUID()
+      await route.fulfill({response,json:receipt});await response.dispose()
     },{times:1})
     await retry.click()
     await expect(page.getByRole('alert').filter({hasText:'Reconnect to verify'})).toBeVisible()
