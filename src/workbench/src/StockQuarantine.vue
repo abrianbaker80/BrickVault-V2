@@ -137,8 +137,8 @@ async function save() {
         </section>
         <dl class="details" aria-label="Current position quantities">
           <dt>Physical on hand</dt><dd>{{ stock.onHandQuantity }}</dd><dt>Quarantined in bin</dt><dd>{{ stock.quarantinedQuantity }}</dd>
-          <dt>Reserved for builds</dt><dd>{{ stock.heldQuantity }}</dd><dt>Free</dt><dd>{{ stock.sellableQuantity }}</dd>
-          <dt>Backed by offers</dt><dd>{{ stock.offerBackedQuantity }}</dd><dt>Available to back a new offer</dt><dd>{{ layer.freeToBackQuantity }}</dd><dt>Available to quarantine</dt><dd>{{ stock.availableToQuarantineQuantity }}</dd>
+          <dt>Reserved for builds</dt><dd>{{ stock.heldQuantity }}</dd><dt>Saleable stock</dt><dd>{{ stock.sellableQuantity }}</dd>
+          <dt>Allocated to draft offers</dt><dd>{{ stock.offerBackedQuantity }}</dd><dt>Available to back a new offer</dt><dd>{{ layer.freeToBackQuantity }}</dd><dt>Available to quarantine</dt><dd>{{ stock.availableToQuarantineQuantity }}</dd>
         </dl>
         <p v-if="layer.catalogRevision !== layer.currentCatalog.revision && !layer.freeToBackQuantity" class="warning">The recorded catalog revision differs from the current identity. This position cannot back a new offer.</p>
         <small>Read {{ time(stock.asOf) }} · Purchase revision {{ stock.purchaseRevision }}</small>
