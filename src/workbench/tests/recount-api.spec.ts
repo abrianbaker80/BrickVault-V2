@@ -54,16 +54,28 @@ test('recount snapshots cover every match and concurrent confirmations have one 
   expect(await replay.json()).toEqual(await saved[0].json())
   const countFields={purchaseId:f.paid.purchaseId,positionId:f.position,locationId:f.a.id,confirmedLocationCode:f.a.code,
     countedQuantity:6,reason:'Witness the queued position'}
+  for (const batch of receipts) {
+    expect(batch.rows.find(r=>r.target.positionId===f.position)?.taskState).toBe('pending')
+    expect(batch.rows.find(r=>r.target.positionId===missing)?.taskState).toBeNull()
+  }
   const observation=await f.write('receiving/counts',5,countFields)
-  for(const id of [firstBatch,secondBatch]) expect((await read(id)).rows.find(r=>r.target.positionId===f.position)?.observationId).toBe(observation)
+  for(const id of [firstBatch,secondBatch]) expect((await read(id)).rows.find(r=>r.target.positionId===f.position)).toMatchObject({observationId:observation,taskState:'witnessed'})
   const fresh=randomUUID()
   await post('previews',{...selection,previewId:fresh,positionIds:[f.position]})
   await post('batches',{commandId:randomUUID(),previewId:fresh})
   expect((await read(fresh)).rows[0].observationId).toBeNull()
+  const duplicate=randomUUID()
+  await post('previews',{...selection,previewId:duplicate,positionIds:[f.position]})
+  await post('batches',{commandId:randomUUID(),previewId:duplicate})
+  const queue = async ():Promise<Models['RecountQueuePage']> => (await page.request.get(root+'queue?limit=100')).json()
+  const before=await queue()
   await f.write('receiving/transfers',6,{purchaseId:f.paid.purchaseId,sourcePlacementId:f.position,sourceLocationId:f.a.id,
     confirmedSourceLocationCode:f.a.code,destinationLocationId:f.b.id,confirmedDestinationLocationCode:f.b.code,
     quantity:6,moveAllBacking:true,backing:[],reason:'Move the full queued position'})
-  const queue:Models['RecountQueuePage']=await (await page.request.get(root+'queue?limit=100')).json()
-  expect(queue.rows.find(q=>q.target.positionId===f.position)?.available).toBe(false)
-  expect((await read(fresh)).rows[0].observationId).toBeNull()
+  const after=await queue()
+  expect(after.total).toBe(before.total-1)
+  expect(after.rows.map(r=>r.target.positionId)).not.toContain(f.position)
+  expect((await read(fresh)).rows[0]).toMatchObject({outcome:'queued',taskState:'depleted',observationId:null})
+  expect((await read(duplicate)).rows[0]).toMatchObject({outcome:'already-queued',taskState:'depleted',observationId:null,queueBatchId:fresh})
+  expect((await read(firstBatch)).rows.find(r=>r.target.positionId===f.position)?.taskState).toBe('witnessed')
 })

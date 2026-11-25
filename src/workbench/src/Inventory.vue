@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, explain } from './api'
-import type { StockPage, StockQuery, Workspace } from './api'
+import type { StockPage, StockQuery, TransferControls, Workspace } from './api'
 import { label, time } from './presentation'
 import PositionInspector from './PositionInspector.vue'
 import ReceiptLotInspector from './ReceiptLotInspector.vue'
+import RecountPreview from './RecountPreview.vue'
+import RecountWork from './RecountWork.vue'
 
-const props = defineProps<{ workspace: Workspace; connected: boolean }>()
+const props = defineProps<{ workspace: Workspace; connected: boolean; controls: TransferControls; csrf: string }>()
 const emit = defineEmits<{ failure: [reason: unknown] }>()
 const search = ref<HTMLInputElement>()
 const host = ref<HTMLElement>()
@@ -22,7 +24,27 @@ const result = shallowRef<StockPage | null>(null)
 const error = ref('')
 const loading = ref(false)
 const lotRoute = () => location.hash.startsWith('#inventory/lot/') ? location.hash.slice('#inventory/lot/'.length).toLowerCase() : ''
-const routeId = () => location.hash.startsWith('#inventory/') && !location.hash.startsWith('#inventory/lot/')
+const recountRoute = () => {
+  const hash = location.hash
+  if (hash === '#inventory/recounts') return 'queue'
+  if (hash.startsWith('#inventory/recounts/')) return hash.slice('#inventory/recounts/'.length)
+  return ''
+}
+const recountView = ref(recountRoute())
+const checked = ref(new Set<string>())
+const outsidePage = computed(() => checked.value.size - (result.value?.rows.filter(r => checked.value.has(r.layer.placementId)).length ?? 0))
+const preview = shallowRef<{ selected: string[]; filter: StockQuery }>()
+const previewButton = ref<HTMLButtonElement>()
+function openPreview() {
+  if (!props.controls.enabled || !result.value?.complete || lastRead.value) return
+  preview.value = { selected:[...checked.value], filter:{...criteria.value} }
+}
+async function closePreview() {
+  preview.value = undefined
+  await nextTick()
+  previewButton.value?.focus()
+}
+const routeId = () => !recountRoute() && !location.hash.startsWith('#inventory/lot/') && location.hash.startsWith('#inventory/')
   ? location.hash.slice('#inventory/'.length).toLowerCase() : ''
 const selected = ref(routeId())
 const selectedLot = ref(lotRoute())
@@ -97,6 +119,8 @@ async function close() {
   else search.value?.focus()
 }
 function routeChanged() {
+  recountView.value = recountRoute()
+  preview.value = undefined
   selected.value = routeId()
   selectedLot.value = lotRoute()
   previousPosition.value = history.state?.timelineTo === selected.value ? history.state.timelineFrom : ''
@@ -133,6 +157,8 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
+  <RecountWork v-if="recountView" :key="recountView" :route="recountView" :as-of="workspace.asOf" :state="connected ? 'ready' : 'unavailable'" @failure="emit('failure',$event)" />
+  <template v-else>
   <div class="metrics inventory-metrics" role="group" :aria-label="lastRead ? 'Last received matching totals' : 'Matching inventory totals'">
     <div><span>Matching positions</span><strong>{{ totalsKnown ? result?.matchingPositions : '—' }}</strong></div>
     <div><span>Units in matching positions</span><strong>{{ totalsKnown ? result?.matchingUnits : '—' }}</strong></div>
@@ -158,11 +184,19 @@ onBeforeUnmount(() => {
       </p>
       <p v-else-if="loading" role="status" class="inventory-note">{{ result ? 'Refreshing stock positions…' : 'Reading stock positions…' }}</p>
       <p v-if="result && !result.complete" role="status" class="warning inventory-note">Partial stock read. Matching totals are unavailable.</p>
+      <div class="recount-actions">
+        <a href="#inventory/recounts">Recount queue</a>
+        <button ref="previewButton" :disabled="lastRead || !result?.complete || !controls.enabled || (!checked.size && !result.matchingPositions)" @click="openPreview">Preview recount</button>
+        <span v-if="checked.size" aria-live="polite">{{ checked.size }} selected · {{ outsidePage }} outside this page</span>
+        <button v-if="checked.size" @click="checked.clear()">Clear selection</button>
+      </div>
       <div v-if="result?.rows.length" class="table-wrap">
         <table class="position-table"><caption class="sr">Stock positions</caption>
           <thead><tr><th scope="col">Catalog item</th><th scope="col" class="bin-col">Bin</th><th scope="col" class="receipt-col">Receipt</th><th scope="col">Stock</th></tr></thead>
           <tbody><tr v-for="{ layer, location } in result.rows" :key="layer.placementId" :class="{ inspecting: layer.placementId === selected }">
-            <td><button class="row-link" :data-position="layer.placementId"
+            <td><label class="recount-check"><input type="checkbox" :checked="checked.has(layer.placementId)" :disabled="lastRead || !result.complete"
+              :aria-label="'Select position '+layer.placementId+' for recount · '+layer.currentCatalog.name+' in '+location.code" @change="checked.has(layer.placementId) ? checked.delete(layer.placementId) : checked.add(layer.placementId)" /></label>
+              <button class="row-link" :data-position="layer.placementId"
               :aria-label="'Inspect ' + layer.currentCatalog.name + ' in ' + location.code + ', position ' + layer.placementId" :aria-current="layer.placementId === selected || undefined"
               @click="inspect(layer.placementId)"><strong>{{ layer.currentCatalog.name }}</strong>
               <small>{{ label(layer.currentCatalog.itemType) }} · {{ layer.currentCatalog.itemNumber }}{{ layer.currentCatalog.variant ? ' · ' + layer.currentCatalog.variant : '' }}</small></button>
@@ -198,8 +232,15 @@ onBeforeUnmount(() => {
       </template>
     </component>
   </div>
+  <RecountPreview v-if="preview" :selected="preview.selected" :filter="preview.filter" :csrf="csrf" :controls="controls" :connected="connected"
+    @close="closePreview" @failure="emit('failure',$event)" />
+  </template>
 </template>
 <style scoped>
+.recount-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:4px 16px 12px; font-size:13px }
+.recount-actions a { color:#355340 }
+.recount-check { display:inline-block; vertical-align:top }
+.recount-check input { width:16px; height:16px; margin:8px 4px 4px 0 }
 .previous-position a { color: #355340 }
 .previous-position { margin: 8px 16px; font-size: 13px }
 .inventory-metrics { grid-template-columns: repeat(2,minmax(0,1fr)) }

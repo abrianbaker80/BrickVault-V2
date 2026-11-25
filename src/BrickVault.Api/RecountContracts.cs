@@ -29,7 +29,7 @@ internal sealed record RecountTarget(Guid PositionId, Guid? PurchaseId, string? 
     string? ItemName, Guid? LocationId, string? LocationCode, int? PurchaseRevision, int? CatalogRevision, int? LocationRevision, int? Quantity);
 internal sealed record RecountPreviewPage(string Scope, Guid PreviewId, string Mode, string? Q, string? ItemType, Guid? LocationId,
     DateTime AsOf, bool Complete, long Total, Guid? NextAfter, List<RecountTarget> Rows);
-internal sealed record RecountResult(RecountTarget Target, string Outcome, Guid? QueueBatchId, Guid? ObservationId);
+internal sealed record RecountResult(RecountTarget Target, string Outcome, Guid? QueueBatchId, Guid? ObservationId, string? TaskState);
 internal sealed record RecountBatchPage(string Scope, Guid BatchId, Guid CommandId, Guid CorrelationId, DateTime AsOf,
     bool Complete, long Total, long Queued, long Changed, long AlreadyQueued, long Unavailable, Guid? NextAfter, List<RecountResult> Rows);
 internal sealed record RecountQueueEntry(Guid BatchId, RecountTarget Target, bool Available);

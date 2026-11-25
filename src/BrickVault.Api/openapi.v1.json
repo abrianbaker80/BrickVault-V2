@@ -6695,6 +6695,10 @@
       "RecountResult": {
         "type": "object",
         "properties": {
+          "taskState": {
+            "type": ["string", "null"],
+            "enum": ["pending", "witnessed", "depleted", null]
+          },
           "target": {
             "$ref": "#/components/schemas/RecountTarget"
           },
@@ -6723,6 +6727,7 @@
           }
         },
         "required": [
+          "taskState",
           "target",
           "outcome",
           "queueBatchId",
