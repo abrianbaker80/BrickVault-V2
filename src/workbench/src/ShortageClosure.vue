@@ -134,7 +134,7 @@ async function submit() {
             <dt>Ledger quantity</dt><dd>{{ review.ledgerQuantity }}</dd><dt>Latest witnessed count</dt><dd>{{ review.latestObservation.countedQuantity }}</dd>
             <dt>In quarantine</dt><dd>{{ review.quarantinedQuantity }}</dd><dt>Held for builds</dt><dd>{{ review.protectedProjectQuantity }}</dd>
             <dt>Backing offers</dt><dd>{{ review.offerBackedQuantity }}</dd><dt>Original delivery cost</dt><dd>{{ money(review.receipt.itemCostMinor,review.receipt.currency) }}</dd></dl>
-          <nav><a :href="countReceiptLink(location.id,openingId)">Opening count receipt</a><a :href="countReceiptLink(location.id,route.id)">Witnessed recount receipt</a></nav>
+          <nav aria-label="Count evidence"><a :href="countReceiptLink(location.id,openingId)">Opening count receipt</a><a :href="countReceiptLink(location.id,route.id)">Witnessed recount receipt</a></nav>
           <form @submit.prevent="submit"><fieldset :disabled="!ready">
             <label>Confirm physical bin code<input v-model="bin" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
             <small v-if="bin && bin!==review.location.code" class="warning">Enter the code on the registered bin.</small>
@@ -153,7 +153,7 @@ async function submit() {
           <dt>Held for builds</dt><dd>{{ receipt.heldQuantity }}</dd><dt>Backing offers</dt><dd>{{ receipt.offerBackedQuantity }}</dd>
           <dt>Original delivery cost</dt><dd>{{ money(receipt.receipt.itemCostMinor,receipt.receipt.currency) }}</dd></dl>
         <p>The closure recorded zero stock loss. Quantities, commitments and cost were preserved.</p>
-        <nav><a :href="countReceiptLink(location.id,receipt.openingObservation.id)">Opening count receipt</a>
+        <nav aria-label="Closure receipt navigation"><a :href="countReceiptLink(location.id,receipt.openingObservation.id)">Opening count receipt</a>
           <a :href="countReceiptLink(location.id,receipt.recountObservation.id)">Witnessed recount receipt</a>
           <a :href="countPositionLink(location.id,route.position)">Position count history</a>
           <a :href="'#inventory/'+route.position">Position timeline</a><a :href="'#inventory/lot/'+receipt.receipt.deliveryId">Receipt lot</a></nav>
@@ -168,5 +168,8 @@ async function submit() {
 .closure-body {padding:16px;overflow-wrap:anywhere}.closure-body :is(p,dl){margin:0}
 .closure-body small {display:block;color:var(--muted)}.closure-body a{color:#355340}
 fieldset {padding:0;border:0;min-width:0}fieldset .check {display:flex;gap:8px;align-items:baseline}.check input{width:16px;flex:0 0 auto}
-nav {display:flex;gap:10px;flex-wrap:wrap}form button{justify-self:end}
+nav {grid-area:auto;display:flex;gap:4px 12px;flex-wrap:wrap;padding:0;border:0}
+nav a {display:inline-block;padding:4px 0;color:#355340;text-decoration:underline;text-underline-offset:2px}
+nav a:hover {background:transparent;color:#203526}
+form button{justify-self:end}
 </style>
