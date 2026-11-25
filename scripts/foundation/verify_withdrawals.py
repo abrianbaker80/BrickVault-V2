@@ -1,5 +1,7 @@
 """Withdraw backing from one local draft offer and recover its original position receipt."""
 
+import re
+from urllib.parse import urlencode
 from uuid import uuid4
 
 from verify_receipt_lots import read_lot
@@ -54,6 +56,7 @@ def qualify_withdrawals(client, catalog):
 
 
 def verify_recovered_withdrawals(client, evidence):
+    contract = client.call("contract")
     for purchase, position, delivery, cost, chosen, other, first, partial, last, full in evidence:
         assert client.call(WITHDRAW, "POST", first) == partial
         assert client.call(WITHDRAW, "POST", last) == full
@@ -67,6 +70,24 @@ def verify_recovered_withdrawals(client, evidence):
         layer, = positions
         assert (layer["placementId"], layer["quantity"], layer["freeToBackQuantity"]) == (position, 8, 5)
         timeline = client.call(f"inventory/positions/{position}/timeline?withdrawals=true")
+        for route, identifier, request_key, result_key, shape, limit in (
+            ("positions/{positionId}/timeline", position, "after", "nextAfter", "StockPositionTimeline", "limit"),
+            ("receipt-lots/{deliveryId}", delivery, "eventAfter", "nextEventAfter", "StockReceiptLot", "eventLimit"),
+        ):
+            params = contract["paths"]["/api/v1/inventory/" + route]["get"]["parameters"]
+            accepted = next(p["schema"] for p in params if p["name"] == request_key)
+            returned = contract["components"]["schemas"][shape]["properties"][result_key]
+            assert accepted["maxLength"] == returned["maxLength"]
+            assert accepted.get("pattern") == returned.get("pattern")
+            url = "inventory/" + route.format(positionId=identifier, deliveryId=identifier)
+            query = {limit: 1, "withdrawals": "true"}
+            page = client.call(url + "?" + urlencode(query))
+            cursor = page[result_key]
+            assert "offer-withdrawal" in cursor and len(cursor) <= accepted["maxLength"]
+            if "pattern" in accepted:
+                assert re.fullmatch(accepted["pattern"], cursor)
+            following = client.call(url + "?" + urlencode({**query, request_key: cursor}))
+            assert following["events"] and following["events"][0] != page["events"][0]
         backing = f"inventory/positions/{position}/draft-backing"
         current = client.call(backing)
         assert current["complete"] and current["purchaseRevision"] == full["revision"]
