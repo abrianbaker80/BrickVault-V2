@@ -110,7 +110,7 @@ public sealed class DraftBackingWithdrawalTests
              evidence.PriorTotalOfferBackedQuantity, evidence.RemainingTotalOfferBackedQuantity, evidence.UnitPriceMinor, evidence.Currency));
         Assert.Equal("unknown_draft_backing_withdrawal",
             await Reject(() => drafts.Evidence(sibling.EntityId, null, withdrawal.CommandId, token)));
-        var legacy = Assert.Single((await receiving.LossSnapshot(token)).Purchases, p => p.Id == purchase.EntityId);
+        var legacy = Assert.Single((await receiving.LossSnapshot(token, recoveries: true)).Purchases, p => p.Id == purchase.EntityId);
         Assert.Equal((12, 2, 10, 5, 5), (legacy.Balances.PhysicalOnHand, legacy.Balances.Reserved,
             legacy.Balances.Free, legacy.Balances.BackedQuantity, legacy.Balances.WithheldQuantity));
         Assert.Equal("draft_backing_client_upgrade_required", await Reject(() => timelines.Read(origin.EntityId, null, 25, token)));
@@ -187,7 +187,7 @@ public sealed class DraftBackingWithdrawalTests
             (evt.Id, evt.OfferId, evt.Kind, evt.PhysicalDelta, evt.ReservedDelta, evt.OfferBackedDelta));
         Assert.Equal("stock-loss", Assert.Single((await timelines.Read(origin.EntityId, timeline.NextAfter, 1, token, true)).Events).Kind);
         var empty = await Save(Prepare(lastAtOrigin.Revision, sibling.EntityId, firstOffer.EntityId, b));
-        var fullyWithdrawn = Assert.Single((await receiving.LossSnapshot(token)).Purchases, p => p.Id == purchase.EntityId);
+        var fullyWithdrawn = Assert.Single((await receiving.LossSnapshot(token, recoveries: true)).Purchases, p => p.Id == purchase.EntityId);
         var retained = Assert.Single(fullyWithdrawn.Offers, x => x.Id == firstOffer.EntityId);
         Assert.Equal((0, 249, "USD", 0), (retained.BackedQuantity, retained.UnitPriceMinor, retained.Currency, retained.PublishedQuantity));
         Assert.Empty(retained.Backing);
