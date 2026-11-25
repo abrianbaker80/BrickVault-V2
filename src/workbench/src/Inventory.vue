@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, explain } from './api'
-import type { StockPage, StockQuery, Workspace } from './api'
+import type { StockPage, StockQuery, TransferControls, Workspace } from './api'
 import { label, time } from './presentation'
 import PositionInspector from './PositionInspector.vue'
+import ReceiptLotInspector from './ReceiptLotInspector.vue'
+import RecountPreview from './RecountPreview.vue'
+import RecountWork from './RecountWork.vue'
 
-const props = defineProps<{ workspace: Workspace; connected: boolean }>()
+const props = defineProps<{ workspace: Workspace; connected: boolean; controls: TransferControls; csrf: string }>()
 const emit = defineEmits<{ failure: [reason: unknown] }>()
 const search = ref<HTMLInputElement>()
 const host = ref<HTMLElement>()
@@ -20,10 +23,40 @@ const after = computed(() => starts.value[starts.value.length - 1])
 const result = shallowRef<StockPage | null>(null)
 const error = ref('')
 const loading = ref(false)
-const routeId = () => location.hash.startsWith('#inventory/') ? location.hash.slice('#inventory/'.length).toLowerCase() : ''
+const lotRoute = () => location.hash.startsWith('#inventory/lot/') ? location.hash.slice('#inventory/lot/'.length).toLowerCase() : ''
+const recountRoute = () => {
+  const hash = location.hash
+  if (hash === '#inventory/recounts') return 'queue'
+  if (hash.startsWith('#inventory/recounts/')) return hash.slice('#inventory/recounts/'.length).toLowerCase()
+  return ''
+}
+const recountView = ref(recountRoute())
+const checked = ref(new Set<string>())
+const outsidePage = computed(() => checked.value.size - (result.value?.rows.filter(r => checked.value.has(r.layer.placementId)).length ?? 0))
+const preview = shallowRef<{ selected: string[]; filter: StockQuery; route: string }>()
+const previewButton = ref<HTMLButtonElement>()
+function openPreview() {
+  if (!props.controls.enabled || !result.value?.complete || lastRead.value) return
+  preview.value = { selected:[...checked.value], filter:{...criteria.value}, route:location.hash }
+}
+async function closePreview() {
+  const issuingRoute = preview.value?.route
+  preview.value = undefined
+  await nextTick()
+  if (location.hash !== issuingRoute || document.querySelector('dialog[open]')) return
+  const opener = previewButton.value
+  if (opener && !opener.disabled) opener.focus()
+  else search.value?.focus()
+}
+const routeId = () => !recountRoute() && !location.hash.startsWith('#inventory/lot/') && location.hash.startsWith('#inventory/')
+  ? location.hash.slice('#inventory/'.length).toLowerCase() : ''
 const selected = ref(routeId())
+const selectedLot = ref(lotRoute())
+const inspectorOpen = computed(() => Boolean(selected.value || selectedLot.value))
 const historyView = ref<'all' | 'transfers'>('all')
 const previousPosition = ref<string>(history.state?.timelineTo === selected.value ? history.state.timelineFrom : '')
+const lotFrom = ref<string>(history.state?.lotTo === selectedLot.value ? history.state.lotFrom : '')
+const positionFromLot = ref<string>(history.state?.lotPosition === selected.value ? history.state.returnLot : '')
 const filters = computed(() => Boolean(criteria.value.q || criteria.value.itemType || criteria.value.locationId))
 const totalsKnown = computed(() => result.value?.complete === true)
 const lastRead = computed(() => !props.connected || loading.value || Boolean(error.value))
@@ -60,7 +93,9 @@ watch(() => [criteria.value, after.value, props.workspace.asOf, props.connected]
 function inspect(id: string) {
   selected.value = id
   previousPosition.value = ''
-  history.replaceState({ ...history.state, timelineFrom: '', timelineTo: '' }, '', '#inventory/' + id)
+  selectedLot.value = ''
+  positionFromLot.value = ''
+  history.replaceState({ ...history.state, timelineFrom: '', timelineTo: '', lotPosition: '', returnLot: '' }, '', '#inventory/' + id)
 }
 function inspectRelated(id: string) {
   const from = selected.value
@@ -68,9 +103,19 @@ function inspectRelated(id: string) {
   previousPosition.value = from
   selected.value = id
 }
+function inspectLot(id: string) {
+  history.pushState({ ...history.state, lotFrom: selected.value, lotTo: id }, '', '#inventory/lot/' + id)
+  routeChanged()
+}
+function inspectFromLot(id: string) {
+  history.pushState({ ...history.state, timelineFrom: '', timelineTo: '', lotPosition: id, returnLot: selectedLot.value },
+    '', '#inventory/' + id)
+  routeChanged()
+}
 async function close() {
-  const id = selected.value
+  const id = selected.value || lotFrom.value
   selected.value = ''
+  selectedLot.value = ''
   history.replaceState(history.state, '', '#inventory')
   await nextTick()
   const button = host.value?.querySelector<HTMLButtonElement>('[data-position="' + CSS.escape(id) + '"]')
@@ -78,8 +123,13 @@ async function close() {
   else search.value?.focus()
 }
 function routeChanged() {
+  recountView.value = recountRoute()
+  preview.value = undefined
   selected.value = routeId()
+  selectedLot.value = lotRoute()
   previousPosition.value = history.state?.timelineTo === selected.value ? history.state.timelineFrom : ''
+  lotFrom.value = history.state?.lotTo === selectedLot.value ? history.state.lotFrom : ''
+  positionFromLot.value = history.state?.lotPosition === selected.value ? history.state.returnLot : ''
 }
 function keyboard(event: KeyboardEvent) {
   if (event.key === '/' && !event.ctrlKey && !event.altKey && !event.metaKey &&
@@ -88,19 +138,21 @@ function keyboard(event: KeyboardEvent) {
     event.preventDefault(); search.value?.focus()
   }
 }
-watch([inspector, selected], async () => {
+watch([inspector, selected, selectedLot], async () => {
   await nextTick()
   if (inspector.value instanceof HTMLDialogElement && !inspector.value.open) inspector.value.showModal()
   else inspector.value?.querySelector<HTMLButtonElement>('button')?.focus()
 }, { flush: 'post' })
+watch(host, element => {
+  observer?.disconnect()
+  if (!element) return
+  compact.value = element.clientWidth < 920
+  observer = new ResizeObserver(([entry]) => { compact.value = entry.contentRect.width < 920 })
+  observer.observe(element)
+}, { flush: 'post' })
 onMounted(() => {
   window.addEventListener('hashchange', routeChanged)
   window.addEventListener('keydown', keyboard)
-  if (host.value) {
-    compact.value = host.value.clientWidth < 920
-    observer = new ResizeObserver(([entry]) => { compact.value = entry.contentRect.width < 920 })
-    observer.observe(host.value)
-  }
 })
 onBeforeUnmount(() => {
   observer?.disconnect()
@@ -109,11 +161,13 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
+  <RecountWork v-if="recountView" :key="recountView" :route="recountView" :as-of="workspace.asOf" :state="connected ? 'ready' : 'unavailable'" @failure="emit('failure',$event)" />
+  <template v-else>
   <div class="metrics inventory-metrics" role="group" :aria-label="lastRead ? 'Last received matching totals' : 'Matching inventory totals'">
     <div><span>Matching positions</span><strong>{{ totalsKnown ? result?.matchingPositions : '—' }}</strong></div>
     <div><span>Units in matching positions</span><strong>{{ totalsKnown ? result?.matchingUnits : '—' }}</strong></div>
   </div>
-  <div ref="host" class="register-workspace" :class="{ docked: selected && !compact }">
+  <div ref="host" class="register-workspace" :class="{ docked: inspectorOpen && !compact }">
     <section class="panel inventory-register" role="region" aria-label="Stock register">
       <header class="panel-head"><h2>Stock register</h2>
         <span v-if="result" class="count">Stock read {{ time(result.asOf) }}</span></header>
@@ -134,11 +188,19 @@ onBeforeUnmount(() => {
       </p>
       <p v-else-if="loading" role="status" class="inventory-note">{{ result ? 'Refreshing stock positions…' : 'Reading stock positions…' }}</p>
       <p v-if="result && !result.complete" role="status" class="warning inventory-note">Partial stock read. Matching totals are unavailable.</p>
+      <div class="recount-actions">
+        <a href="#inventory/recounts">Recount queue</a>
+        <button ref="previewButton" :disabled="lastRead || !result?.complete || !controls.enabled || (!checked.size && !result.matchingPositions)" @click="openPreview">Preview recount</button>
+        <span v-if="checked.size" aria-live="polite">{{ checked.size }} selected · {{ outsidePage }} outside this page</span>
+        <button v-if="checked.size" @click="checked.clear()">Clear selection</button>
+      </div>
       <div v-if="result?.rows.length" class="table-wrap">
         <table class="position-table"><caption class="sr">Stock positions</caption>
           <thead><tr><th scope="col">Catalog item</th><th scope="col" class="bin-col">Bin</th><th scope="col" class="receipt-col">Receipt</th><th scope="col">Stock</th></tr></thead>
           <tbody><tr v-for="{ layer, location } in result.rows" :key="layer.placementId" :class="{ inspecting: layer.placementId === selected }">
-            <td><button class="row-link" :data-position="layer.placementId"
+            <td><label class="recount-check"><input type="checkbox" :checked="checked.has(layer.placementId)" :disabled="lastRead || !result.complete"
+              :aria-label="'Select position '+layer.placementId+' for recount · '+layer.currentCatalog.name+' in '+location.code" @change="checked.has(layer.placementId) ? checked.delete(layer.placementId) : checked.add(layer.placementId)" /></label>
+              <button class="row-link" :data-position="layer.placementId"
               :aria-label="'Inspect ' + layer.currentCatalog.name + ' in ' + location.code + ', position ' + layer.placementId" :aria-current="layer.placementId === selected || undefined"
               @click="inspect(layer.placementId)"><strong>{{ layer.currentCatalog.name }}</strong>
               <small>{{ label(layer.currentCatalog.itemType) }} · {{ layer.currentCatalog.itemNumber }}{{ layer.currentCatalog.variant ? ' · ' + layer.currentCatalog.variant : '' }}</small></button>
@@ -158,15 +220,31 @@ onBeforeUnmount(() => {
         <button :disabled="!connected || loading || !!error || !result?.complete || !result.nextAfter" @click="result?.nextAfter && starts.push(result.nextAfter)">Next</button>
       </div>
     </section>
-    <component v-if="selected" :is="compact ? 'dialog' : 'aside'" ref="inspector" class="panel inspector"
+    <component v-if="inspectorOpen" :is="compact ? 'dialog' : 'aside'" ref="inspector" class="panel inspector"
       aria-labelledby="position-title" @cancel.prevent="close" @keydown.esc.prevent="close">
-      <header class="panel-head"><h2 id="position-title">Position inspector</h2><button class="close" aria-label="Close position inspector" @click="close">×</button></header>
-      <p class="previous-position" v-if="previousPosition"><a :href="'#inventory/' + previousPosition">Return to previous position timeline</a></p>
-      <PositionInspector :history-view="historyView" @view="historyView = $event" @related="inspectRelated" :key="selected" :id="selected" :as-of="workspace.asOf" :connected="connected" @failure="emit('failure', $event)" @inspect="inspect" />
+      <header class="panel-head"><h2 id="position-title">{{ selectedLot ? 'Receipt lot inspector' : 'Position inspector' }}</h2>
+        <button class="close" :aria-label="selectedLot ? 'Close receipt lot inspector' : 'Close position inspector'" @click="close">×</button></header>
+      <template v-if="selectedLot">
+        <p v-if="lotFrom" class="previous-position"><a :href="'#inventory/' + lotFrom">Return to opening position</a></p>
+        <ReceiptLotInspector :key="selectedLot" :id="selectedLot" :as-of="workspace.asOf" :connected="connected"
+          @failure="emit('failure', $event)" @inspect="inspectFromLot" />
+      </template>
+      <template v-else>
+        <p class="previous-position" v-if="previousPosition"><a :href="'#inventory/' + previousPosition">Return to previous position timeline</a></p>
+        <p class="previous-position" v-if="positionFromLot"><a :href="'#inventory/lot/' + positionFromLot">Return to receipt lot</a></p>
+        <PositionInspector :history-view="historyView" @view="historyView = $event" @related="inspectRelated" :key="selected" :id="selected" :as-of="workspace.asOf" :connected="connected" @failure="emit('failure', $event)" @inspect="inspect" @lot="inspectLot" />
+      </template>
     </component>
   </div>
+  <RecountPreview v-if="preview" :selected="preview.selected" :filter="preview.filter" :csrf="csrf" :controls="controls" :connected="connected"
+    @close="closePreview" @failure="emit('failure',$event)" />
+  </template>
 </template>
 <style scoped>
+.recount-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:4px 16px 12px; font-size:13px }
+.recount-actions a { color:#355340 }
+.recount-check { display:inline-block; vertical-align:top }
+.recount-check input { width:16px; height:16px; margin:8px 4px 4px 0 }
 .previous-position a { color: #355340 }
 .previous-position { margin: 8px 16px; font-size: 13px }
 .inventory-metrics { grid-template-columns: repeat(2,minmax(0,1fr)) }

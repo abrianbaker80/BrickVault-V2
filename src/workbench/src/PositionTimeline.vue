@@ -8,7 +8,7 @@ import { time } from './presentation'
 import { usePositionPage, type PositionReadState } from './usePositionPage'
 
 const props = defineProps<{ id: string; asOf: string; state: PositionReadState }>()
-const emit = defineEmits<{ failure: [reason: unknown]; related: [id: string]; inspect: [id: string] }>()
+const emit = defineEmits<{ failure: [reason: unknown]; related: [id: string]; inspect: [id: string]; lot: [id: string] }>()
 const missing = ref(false)
 const { page, confirmed, requested, attempt, loading, partial, error, heading, retry } =
   usePositionPage<PositionTimelinePage>(props, (after, previous) => {
@@ -32,7 +32,7 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
     {{ page?.complete ? 'Showing balances and activity from the last confirmed timeline read.' :
       loading ? 'Reading position balances and activity…' : 'Confirmed position balances are unavailable.' }}
   </p>
-  <StockPositionDetails v-if="page?.complete" :record="page.position" :as-of="page.asOf" @inspect="emit('inspect', $event)" />
+  <StockPositionDetails v-if="page?.complete" :record="page.position" :as-of="page.asOf" @inspect="emit('inspect', $event)" @lot="emit('lot', $event)" />
   <section class="timeline" role="region" aria-label="Position timeline">
     <h3 ref="heading" tabindex="-1">Position timeline</h3>
     <p v-if="error || state === 'unavailable'" class="warning" role="status">

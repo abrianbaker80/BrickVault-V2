@@ -24,6 +24,7 @@ public sealed class StockPositionTimelineTests
         var holds = new BuildHolds(db);
         var losses = new StockLosses(db);
         var timelines = new StockPositionTimelines(db);
+        var lots = new StockReceiptLots(db);
         var stock = new StockRegister(db);
         var tag = Guid.NewGuid().ToString("N")[..12].ToUpperInvariant();
         var catalog = await references.Save(new CatalogCommand
@@ -43,12 +44,12 @@ public sealed class StockPositionTimelineTests
         var purchase = await receiving.Save(new PurchaseCommand
         {
             CommandId = Guid.NewGuid(), ExpectedRevision = 0, Reference = "TIMELINE-" + tag, Source = "Fictional purchase",
-            Currency = "USD", OrderedQuantity = 7, PendingChargeMinor = null
+            Currency = "USD", OrderedQuantity = 12, PendingChargeMinor = null
         }, Guid.NewGuid(), token);
         var delivery = await receiving.Save(new DeliveryCommand
         {
             CommandId = Guid.NewGuid(), ExpectedRevision = purchase.Revision, PurchaseId = purchase.EntityId,
-            Reference = "Fixture carton", Quantity = 7, CatalogId = catalog.EntityId, ItemCostMinor = 3
+            Reference = "Fixture carton", Quantity = 9, CatalogId = catalog.EntityId, ItemCostMinor = 3
         }, Guid.NewGuid(), token);
         var placed = await receiving.Save(new PutawayCommand
         {
@@ -187,6 +188,9 @@ public sealed class StockPositionTimelineTests
         Assert.Equal(bCode, events[0].RelatedLocationCode);
         Assert.Equal(2, (await stock.History(placed.EntityId, null, 25, token)).Rows.Count);
         Assert.Equal(full.Position, Assert.Single((await stock.Search(null, null, null, placed.EntityId, null, 25, token)).Rows));
+        var heldPosition = await stock.Search(held.EntityId.ToString(), null, a.EntityId, null, null, 25, token);
+        Assert.Equal(full.Position, Assert.Single(heldPosition.Rows));
+        Assert.Equal(0, heldPosition.MatchingUnits);
 
         async Task<string> Reject(Func<Task> read) => (await Assert.ThrowsAsync<Fault>(read)).Code;
         Assert.Equal("invalid_timeline_cursor", await Reject(() => timelines.Read(lastMove.EntityId, one.NextAfter, 25, token)));
@@ -196,5 +200,75 @@ public sealed class StockPositionTimelineTests
             $"{firstMove.EntityId:N}.stock-loss.{loss.EntityId:N}", 25, token)));
         Assert.Equal("invalid_timeline_page", await Reject(() => timelines.Read(placed.EntityId, null, 101, token)));
         Assert.Equal("unknown_position", await Reject(() => timelines.Read(Guid.NewGuid(), null, 25, token)));
+
+        var originalLot = await lots.Read(delivery.EntityId, null, null, 1, 1, token);
+        var independent = await receiving.Save(new PutawayCommand
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = lastMove.Revision, PurchaseId = purchase.EntityId,
+            DeliveryId = delivery.EntityId, CatalogId = catalog.EntityId, LocationId = a.EntityId,
+            ConfirmedLocationCode = newCode, Quantity = 1
+        }, Guid.NewGuid(), token);
+        var siblingDelivery = await receiving.Save(new DeliveryCommand
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = independent.Revision, PurchaseId = purchase.EntityId,
+            Reference = "Different receipt layer", Quantity = 3, CatalogId = catalog.EntityId, ItemCostMinor = null
+        }, Guid.NewGuid(), token);
+        var siblingPlacement = await receiving.Save(new PutawayCommand
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = siblingDelivery.Revision, PurchaseId = purchase.EntityId,
+            DeliveryId = siblingDelivery.EntityId, CatalogId = catalog.EntityId, LocationId = a.EntityId,
+            ConfirmedLocationCode = newCode, Quantity = 1
+        }, Guid.NewGuid(), token);
+        var shared = await receiving.Save(new OfferCommand
+        {
+            CommandId = Guid.NewGuid(), ExpectedRevision = siblingPlacement.Revision, PurchaseId = purchase.EntityId,
+            CatalogId = catalog.EntityId, UnitPriceMinor = 200, Backing = [new(firstMove.EntityId, 1), new(independent.EntityId, 1)]
+        }, Guid.NewGuid(), token);
+        Assert.Equal("stale_lot_page", await Reject(() => lots.Read(delivery.EntityId, originalLot.NextPositionAfter,
+            originalLot.NextEventAfter, 1, 1, token)));
+        var lot = await lots.Read(delivery.EntityId, null, null, 25, 25, token);
+        Assert.Equal((9, 1, 5, 6, 3, 4, 5, 0, 0), (lot.ReceivedQuantity, lot.UnplacedQuantity,
+            lot.PositionedQuantity, lot.CurrentOnHandQuantity, lot.LostQuantity, lot.PositionCount,
+            lot.OfferBackedQuantity, lot.HeldQuantity, lot.FreeToBackQuantity));
+        Assert.Equal((3, 1, 2), (lot.ItemCostMinor, lot.AllocatedLostItemCostMinor, lot.RemainingItemCostMinor));
+        Assert.Equal((delivery.CommandId, delivery.CorrelationId, delivery.Revision),
+            (lot.ReceiptCommandId, lot.ReceiptCorrelationId, lot.ReceivedRevision));
+        Assert.NotNull(lot.ReceivedAt);
+        Assert.False(lot.HasUndatedEvents);
+        Assert.Equal(0, Assert.Single(lot.Positions, p => p.Layer.PlacementId == placed.EntityId).Layer.Quantity);
+        Assert.Equal(delivery.EntityId, Assert.Single(lot.Positions, p => p.Layer.PlacementId == independent.EntityId).Layer.DeliveryId);
+        Assert.DoesNotContain(lot.Positions, p => p.Layer.PlacementId == siblingPlacement.EntityId);
+        Assert.DoesNotContain(lot.Events, e => e.PositionId == siblingPlacement.EntityId);
+        Assert.Equal(2, lot.Events.Count(e => e.Event.Id == shared.EntityId));
+        var internalMoves = lot.Events.Where(e => e.Event.Kind == "transfer-out").ToList();
+        Assert.Equal(2, internalMoves.Count);
+        Assert.All(internalMoves, e =>
+        {
+            Assert.Equal(0, e.Event.PhysicalDelta);
+            Assert.Equal(0, e.Event.OfferBackedDelta);
+            Assert.Equal(2, e.Event.Quantity);
+            Assert.Equal(placed.EntityId, e.PositionId);
+            Assert.NotNull(e.Event.RelatedPositionId);
+        });
+        Assert.Equal(3, internalMoves.Sum(e => e.TransferBackedQuantity));
+        Assert.Equal(lot.PositionedQuantity, lot.Events.Sum(e => e.Event.PhysicalDelta));
+        Assert.Equal(lot.OfferBackedQuantity, lot.Events.Sum(e => e.Event.OfferBackedDelta));
+        var pagedLot = await lots.Read(delivery.EntityId, null, null, 1, 1, token);
+        Assert.NotNull(pagedLot.NextPositionAfter);
+        Assert.NotNull(pagedLot.NextEventAfter);
+        var nextLot = await lots.Read(delivery.EntityId, pagedLot.NextPositionAfter, pagedLot.NextEventAfter, 1, 1, token);
+        Assert.Equal(shared.EntityId, Assert.Single(nextLot.Events).Event.Id);
+        Assert.NotEqual(Assert.Single(pagedLot.Events).PositionId, Assert.Single(nextLot.Events).PositionId);
+        Assert.Equal(lot.PositionedQuantity, nextLot.PositionedQuantity);
+        Assert.Equal("invalid_lot_cursor", await Reject(() => lots.Read(siblingDelivery.EntityId, pagedLot.NextPositionAfter,
+            null, 1, 1, token)));
+        Assert.Equal("invalid_lot_cursor", await Reject(() => lots.Read(delivery.EntityId, pagedLot.NextEventAfter, null, 1, 1, token)));
+        Assert.Equal("invalid_lot_page", await Reject(() => lots.Read(delivery.EntityId, null, null, 0, 1, token)));
+        Assert.Equal("unknown_receipt_lot", await Reject(() => lots.Read(Guid.NewGuid(), null, null, 1, 1, token)));
+        var unknownLot = await lots.Read(siblingDelivery.EntityId, null, null, 1, 1, token);
+        Assert.Equal((3, 2, 1), (unknownLot.ReceivedQuantity, unknownLot.UnplacedQuantity, unknownLot.PositionedQuantity));
+        Assert.Null(unknownLot.ItemCostMinor);
+        Assert.Null(unknownLot.AllocatedLostItemCostMinor);
+        Assert.Null(unknownLot.RemainingItemCostMinor);
     }
 }

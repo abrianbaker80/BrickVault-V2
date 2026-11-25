@@ -30,14 +30,16 @@ RECEIVING_FACTS = ("purchases", "deliveries", "placements", "offers", "offer_bac
 TRANSFER_FACTS = ("placement_positions", "placement_transfers", "placement_transfer_backing")
 COUNT_FACTS = ("stock_count_observations", "stock_shortage_cases")
 HOLD_FACTS = ("stock_build_holds", "stock_build_hold_releases")
+LOSS_FACTS = ("stock_loss_postings", "stock_loss_offer_reductions")
+RECOUNT_FACTS = ("recount_previews", "recount_preview_targets", "recount_batches", "recount_results")
 SCHEMA_FACTS = {
     2: FACTS,
     3: FACTS + RECEIVING_FACTS,
     4: FACTS + RECEIVING_FACTS + TRANSFER_FACTS,
     5: FACTS + RECEIVING_FACTS + TRANSFER_FACTS + COUNT_FACTS,
     6: FACTS + RECEIVING_FACTS + TRANSFER_FACTS + COUNT_FACTS + HOLD_FACTS,
-    7: FACTS + RECEIVING_FACTS + TRANSFER_FACTS + COUNT_FACTS + HOLD_FACTS
-       + ("stock_loss_postings", "stock_loss_offer_reductions"),
+    7: FACTS + RECEIVING_FACTS + TRANSFER_FACTS + COUNT_FACTS + HOLD_FACTS + LOSS_FACTS,
+    8: FACTS + RECEIVING_FACTS + TRANSFER_FACTS + COUNT_FACTS + HOLD_FACTS + LOSS_FACTS + RECOUNT_FACTS,
 }
 
 

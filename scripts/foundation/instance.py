@@ -345,6 +345,10 @@ class Instance:
                         ON brickvault.stock_loss_postings TO bv_api;
                     GRANT INSERT (loss_id,offer_id,quantity) ON brickvault.stock_loss_offer_reductions TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 8 THEN
+                    GRANT INSERT ON brickvault.recount_previews, brickvault.recount_preview_targets,
+                        brickvault.recount_batches, brickvault.recount_results TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,

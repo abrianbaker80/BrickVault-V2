@@ -6,7 +6,7 @@ import { money } from './receiving'
 import { label, time } from './presentation'
 
 const props = defineProps<{ record: StockPosition; asOf: string }>()
-const emit = defineEmits<{ inspect: [id: string] }>()
+const emit = defineEmits<{ inspect: [id: string]; lot: [id: string] }>()
 const layer = computed(() => props.record.layer)
 </script>
 <template>
@@ -29,6 +29,7 @@ const layer = computed(() => props.record.layer)
       <dt>Original bin</dt><dd>{{ layer.locationCodeAtPutaway }}</dd>
       <dt>Recorded catalog revision</dt><dd>{{ layer.catalogRevision }}</dd>
     </dl>
+    <p><a :href="'#inventory/lot/' + layer.deliveryId" @click.exact.prevent="emit('lot', layer.deliveryId)">Inspect receipt lot</a></p>
     <details class="ids"><summary>Receipt and catalog IDs</summary><dl class="details">
       <dt>Purchase ID</dt><dd>{{ layer.purchaseId }}</dd><dt>Delivery ID</dt><dd>{{ layer.deliveryId }}</dd>
       <dt>Catalog ID</dt><dd>{{ layer.catalogId }}</dd><dt>Receipt correlation ID</dt><dd>{{ layer.receiptCorrelationId }}</dd>
