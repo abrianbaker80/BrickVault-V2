@@ -86,10 +86,11 @@ function retryRead() {
           <dt>Whole delivery cost ({{ page.receipt.deliveryQuantity }} units)</dt>
           <dd>{{ money(page.receipt.itemCostMinor, page.receipt.currency) }}<template v-if="page.receipt.itemCostMinor === null"> ({{ page.receipt.currency }})</template></dd>
         </dl>
+        <p v-if="page.quarantineBlocksLoss" class="warning">{{ page.quarantinedQuantity }} quarantined in this position. The count does not identify which pieces are missing. Loss posting is blocked.</p>
         <p v-if="page.protectedProjectShortfall" class="warning">Build reservations exceed the proposed stock by {{ page.protectedProjectShortfall }}. Review the named holds.</p>
         <p v-if="page.minimumOfferBackingReduction" class="warning">At least {{ page.minimumOfferBackingReduction }} units of offer backing need review.</p>
         <p v-if="!page.candidateLossQuantity">The latest count supports no stock loss.</p>
-        <a v-if="page.candidateLossQuantity && !page.protectedProjectShortfall && connected && !loading && !error && !partial"
+        <a v-if="page.candidateLossQuantity && !page.protectedProjectShortfall && page.quarantineBlocksLoss === false && connected && !loading && !error && !partial"
           :href="lossCaseLink(bin, position, caseId)">Choose reductions and post stock loss</a>
         <h3 ref="offersHeading" tabindex="-1">Unpublished offers ({{ page.offerCount }})</h3>
         <ul v-if="page.offers.length" class="receipt-lines">

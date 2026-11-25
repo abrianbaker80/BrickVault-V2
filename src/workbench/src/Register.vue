@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import BinStock from './BinStock.vue'
+import StockQuarantine from './StockQuarantine.vue'
 import BuildHolds from './BuildHolds.vue'
 import StockLossWorkspace from './StockLossWorkspace.vue'
 import type { CountLink } from './countLinks'
@@ -37,9 +38,10 @@ function inspect(row: Catalog | Location, event: MouseEvent) {
 watch(() => props.confirmedSourceId, id => {
   if (id && !inspectedId.value && props.page === 'locations') inspectedId.value = id
 })
-watch([inspectedId, compact, () => props.countLink?.holdPositionId || props.countLink?.lossPositionId], async () => {
+const separateDialog = computed(() => props.countLink?.holdPositionId || props.countLink?.lossPositionId || props.countLink?.quarantinePositionId)
+watch([inspectedId, compact, separateDialog], async () => {
   await nextTick()
-  if (props.countLink?.holdPositionId || props.countLink?.lossPositionId) return
+  if (separateDialog.value) return
   if (detail.value instanceof HTMLDialogElement) {
     if (!detail.value.open) detail.value.showModal()
   } else detail.value?.querySelector<HTMLButtonElement>('button')?.focus()
@@ -136,6 +138,11 @@ onBeforeUnmount(() => {
   <StockLossWorkspace v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.lossPositionId"
     :key="countLink.binId + '/' + countLink.lossPositionId + '/' + (countLink.lossReceiptId ? 'posting/' + countLink.lossReceiptId : 'case/' + countLink.lossCaseId)" :location="inspected" :position="countLink.lossPositionId"
     :catalog="workspace.catalog" :case-id="countLink.lossCaseId" :posting="countLink.lossReceiptId" :as-of="workspace.asOf" :connected="connected" :controls="transfers"
+    @failure="emit('failure', $event)" @recover="close" @close="inspectBin(inspected.id)" />
+  <StockQuarantine v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.quarantinePositionId"
+    :key="[countLink.binId, countLink.quarantinePositionId, countLink.quarantineReceiptId].join('/')"
+    :location="inspected" :position-id="countLink.quarantinePositionId" :receipt-id="countLink.quarantineReceiptId"
+    :as-of="workspace.asOf" :connected="connected" :controls="transfers"
     @failure="emit('failure', $event)" @recover="close" @close="inspectBin(inspected.id)" />
   <BuildHolds v-if="inspected && 'code' in inspected && countLink?.binId === inspected.id && countLink.holdPositionId"
     :key="countLink.binId + '/' + countLink.holdPositionId" :location="inspected" :position-id="countLink.holdPositionId"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { StockPosition } from './api'
-import { countPositionLink } from './countLinks'
+import { countPositionLink, quarantineLink } from './countLinks'
 import { money } from './receiving'
 import { label, time } from './presentation'
 
@@ -19,9 +19,11 @@ const layer = computed(() => props.record.layer)
     <h3>Stock position</h3><dl class="details">
       <dt>Bin</dt><dd>{{ record.location.code }} · {{ record.location.name }}</dd>
       <dt>Physical on hand</dt><dd>{{ layer.quantity }}</dd><dt>Backed by offers</dt><dd>{{ layer.backedQuantity }}</dd>
+      <template v-if="layer.quarantinedQuantity"><dt>Quarantined in bin</dt><dd>{{ layer.quarantinedQuantity }}</dd></template>
       <dt>Unbacked</dt><dd>{{ layer.unbackedQuantity }}</dd><dt>Available to back</dt><dd>{{ layer.freeToBackQuantity }}</dd>
     </dl>
     <p><a :href="countPositionLink(record.location.id, layer.placementId)">Inspect counts and stock-loss receipts</a></p>
+    <p><a :href="quarantineLink(record.location.id,layer.placementId)">Inspect position quarantine</a></p>
     <h3>Receipt provenance</h3><dl class="details">
       <dt>Purchase</dt><dd>{{ layer.purchaseReference }}</dd><dt>Delivery</dt><dd>{{ layer.deliveryReference }}</dd>
       <dt>Whole delivery</dt><dd>{{ layer.receiptQuantity }} units</dd><dt>Whole-delivery item cost</dt>

@@ -135,6 +135,7 @@ function openForm() {
           <p v-if="journalError" class="warning" role="alert">{{ journalError }}</p>
           <div v-if="notice" class="success" role="status"><strong>{{ notice.message }}</strong>
             <div>Correlation ID {{ notice.correlationId }}</div>
+            <a v-if="notice.quarantineReceipt" :href="notice.quarantineReceipt">View quarantine receipt</a>
             <a v-if="notice.recountLink" :href="notice.recountLink">View recount receipt</a>
             <a v-if="notice.lossLink" :href="notice.lossLink">View posted stock loss</a>
             <a v-if="notice.countLink" :href="notice.countLink">View count receipt</a></div>

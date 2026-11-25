@@ -62,7 +62,7 @@ export async function fixture(page: Page) {
 
 export const stock = (page: Page) => page.getByRole('region', { name: 'Stock in this bin' })
 export const open = (page: Page, bin: { name: string }) => page.getByRole('button', { name: 'Inspect ' + bin.name }).click()
-export const endpoint = (bin: { id: string }) => '**/api/v1/receiving/bins/' + bin.id + '/movements'
+export const endpoint = (bin: { id: string }) => '**/api/v1/receiving/bins/' + bin.id + '/movements?*'
 export async function totals(page: Page, values: number[]) {
   await expect(stock(page).locator('dt')).toHaveText(['On hand', 'Backed by offers', 'Unbacked', 'Available to back'])
   await expect(stock(page).locator('dd')).toHaveText(values.map(String))
@@ -72,7 +72,7 @@ export async function audit(page: Page) {
   expect(scan.violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target) }))).toEqual([])
 }
 export async function purchases(page: Page, ids: string[]) {
-  const response = await page.request.get('/api/v1/receiving/current?holds=true&losses=true')
+  const response = await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true')
   expect(response.ok()).toBe(true)
   const snapshot: ReceivingWorkspace = await response.json()
   return snapshot.purchases.filter(p => ids.includes(p.id))
