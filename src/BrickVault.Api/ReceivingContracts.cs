@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Npgsql;
 
 namespace BrickVault.Api;
 
@@ -108,10 +109,27 @@ internal sealed record PurchaseRow(Guid Id, int Revision, string Reference, stri
     IReadOnlyList<OfferRow> Offers, StockBalances Balances);
 internal sealed record ReceivingWorkspace(string Scope, DateTime AsOf, bool Complete, IReadOnlyList<PurchaseRow> Purchases);
 
+internal sealed record DeliveryRecoveryTotals(long GrossLostQuantity, long RecoveredQuantity,
+    string? GrossAllocatedItemCostMinor, string? RestoredItemCostMinor)
+{
+    internal static DeliveryRecoveryTotals? Read(NpgsqlDataReader row, int first, bool acceptRecoveries)
+    {
+        var recovered = row.GetInt64(first + 1);
+        if (!acceptRecoveries)
+        {
+            if (recovered > 0) throw StockLossRecoveries.Upgrade();
+            return null;
+        }
+        return new(row.GetInt64(first), recovered, row.IsDBNull(first + 2) ? null : row.GetString(first + 2),
+            row.IsDBNull(first + 3) ? null : row.GetString(first + 3));
+    }
+}
+
 internal sealed record LossDeliveryRow(Guid Id, string Reference, int Quantity, Guid? CatalogId, int? CatalogRevision,
     int? ItemCostMinor, int IntakeQuantity, IReadOnlyList<PlacementRow> Placements, int LostQuantity,
     int? AllocatedLostItemCostMinor, int? RemainingItemCostMinor,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DeliveryRecoveryTotals? RecoveryTotals = null);
 internal sealed record LossPurchaseRow(Guid Id, int Revision, string Reference, string Source, string Currency,
     int OrderedQuantity, int? PendingChargeMinor, IReadOnlyList<LossDeliveryRow> Deliveries,
     IReadOnlyList<OfferRow> Offers, StockBalances Balances);

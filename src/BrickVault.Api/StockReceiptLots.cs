@@ -18,12 +18,14 @@ internal sealed record StockReceiptLot(string Scope, DateTime AsOf, bool Complet
     int PositionCount, int OfferBackedQuantity, int HeldQuantity, int FreeToBackQuantity, bool HasUndatedEvents,
     IReadOnlyList<StockRegisterRow> Positions, IReadOnlyList<StockReceiptLotEvent> Events,
     string? NextPositionAfter, string? NextEventAfter,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DeliveryRecoveryTotals? RecoveryTotals = null);
 
 internal sealed class StockReceiptLots(NpgsqlDataSource db)
 {
     public async Task<StockReceiptLot> Read(Guid deliveryId, string? positionAfter, string? eventAfter, int positionLimit,
-        int eventLimit, CancellationToken token, bool withdrawals = false, bool quarantine = false, bool closures = false)
+        int eventLimit, CancellationToken token, bool withdrawals = false, bool quarantine = false, bool closures = false,
+        bool recoveries = false)
     {
         if (positionLimit is < 1 or > 100 || eventLimit is < 1 or > 100)
             throw new Fault(400, "invalid_lot_page", "Choose page sizes from 1 to 100.");
@@ -36,23 +38,22 @@ internal sealed class StockReceiptLots(NpgsqlDataSource db)
         var evidence = (await Rows(connection, tx, """
             SELECT transaction_timestamp(),d.reference,d.purchase_id,buy.reference,buy.revision,buy.source,buy.currency,
                 d.catalog_id,d.catalog_revision,d.command_id,c.correlation_id,c.revision,a.occurred_at,d.item_cost_minor,
-                d.quantity,s.loss,s.basis,
-                d.quantity-COALESCE((SELECT sum(placed.quantity) FROM brickvault.placements placed WHERE placed.delivery_id=d.id),0)::integer
+                d.quantity,s.active_lost_quantity::integer,s.active_allocated_item_cost_minor::integer,
+                d.quantity-COALESCE((SELECT sum(placed.quantity) FROM brickvault.placements placed WHERE placed.delivery_id=d.id),0)::integer,
+                s.gross_lost_quantity::bigint,s.recovered_quantity::bigint,
+                s.gross_allocated_item_cost_minor::text,s.restored_item_cost_minor::text
             FROM brickvault.deliveries d JOIN brickvault.purchases buy ON buy.id=d.purchase_id
             JOIN brickvault.commands c ON c.command_id=d.command_id
             LEFT JOIN brickvault.audit a ON a.command_id=d.command_id
-            CROSS JOIN LATERAL (
-                SELECT COALESCE(sum(l.lost_quantity),0)::integer AS loss,COALESCE(sum(l.allocated_item_cost_minor),0)::integer AS basis
-                FROM brickvault.stock_loss_postings l WHERE l.delivery_id=d.id
-            ) s WHERE d.id=$1
+            JOIN brickvault.delivery_loss_balances s ON s.delivery_id=d.id WHERE d.id=$1
             """, r => new
             {
                 AsOf = r.GetDateTime(0), DeliveryReference = r.GetString(1), PurchaseId = r.GetGuid(2),
                 PurchaseReference = r.GetString(3), Revision = r.GetInt32(4), Source = r.GetString(5), Currency = r.GetString(6),
                 CatalogId = Optional<Guid>(r, 7), CatalogRevision = Optional<int>(r, 8), Command = r.GetGuid(9),
                 Correlation = r.GetGuid(10), ReceivedRevision = r.GetInt32(11), ReceivedAt = Optional<DateTime>(r, 12),
-                Cost = Optional<int>(r, 13), Received = r.GetInt32(14), Lost = r.GetInt32(15), LostBasis = r.GetInt32(16),
-                Unplaced = r.GetInt32(17)
+                Cost = Optional<int>(r, 13), Received = r.GetInt32(14), Lost = r.GetInt32(15), LostBasis = Optional<int>(r, 16),
+                Unplaced = r.GetInt32(17), Recovery = DeliveryRecoveryTotals.Read(r, 18, recoveries)
             }, token, deliveryId)).SingleOrDefault() ??
                 throw new Fault(404, "unknown_receipt_lot", "No recorded delivery has that identifier.");
         var prefix = FormattableString.Invariant($"{deliveryId:N}.{evidence.Revision}.");
@@ -137,14 +138,14 @@ internal sealed class StockReceiptLots(NpgsqlDataSource db)
         return new StockReceiptLot("receipt-lot", evidence.AsOf, true, deliveryId, evidence.DeliveryReference,
             evidence.PurchaseId, evidence.PurchaseReference, evidence.Revision, evidence.Source, evidence.Currency,
             evidence.CatalogId, evidence.CatalogRevision, evidence.Command, evidence.Correlation, evidence.ReceivedRevision,
-            evidence.ReceivedAt, evidence.Cost, evidence.Cost.HasValue ? evidence.LostBasis : null, evidence.Cost - evidence.LostBasis,
+            evidence.ReceivedAt, evidence.Cost, evidence.LostBasis, evidence.Cost - evidence.LostBasis,
             evidence.Received, evidence.Unplaced, totals.Positioned, onHand, evidence.Lost, totals.Positions, totals.Backed,
             totals.Held, totals.Free, hasUndated, positions,
             events.Select(row => row.Event.Kind == "transfer-out"
                 ? new StockReceiptLotEvent(row.PositionId, -row.Event.OfferBackedDelta,
                     row.Event with { PhysicalDelta = 0, OfferBackedDelta = 0 })
                 : new StockReceiptLotEvent(row.PositionId, 0, row.Event)).ToList(), nextPosition, nextEvent,
-            quarantine ? totals.Quarantined : null);
+            quarantine ? totals.Quarantined : null, evidence.Recovery);
     }
 
     private static string[]? ScopedCursor(string? cursor, Guid deliveryId, int revision, int size)
