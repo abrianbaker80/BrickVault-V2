@@ -73,12 +73,16 @@ internal sealed class StockAdjustmentReviews(NpgsqlDataSource db)
 
         var loss = Math.Max(0, position.Ledger - latest.CountedQuantity);
         var afterLoss = position.Ledger - loss;
-        var capacity = Math.Max(0, afterLoss - position.Protected - position.Quarantined);
+        var hasQuarantine = position.Quarantined > 0;
+        // An aggregate shortage cannot show how many quarantined units would remain after posting.
+        int? capacity = hasQuarantine && loss > 0 ? null :
+            Math.Max(0, afterLoss - position.Protected - position.Quarantined);
+        int? minimumReduction = capacity is int knownCapacity ? Math.Max(0, position.Backed - knownCapacity) : null;
         return new StockAdjustmentReview("stock-adjustment-review", position.AsOf, true, position.Location,
             positionId, caseId, position.Purchase, position.Revision, position.Receipt, latest, position.Ledger,
             loss, afterLoss, position.Protected, Math.Max(0, position.Protected - afterLoss), position.Backed,
-            position.OfferCount, capacity, Math.Max(0, position.Backed - capacity), offers, next,
-            quarantine ? position.Quarantined : null, quarantine ? position.Quarantined > 0 : null);
+            position.OfferCount, capacity, minimumReduction, offers, next,
+            quarantine ? position.Quarantined : null, quarantine ? hasQuarantine : null);
     }
 
     private static async Task<Guid?> CheckCursor(NpgsqlConnection connection, NpgsqlTransaction tx,

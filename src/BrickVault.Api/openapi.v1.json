@@ -5876,16 +5876,22 @@
             "description": "Number of offers backed at this position across all pages."
           },
           "offerCapacityAfterLoss": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0,
             "maximum": 1000000,
-            "description": "Projected ledger less protected project units, floored at zero."
+            "description": "Projected capacity after protecting project units and retained quarantine. Null when an aggregate shortage leaves the missing units' quarantine status unknown."
           },
           "minimumOfferBackingReduction": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0,
             "maximum": 1000000,
-            "description": "Minimum reduction needed across all offer backing. No offer is selected."
+            "description": "Minimum reduction across existing offer backing when projected capacity is known. Null when the missing units' quarantine status is unknown."
           },
           "offers": {
             "type": "array",
