@@ -179,3 +179,35 @@ test('partial or foreign preview and an offline connection keep the frozen selec
   expect([...ids]).toHaveLength(1)
   expect(writes).toBe(0)
 })
+
+test('a delayed recount confirmation preserves a newly opened receipt lot and retains the saved batch link', async ({page}) => {
+  const f = await fixture(page)
+  await page.getByRole('link', {name:'Inventory'}).click()
+  await search(page, f.a.code)
+  await page.getByRole('checkbox', {name:'Select position '+f.position+' for recount'}).check()
+  await go(page).click()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  let acknowledge!: (batchId:string) => void
+  const committed = new Promise<string>(resolve => { acknowledge = resolve })
+  await page.route('**/api/v1/inventory/recounts/batches', async route => {
+    const response = await route.fetch()
+    acknowledge((await response.json()).entityId)
+    await gate
+    await route.fulfill({response})
+    await response.dispose()
+  })
+  await preview(page).getByRole('button', {name:'Queue recount'}).click()
+  const id = await committed
+  const lot = '#inventory/lot/'+f.paid.deliveryId
+  await page.evaluate(hash => { window.location.hash = hash }, lot)
+  await expect(page.getByRole('region', {name:'Receipt lot positions'})).toBeVisible()
+  const refreshed = page.waitForResponse(r => new URL(r.url()).pathname === '/api/v1/workspace')
+  release()
+  await (await refreshed).finished()
+  await expect(page.getByRole('link', {name:'View recount receipt'})).toHaveAttribute('href', '#inventory/recounts/'+id)
+  await expect(page.getByRole('region', {name:'Receipt lot positions'})).toBeVisible()
+  expect(new URL(page.url()).hash).toBe(lot)
+  await page.goto('/#inventory/recounts/'+id.toUpperCase())
+  await expect(receipt(page)).toContainText(f.position)
+})

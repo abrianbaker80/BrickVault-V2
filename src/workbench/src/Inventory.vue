@@ -27,7 +27,7 @@ const lotRoute = () => location.hash.startsWith('#inventory/lot/') ? location.ha
 const recountRoute = () => {
   const hash = location.hash
   if (hash === '#inventory/recounts') return 'queue'
-  if (hash.startsWith('#inventory/recounts/')) return hash.slice('#inventory/recounts/'.length)
+  if (hash.startsWith('#inventory/recounts/')) return hash.slice('#inventory/recounts/'.length).toLowerCase()
   return ''
 }
 const recountView = ref(recountRoute())

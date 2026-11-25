@@ -69,11 +69,14 @@ watch(() => [input.value, requested.value, attempt.value, props.connected] as co
 onMounted(() => dialog.value?.showModal())
 async function confirm() {
   if (!writable.value || !page.value) return
+  const issuingDialog = dialog.value
+  const issuingRoute = window.location.hash
   submitting.value=true
   try {
     const saved = await props.controls.dispatch({kind:'recount',workspaceId:props.controls.workspaceId,
       body:{commandId:crypto.randomUUID(),previewId:page.value.previewId}})
     await nextTick()
+    if (!issuingDialog?.isConnected || !issuingDialog.open || window.location.hash !== issuingRoute) return
     if (saved) {
       window.location.hash='inventory/recounts/'+saved.entityId
       emit('close')
