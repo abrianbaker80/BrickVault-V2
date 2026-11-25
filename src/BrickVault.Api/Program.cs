@@ -36,6 +36,7 @@ try
     var bins = new BinStock(db);
     var inventory = new StockRegister(db);
     var positionTimelines = new StockPositionTimelines(db);
+    var receiptLots = new StockReceiptLots(db);
     var transfers = new Transfers(db);
     var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
     {
@@ -142,6 +143,9 @@ try
         inventory.History(positionId, after, limit ?? 25, ct));
     api.MapGet("/inventory/positions/{positionId:guid}/timeline", (Guid positionId, string? after, int? limit, CancellationToken ct) =>
         positionTimelines.Read(positionId, after, limit ?? 25, ct));
+    api.MapGet("/inventory/receipt-lots/{deliveryId:guid}",
+        (Guid deliveryId, string? positionAfter, string? eventAfter, int? positionLimit, int? eventLimit, CancellationToken ct) =>
+            receiptLots.Read(deliveryId, positionAfter, eventAfter, positionLimit ?? 25, eventLimit ?? 25, ct));
     api.MapGet("/receiving/bins/{locationId:guid}", (Guid locationId, CancellationToken ct) => bins.Snapshot(locationId, ct));
     api.MapGet("/receiving/bins/{locationId:guid}/movements",
         (Guid locationId, CancellationToken ct) => bins.Movements(locationId, ct));
