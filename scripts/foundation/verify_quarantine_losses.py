@@ -14,7 +14,7 @@ def receipt_pages(client, base, posting_id):
         page = client.call(base + "/posted-loss?" + urlencode(query))
         assert page.pop("asOf") and page["complete"] and page["postingId"] == posting_id
         pages.append(page)
-        cursor = page["nextQuarantineAfter"]
+        cursor = page.get("nextQuarantineAfter")
         if cursor is None:
             return pages
         assert cursor not in seen
