@@ -362,6 +362,11 @@ class Instance:
                         catalog_revision,expected_purchase_revision,quantity,reason,quarantine_id,inspection_result)
                         ON brickvault.stock_quarantine_releases TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 11 THEN
+                    GRANT INSERT (id,command_id,purchase_id,position_id,location_id,location_code,
+                        case_id,observation_id,expected_purchase_revision,reason)
+                        ON brickvault.stock_shortage_closures TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,
