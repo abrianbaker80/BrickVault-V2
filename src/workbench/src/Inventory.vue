@@ -115,14 +115,16 @@ watch([inspector, selected, selectedLot], async () => {
   if (inspector.value instanceof HTMLDialogElement && !inspector.value.open) inspector.value.showModal()
   else inspector.value?.querySelector<HTMLButtonElement>('button')?.focus()
 }, { flush: 'post' })
+watch(host, element => {
+  observer?.disconnect()
+  if (!element) return
+  compact.value = element.clientWidth < 920
+  observer = new ResizeObserver(([entry]) => { compact.value = entry.contentRect.width < 920 })
+  observer.observe(element)
+}, { flush: 'post' })
 onMounted(() => {
   window.addEventListener('hashchange', routeChanged)
   window.addEventListener('keydown', keyboard)
-  if (host.value) {
-    compact.value = host.value.clientWidth < 920
-    observer = new ResizeObserver(([entry]) => { compact.value = entry.contentRect.width < 920 })
-    observer.observe(host.value)
-  }
 })
 onBeforeUnmount(() => {
   observer?.disconnect()
