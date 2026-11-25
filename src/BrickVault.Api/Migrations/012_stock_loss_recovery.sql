@@ -372,3 +372,41 @@ BEGIN
     RETURN NULL;
 END;
 $$;
+
+-- A queued task belongs to the units present at its frozen purchase revision. A zero balance
+-- before its first witness is terminal even if a later recovery restores units to the position.
+CREATE VIEW brickvault.stock_position_physical_deltas AS
+SELECT t.source_position_id AS position_id,c.revision,-t.quantity AS delta
+FROM brickvault.placement_transfers t JOIN brickvault.commands c ON c.command_id=t.command_id
+UNION ALL
+SELECT l.position_id,c.revision,-l.lost_quantity
+FROM brickvault.stock_loss_postings l JOIN brickvault.commands c ON c.command_id=l.command_id
+UNION ALL
+SELECT r.position_id,c.revision,r.saleable_quantity+r.quarantine_quantity
+FROM brickvault.stock_loss_recoveries r JOIN brickvault.commands c ON c.command_id=r.command_id;
+
+CREATE VIEW brickvault.recount_task_states AS
+SELECT r.batch_id,r.position_id,t.purchase_revision,
+    CASE WHEN depleted.revision IS NULL THEN witness.id END AS observation_id,
+    depleted.revision IS NOT NULL AS depleted
+FROM brickvault.recount_results r
+JOIN brickvault.recount_preview_targets t ON t.preview_id=r.batch_id AND t.position_id=r.position_id
+LEFT JOIN LATERAL (
+    SELECT n.id,n.expected_purchase_revision FROM brickvault.stock_count_observations n
+    WHERE n.position_id=r.position_id AND n.expected_purchase_revision>=t.purchase_revision
+    ORDER BY n.expected_purchase_revision,n.id LIMIT 1
+) witness ON true
+LEFT JOIN LATERAL (
+    SELECT min(frontier.revision) AS revision
+    FROM (
+        SELECT physical.revision,t.quantity+sum(physical.delta) OVER (ORDER BY physical.revision) AS quantity
+        FROM brickvault.stock_position_physical_deltas physical
+        WHERE physical.position_id=r.position_id AND physical.revision>t.purchase_revision
+            AND (witness.id IS NULL OR physical.revision<=witness.expected_purchase_revision)
+    ) frontier
+    WHERE frontier.quantity=0
+) depleted ON true
+WHERE r.outcome='queued';
+
+CREATE OR REPLACE VIEW brickvault.recount_tasks AS
+SELECT batch_id,position_id,purchase_revision,observation_id FROM brickvault.recount_task_states;
