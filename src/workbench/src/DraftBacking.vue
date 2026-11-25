@@ -5,14 +5,20 @@ import type { DraftBackingPage, DraftOfferHistory, Location, TransferControls, W
 import { draftBackingLink, quarantineLink } from './countLinks'
 import { itemLabel, money } from './receiving'
 import { time } from './presentation'
-import { usePositionPage } from './usePositionPage'
+import { usePositionPage, type PositionReadState } from './usePositionPage'
 
-const props = defineProps<{ bin: Location; position: string; offer?: string; receipt?: string; asOf: string; connected: boolean; controls: TransferControls }>()
+const props = defineProps<{ bin: Location; position: string; offer?: string; receipt?: string; asOf: string; connected: boolean; workspaceReady: boolean; controls: TransferControls }>()
 const emit = defineEmits<{ close: []; failure: [reason:unknown]; recover: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const formTitle = ref<HTMLElement>()
 const beginButton = ref<HTMLButtonElement>()
-const readState = { get asOf() { return props.asOf }, get state() { return props.connected ? 'ready' as const : 'unavailable' as const } }
+const readState = {
+  get asOf() { return props.asOf },
+  get state(): PositionReadState {
+    if (!props.connected) return 'unavailable'
+    return props.workspaceReady ? 'ready' : 'loading'
+  }
+}
 const staleCursor = ref(false)
 type Page = DraftBackingPage | DraftOfferHistory | (WithdrawalEvidence & { nextAfter: null })
 const { page, confirmed, requested, attempt, loading, partial, error, heading, retry } = usePositionPage<Page>(readState, async after => {
@@ -30,7 +36,7 @@ const confirmedPage = computed(() => page.value?.complete ? page.value : undefin
 const snapshot = computed(() => confirmedPage.value && 'position' in confirmedPage.value ? confirmedPage.value : undefined)
 const history = computed(() => snapshot.value && 'offer' in snapshot.value ? snapshot.value : undefined)
 const receipt = computed(() => confirmedPage.value && 'priorBackedQuantity' in confirmedPage.value ? confirmedPage.value : undefined)
-const ready = computed(() => props.connected && props.controls.enabled && !loading.value && !partial.value && !error.value && !sending.value)
+const canPrepare = computed(() => props.workspaceReady && props.connected && props.controls.enabled && !partial.value && !error.value && !sending.value)
 const quantity = ref<number | ''>('')
 const binCode = ref('')
 const reason = ref('')
@@ -50,14 +56,14 @@ const stale = computed(() => {
 })
 const validQuantity = computed(() => Number.isInteger(quantity.value) && Number(quantity.value)>0 &&
   Number(quantity.value)<=(frozen.value?.data.offer.backedQuantity ?? 0))
-const writable = computed(() => ready.value && !stale.value && frozen.value && history.value?.offer.canWithdraw && validQuantity.value &&
+const writable = computed(() => canPrepare.value && !loading.value && !stale.value && frozen.value && history.value?.offer.canWithdraw && validQuantity.value &&
   binCode.value===frozen.value.data.position.location.code && reason.value.trim().length>0)
 const titles = { 'offer-backing':'Offer backing added', 'transfer-in':'Backing transferred in', 'transfer-out':'Backing transferred out',
   'stock-loss':'Reduced with posted loss', 'offer-withdrawal':'Draft backing withdrawn' }
 const link = (view?:'offers'|'receipts',id?:string) => draftBackingLink(props.bin.id,props.position,view,id)
 onMounted(() => dialog.value?.showModal())
 async function begin() {
-  if (!ready.value || !history.value?.offer.canWithdraw) return
+  if (!canPrepare.value || !history.value?.offer.canWithdraw) return
   frozen.value={data:history.value,workspaceId:props.controls.workspaceId}
   binCode.value=''; quantity.value=''; reason.value=''; feedback.value=''
   await nextTick()
@@ -94,6 +100,7 @@ async function save() {
     <div class="draft-body">
       <p v-if="error || partial || !connected" class="warning" role="status">{{ error || (partial ? 'Partial backing read.' : 'The workspace is offline.') }}
         {{ confirmedPage ? 'Showing the last confirmed read.' : 'Backing details are unavailable.' }}</p>
+      <p v-else-if="!workspaceReady" role="status">Waiting for a complete workspace read…</p>
       <p v-else-if="loading" role="status">Reading offer backing…</p>
       <button ref="retry" v-if="connected && (error || partial)" :disabled="loading" @click="staleCursor ? (requested=['']) : attempt++">{{ staleCursor ? 'Read from first page' : 'Retry backing read' }}</button>
       <template v-if="receipt">
@@ -137,7 +144,7 @@ async function save() {
             <h3 ref="formTitle" tabindex="-1">Withdraw draft backing</h3>
             <p>Pieces stay in {{ frozen.data.position.location.code }}. Withdrawing backing preserves their cost and the offer price.</p>
             <p v-if="stale" class="warning" role="alert">The position or offer changed. Cancel and review current backing before confirming.</p>
-            <fieldset :disabled="!ready || stale">
+            <fieldset :disabled="!canPrepare || stale">
               <label>Quantity to withdraw<input type="number" v-model="quantity" min="1" :max="frozen.data.offer.backedQuantity" inputmode="numeric" required /></label>
               <label>Confirm physical bin code<input v-model="binCode" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
               <small v-if="binCode && binCode!==frozen.data.position.location.code" class="warning">Enter the code on the selected bin.</small>
@@ -154,7 +161,7 @@ async function save() {
           </form>
           <template v-else>
             <p v-if="history.offer.authority==='unverified-origin'" class="warning">The origin of this offer has not been verified. Its backing is protected.</p>
-            <button ref="beginButton" class="primary" :disabled="!ready || !history.offer.canWithdraw" @click="begin">Withdraw backing</button>
+            <button ref="beginButton" class="primary" :disabled="!canPrepare || !history.offer.canWithdraw" @click="begin">Withdraw backing</button>
             <h3>Backing history at this position</h3><ol class="receipt-lines" aria-label="Offer backing history">
               <li v-for="c in history.contributions" :key="c.kind+'/'+c.id"><strong>{{ titles[c.kind] }}</strong>
                 <p>{{ c.backingDelta>0 ? '+' : '' }}{{ c.backingDelta }} backed · Revision {{ c.revision }}</p>

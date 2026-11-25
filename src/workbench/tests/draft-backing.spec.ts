@@ -42,7 +42,7 @@ test('selected draft backing can be partially and fully withdrawn without losing
   await dialog.getByLabel('Confirm physical bin code').fill(f.a.code)
   await dialog.getByLabel('Quantity to withdraw').fill('4'); await expect(save).toBeDisabled()
   await dialog.getByLabel('Quantity to withdraw').fill('1')
-  await expect(dialog.getByLabel('Proposed withdrawal').locator('dd')).toHaveText(['3 → 2','3 → 2','3 → 4'])
+  await expect(dialog.getByLabel('Proposed withdrawal').locator('dd')).toHaveText(['3 â†’ 2','3 â†’ 2','3 â†’ 4'])
   await page.screenshot({path:info.outputPath('draft-withdrawal-desktop.png')})
   await page.setViewportSize({width:320,height:760})
   await expect(save).toBeEnabled()
@@ -103,13 +103,13 @@ test('position offer pages preserve exact selection even with a sibling allocati
   await review(page,pos,f.a.id,shared)
   await d.getByRole('button',{name:'Withdraw backing',exact:true}).click()
   await fill(page,f.a.code,1,'Release a shared allocation')
-  await expect(d.getByLabel('Proposed withdrawal').locator('dd')).toHaveText(['2 → 1','4 → 3','0 → 1'])
+  await expect(d.getByLabel('Proposed withdrawal').locator('dd')).toHaveText(['2 â†’ 1','4 â†’ 3','0 â†’ 1'])
   await f.write('inventory/draft-backing-withdrawals',31,{purchaseId,positionId:pos,offerId:shared,locationId:f.a.id,confirmedLocationCode:f.a.code,quantity:1,reason:'Second operator reviewed the same position'})
   await d.getByRole('button',{name:'Confirm withdrawal'}).click()
   await expect(d).toContainText('The position or offer changed')
   await expect(d.getByRole('button',{name:'Confirm withdrawal'})).toBeDisabled()
   await d.getByRole('button',{name:'Cancel'}).click()
-  await expect(d.getByRole('region',{name:'Selected offer'})).toContainText('1 backed at this position · 3 across all positions')
+  await expect(d.getByRole('region',{name:'Selected offer'})).toContainText('1 backed at this position Â· 3 across all positions')
   await d.getByRole('button',{name:'Withdraw backing',exact:true}).click()
   await fill(page,f.a.code,1,'Final source allocation')
   await d.getByRole('button',{name:'Confirm withdrawal'}).click()
@@ -281,4 +281,62 @@ test('quarantine and withdrawal use the same physical position and leave protect
   const lot=page.getByRole('region',{name:'Receipt lot activity'})
   await expect(lot.getByRole('link',{name:'View quarantine receipt'})).toHaveAttribute('href',quarantineLink(f.a.id,f.position,quarantineId))
   await expect(lot.getByRole('link',{name:'View withdrawal receipt'})).toHaveAttribute('href',draftBackingLink(f.a.id,f.position,'receipts',withdrawalId))
+})
+
+test('keyboard withdrawal preparation survives workspace entry and repeated history refreshes',async ({page})=>{
+  const f=await eight(page)
+  const dialog=view(page), start=dialog.getByRole('button',{name:'Withdraw backing',exact:true})
+  const form=dialog.getByRole('heading',{name:'Withdraw draft backing',exact:true})
+  const history=path(f.position)+'/'+f.offer+'/history'
+  async function delayResponse(pathname:string) {
+    let received!:()=>void, release!:()=>void, done!:()=>void
+    const waiting=new Promise<void>(resolve=>{received=resolve})
+    const allowed=new Promise<void>(resolve=>{release=resolve})
+    const finished=new Promise<void>(resolve=>{done=resolve})
+    await page.route(url=>url.pathname===pathname,async route=>{
+      const response=await route.fetch()
+      received()
+      try {
+        await allowed
+        await route.fulfill({response})
+      } finally {
+        await response.dispose()
+        done()
+      }
+    },{times:1})
+    return {waiting, async resume() {release(); await finished}}
+  }
+  await review(page,f.position,f.a.id,f.offer)
+  await expect(start).toBeEnabled()
+  for(let i=0;i<2;i++) {
+    await start.focus()
+    await expect(start).toBeFocused()
+    const refresh=await delayResponse(history)
+    try {
+      await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
+      await refresh.waiting
+      await expect(dialog.getByText('Reading offer backingâ€¦')).toBeVisible()
+      await page.keyboard.press('Enter')
+      await expect(form).toBeFocused()
+      await fill(page,f.a.code,1,'Prepared during revalidation')
+      await expect(dialog.getByRole('button',{name:'Confirm withdrawal'})).toBeDisabled()
+    } finally {await refresh.resume()}
+    await expect(dialog.getByRole('button',{name:'Confirm withdrawal'})).toBeEnabled()
+    await dialog.getByRole('button',{name:'Cancel',exact:true}).press('Enter')
+    await expect(start).toBeFocused()
+  }
+  await page.goto('/#receiving/'+f.purchaseId)
+  const source=page.getByRole('link',{name:'Review draft offer '+f.offer+' at position '+f.position})
+  await expect(source).toBeVisible()
+  const register=await delayResponse('/api/v1/workspace')
+  try {
+    await source.press('Enter')
+    await register.waiting
+    await expect(dialog.getByText('Waiting for a complete workspace readâ€¦')).toBeVisible()
+    await expect(start).toHaveCount(0)
+  } finally {await register.resume()}
+  await start.focus()
+  await expect(start).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(form).toBeFocused()
 })
