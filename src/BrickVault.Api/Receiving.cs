@@ -125,7 +125,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
 
     public async Task<ReceivingWorkspace> CurrentSnapshot(bool acceptHolds, CancellationToken token)
     {
-        var snapshot = await LossSnapshot(token);
+        var snapshot = await LossSnapshot(token, recoveries: true);
         if (!acceptHolds && snapshot.Purchases.Any(p => p.Balances.Reserved > 0))
             throw new Fault(426, "receiving_client_upgrade_required",
                 "Active build holds require a newer Workbench. Update Workbench to read the reserved stock and receiving balances.");
@@ -135,6 +135,8 @@ internal sealed class Receiving(NpgsqlDataSource db)
         if (snapshot.Purchases.SelectMany(p => p.Offers).Any(o => o.Backing.Count == 0))
             throw new Fault(426, "receiving_client_upgrade_required",
                 "An offer has no remaining backing. Update Workbench to see the offer and its current allocation.");
+        if (snapshot.Purchases.SelectMany(p => p.Deliveries).Any(d => d.RecoveryTotals?.RecoveredQuantity > 0))
+            throw StockLossRecoveries.Upgrade();
         return BeforeLossContract(snapshot);
     }
 
