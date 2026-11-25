@@ -37,6 +37,7 @@ try
     var bins = new BinStock(db);
     var inventory = new StockRegister(db);
     var positionTimelines = new StockPositionTimelines(db);
+    var quarantines = new StockQuarantines(db);
     var receiptLots = new StockReceiptLots(db);
     var transfers = new Transfers(db);
     var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions
@@ -115,19 +116,19 @@ try
     api.MapGet("/receiving", (CancellationToken ct) => receiving.LegacySnapshot(ct));
     api.MapGet("/receiving/current", async (HttpContext c, CancellationToken ct) =>
         c.Request.Query["losses"] == "true"
-            ? (object)await receiving.LossSnapshot(ct)
+            ? (object)await receiving.LossSnapshot(ct, c.Request.Query["quarantine"] == "true")
             : await receiving.CurrentSnapshot(c.Request.Query["holds"] == "true", ct));
     api.MapGet("/receiving/bins/{locationId:guid}/positions/{positionId:guid}/holds",
-        (Guid locationId, Guid positionId, Guid? after, int? limit, Guid? commandId, CancellationToken ct) =>
-            holds.Snapshot(locationId, positionId, after, limit ?? 25, ct, commandId));
+        (Guid locationId, Guid positionId, Guid? after, int? limit, Guid? commandId, bool? quarantine, CancellationToken ct) =>
+            holds.Snapshot(locationId, positionId, after, limit ?? 25, ct, commandId, quarantine == true));
     api.MapGet("/receiving/bins/{locationId:guid}/positions/{positionId:guid}/holds/{holdId:guid}/releases",
         (Guid locationId, Guid positionId, Guid holdId, Guid? after, int? limit, Guid? commandId, CancellationToken ct) =>
             holds.Releases(locationId, positionId, holdId, after, limit ?? 25, ct, commandId));
     api.MapPost("/receiving/holds", (HttpContext c, CancellationToken ct) => Save<StockHoldCommand>(c, holds.Save, ct));
     api.MapPost("/receiving/holds/release", (HttpContext c, CancellationToken ct) => Save<StockHoldReleaseCommand>(c, holds.Save, ct));
     api.MapGet("/receiving/bins/{locationId:guid}/positions/{positionId:guid}/shortages/{caseId:guid}/adjustment-review",
-        (Guid locationId, Guid positionId, Guid caseId, string? after, int? limit, CancellationToken ct) =>
-            adjustmentReviews.Read(locationId, positionId, caseId, after, limit ?? 25, ct));
+        (Guid locationId, Guid positionId, Guid caseId, string? after, int? limit, bool? quarantine, CancellationToken ct) =>
+            adjustmentReviews.Read(locationId, positionId, caseId, after, limit ?? 25, ct, quarantine == true));
     api.MapGet("/receiving/bins/{locationId:guid}/counts",
         (Guid locationId, Guid? positionId, Guid? after, int? limit, Guid? observationId, Guid? commandId,
             CancellationToken ct) => counts.Snapshot(locationId, ct, positionId, after, limit ?? 25, observationId, commandId));
@@ -138,18 +139,27 @@ try
         (Guid locationId, Guid positionId, Guid? caseId, Guid? observationId, Guid? postingId, Guid? commandId,
             string? after, int? limit, CancellationToken ct) =>
             stockLosses.Read(locationId, positionId, caseId, observationId, postingId, commandId, after, limit ?? 25, ct));
-    api.MapGet("/inventory/positions", (string? q, string? itemType, Guid? locationId, Guid? positionId, Guid? after, int? limit, CancellationToken ct) =>
-        inventory.Search(q, itemType, locationId, positionId, after, limit ?? 25, ct));
+    api.MapGet("/inventory/positions", (string? q, string? itemType, Guid? locationId, Guid? positionId, Guid? after, int? limit,
+        bool? quarantine, CancellationToken ct) =>
+        inventory.Search(q, itemType, locationId, positionId, after, limit ?? 25, ct, quarantine == true));
     api.MapGet("/inventory/positions/{positionId:guid}/movements", (Guid positionId, Guid? after, int? limit, CancellationToken ct) =>
         inventory.History(positionId, after, limit ?? 25, ct));
-    api.MapGet("/inventory/positions/{positionId:guid}/timeline", (Guid positionId, string? after, int? limit, CancellationToken ct) =>
-        positionTimelines.Read(positionId, after, limit ?? 25, ct));
+    api.MapGet("/inventory/positions/{positionId:guid}/timeline", (Guid positionId, string? after, int? limit, bool? quarantine, CancellationToken ct) =>
+        positionTimelines.Read(positionId, after, limit ?? 25, ct, quarantine == true));
     api.MapGet("/inventory/receipt-lots/{deliveryId:guid}",
-        (Guid deliveryId, string? positionAfter, string? eventAfter, int? positionLimit, int? eventLimit, CancellationToken ct) =>
-            receiptLots.Read(deliveryId, positionAfter, eventAfter, positionLimit ?? 25, eventLimit ?? 25, ct));
-    api.MapGet("/receiving/bins/{locationId:guid}", (Guid locationId, CancellationToken ct) => bins.Snapshot(locationId, ct));
+        (Guid deliveryId, string? positionAfter, string? eventAfter, int? positionLimit, int? eventLimit, bool? quarantine, CancellationToken ct) =>
+            receiptLots.Read(deliveryId, positionAfter, eventAfter, positionLimit ?? 25, eventLimit ?? 25, ct, quarantine == true));
+    api.MapGet("/inventory/positions/{positionId:guid}/quarantine", (Guid positionId, Guid? after, int? limit, CancellationToken ct) =>
+        quarantines.Snapshot(positionId, after, limit ?? 25, ct));
+    api.MapGet("/inventory/positions/{positionId:guid}/quarantine/receipts",
+        (Guid positionId, Guid? receiptId, Guid? commandId, CancellationToken ct) =>
+            quarantines.Evidence(positionId, receiptId, commandId, ct));
+    api.MapPost("/inventory/quarantines", (HttpContext c, CancellationToken ct) => Save<StockQuarantineCommand>(c, quarantines.Save, ct));
+    api.MapPost("/inventory/quarantine-releases", (HttpContext c, CancellationToken ct) => Save<StockQuarantineReleaseCommand>(c, quarantines.Save, ct));
+    api.MapGet("/receiving/bins/{locationId:guid}", (Guid locationId, bool? quarantine, CancellationToken ct) =>
+        bins.Snapshot(locationId, ct, quarantine == true));
     api.MapGet("/receiving/bins/{locationId:guid}/movements",
-        (Guid locationId, CancellationToken ct) => bins.Movements(locationId, ct));
+        (Guid locationId, bool? quarantine, CancellationToken ct) => bins.Movements(locationId, ct, quarantine == true));
     api.MapPost("/receiving/transfers", (HttpContext c, CancellationToken ct) =>
         Save<TransferCommand>(c, transfers.Save, ct, TransferCommand.MaxRequestBodyBytes));
     api.MapPost("/receiving/purchases", (HttpContext c, CancellationToken ct) => Save<PurchaseCommand>(c, receiving.Save, ct));
