@@ -30,8 +30,7 @@ internal sealed class StockRegister(NpgsqlDataSource db)
             await mode.ExecuteNonQueryAsync(ct);
         await Migration.CheckWithin(connection, tx, ct);
 
-        var filtered = PositionRows.From + "\n" + """
-            JOIN brickvault.locations loc ON loc.id=p.location_id
+        var filtered = PositionRows.RegisterFrom + "\n" + """
             WHERE (p.quantity>0 OR p.id=$2 OR p.id=$5)
               AND ($5::uuid IS NULL OR p.id=$5)
               AND ($3::text IS NULL OR c.item_type=$3)
@@ -46,11 +45,8 @@ internal sealed class StockRegister(NpgsqlDataSource db)
             Nullable(NpgsqlDbType.Uuid, locationId), Nullable(NpgsqlDbType.Uuid, positionId)];
         var totals = await Rows(connection, tx, "SELECT transaction_timestamp(),count(*),coalesce(sum(p.quantity),0) " + filtered,
             r => (AsOf: r.GetDateTime(0), Count: r.GetInt64(1), Units: r.GetInt64(2)), ct, Filters());
-        var rows = await Rows(connection, tx, "SELECT " + PositionRows.Select +
-            ",p.origin_placement_id,loc.id,loc.revision,loc.code,loc.name " + filtered +
-            " AND ($6::uuid IS NULL OR p.id>$6) ORDER BY p.id LIMIT $7",
-            r => new StockRegisterRow(PositionRows.ReadLayer(r), r.GetGuid(33),
-                new LocationRow(r.GetGuid(34), r.GetInt32(35), r.GetString(36), r.GetString(37))),
+        var rows = await Rows(connection, tx, "SELECT " + PositionRows.RegisterSelect + " " + filtered +
+            " AND ($6::uuid IS NULL OR p.id>$6) ORDER BY p.id LIMIT $7", PositionRows.ReadRegister,
             ct, [.. Filters(), Nullable(NpgsqlDbType.Uuid, after), limit + 1]);
         Guid? next = null;
         if (rows.Count > limit)

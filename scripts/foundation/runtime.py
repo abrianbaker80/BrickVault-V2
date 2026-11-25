@@ -84,6 +84,19 @@ def caddyfile(s):
     admin off
     auto_https disable_redirects
     skip_install_trust{access_order}
+    # Reverse-proxy warnings can include the upstream request after private headers are added.
+    log {{
+        format filter {{
+            wrap json
+            fields {{
+                request>headers delete
+                request>uri delete
+                headers delete
+                resp_headers delete
+                response>headers delete
+            }}
+        }}
+    }}
     storage file_system {{
         root "{storage}"
     }}

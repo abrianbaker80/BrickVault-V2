@@ -625,7 +625,11 @@ def verify(port):
         try:
             qualify_runtime_start(s)
             password = (s.path / "owner-login.txt").read_text().splitlines()[1]
-            original_keys = [s.config["gateway"], s.config["session"], password]
+            original_keys = {
+                "original gateway token": s.config["gateway"],
+                "original session key": s.config["session"],
+                "original owner password": password,
+            }
             s.pg_stop()
             require(
                 not ready(s), "Readiness reported success while PostgreSQL was stopped."
@@ -872,6 +876,7 @@ def verify(port):
             from verify_counts import qualify_counts, verify_restored_counts
             from verify_holds import qualify_holds, verify_restored_holds
             from verify_losses import qualify_loss, verify_restored_loss
+            from verify_timeline import verify_timeline
 
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
@@ -879,6 +884,7 @@ def verify(port):
             counts = qualify_counts(first, rec["entityId"])
             holds = qualify_holds(first, rec["entityId"])
             loss = qualify_loss(first, rec["entityId"])
+            timeline = verify_timeline(first, loss)
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -913,6 +919,9 @@ def verify(port):
 
             verify_offhost(s, lab, port + 3, before, Browser)
             qualify_gateway_error(s)
+            from verify_gateway_logs import qualify_gateway_log_privacy
+
+            qualify_gateway_log_privacy(lab, port)
             recipient = s.config["recipient"]
             bad_recipient = recipient[:-1] + ("p" if recipient[-1] != "p" else "q")
             expected_failure(
@@ -1034,6 +1043,8 @@ def verify(port):
                 verify_restored_counts(recovered, counts)
                 verify_restored_holds(recovered, holds)
                 verify_restored_loss(recovered, loss)
+                require(verify_timeline(recovered, loss) == timeline,
+                        "Restored timeline differed from the original count, stock loss or offer and hold history.")
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]
@@ -1053,15 +1064,15 @@ def verify(port):
             finally:
                 stop(rescue)
             qualify_guest(rescue, lab)
-            for host in (s, rescue):
-                sensitive_values = [
-                    *original_keys,
-                    host.config["gateway"],
-                    host.config["session"],
-                    (host.path / "owner-login.txt").read_text().splitlines()[1],
-                    *host.config["roles"].values(),
-                    known["name"],
-                ]
+            for label, host in (("source", s), ("restored", rescue)):
+                sensitive_values = {
+                    **original_keys,
+                    "gateway token": host.config["gateway"],
+                    "session key": host.config["session"],
+                    "owner password": (host.path / "owner-login.txt").read_text().splitlines()[1],
+                    **{f"{role} password": value for role, value in host.config["roles"].items()},
+                    "catalog name": known["name"],
+                }
                 for name in (
                     "api.log",
                     "worker.log",
@@ -1072,10 +1083,9 @@ def verify(port):
                     log = (host.path / name).read_text(
                         encoding="utf-8", errors="replace"
                     )
-                    require(
-                        all(value not in log for value in sensitive_values),
-                        "Private credential or catalog text appeared in service logs.",
-                    )
+                    for category, value in sensitive_values.items():
+                        if value in log:
+                            raise AssertionError(f"Private {category} found in {label} {name}.")
             print(
                 json.dumps(
                     {

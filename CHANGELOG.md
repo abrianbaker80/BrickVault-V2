@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Added a stock timeline to the Inventory position inspector. Follow transfers, witnessed counts, build holds, offer backing and posted losses to see how a position reached its current quantity. [Position timeline](https://github.com/abrianbaker80/BrickVault-V2/issues/29)
+
 - Added stock-loss posting with operator-selected reductions per unpublished offer. A single receipt records the witnessed loss, the change in backing at that position and the receipt cost assigned to the loss. [Stock count and loss decisions](https://github.com/abrianbaker80/BrickVault-V2/issues/22)
 
 - Added a stock adjustment review to open shortages. Operators can compare the latest count, recorded receipt cost, protected build units and each unpublished offer before posting a loss. [Stock counts and adjustments](https://github.com/abrianbaker80/BrickVault-V2/issues/22)
@@ -19,6 +21,8 @@
 - Added split purchase receiving, bin confirmation, cost coverage and manually priced unpublished offers to Workbench. The staged schema upgrade preserves the original instance. [Receiving and upgrade guide](docs/verification/m3-receiving.md)
 
 ## M2 isolated technical foundation
+
+- Protected private request and response fields in gateway diagnostics when a response is interrupted. The service still records the operational warning.
 
 - The Windows backup task retries delayed OneDrive uploads within the same run and verifies the signed receipt and encrypted archive. The server continues to capture nightly. [Hosted backup operations](docs/verification/m2-hosted-backups.md)
 

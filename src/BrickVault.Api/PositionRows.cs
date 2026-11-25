@@ -24,6 +24,13 @@ internal static class PositionRows
             JOIN brickvault.catalog c ON c.id=p.catalog_id
             """;
 
+    internal const string RegisterSelect = Select + ",p.origin_placement_id,loc.id,loc.revision,loc.code,loc.name";
+    internal const string RegisterFrom = From + "\nJOIN brickvault.locations loc ON loc.id=p.location_id";
+
+    internal static StockRegisterRow ReadRegister(NpgsqlDataReader r) =>
+        new(ReadLayer(r), r.GetGuid(33),
+            new LocationRow(r.GetGuid(34), r.GetInt32(35), r.GetString(36), r.GetString(37)));
+
     internal static BinStockLayer ReadLayer(NpgsqlDataReader r)
     {
         var recordedRevision = r.GetInt32(11);

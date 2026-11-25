@@ -11,6 +11,8 @@ export type CatalogInput = Omit<Schema['CatalogCommand'], 'commandId' | 'id' | '
 export type LocationInput = Pick<Schema['LocationCommand'], 'code' | 'name'>
 export type StockPage = Schema['StockRegisterPage']
 export type PositionMovementPage = Schema['PositionMovementPage']
+export type PositionTimelinePage = Schema['StockPositionTimeline']
+export type TimelineEvent = Schema['StockPositionTimelineEvent']
 export type StockPosition = Schema['StockRegisterRow']
 export type StockQuery = NonNullable<operations['searchStockPositions']['parameters']['query']>
 export type BinTransferSnapshot = Schema['BinTransferSnapshot']
@@ -123,6 +125,32 @@ export const api = {
     const query = new URLSearchParams({ limit: '25' })
     if (after) query.set('after', after)
     return read('inventory/positions/' + encodeURIComponent(id) + '/movements?' + query, valid.PositionMovementPage)
+  },
+  async positionTimeline(id: string, after: string, previous?: StockPosition) {
+    const query = new URLSearchParams({ limit: '25' })
+    if (after) query.set('after', after)
+    const page = await read('inventory/positions/' + encodeURIComponent(id) + '/timeline?' + query, valid.StockPositionTimeline)
+    const position = page.position
+    if (page.positionId !== id || position.layer.placementId !== id || page.originPlacementId !== position.originPlacementId ||
+        page.purchaseId !== position.layer.purchaseId || page.deliveryId !== position.layer.deliveryId ||
+        page.location.id !== position.location.id || page.location.revision !== position.location.revision ||
+        page.location.code !== position.location.code || page.location.name !== position.location.name ||
+        position.layer.catalogId !== position.layer.currentCatalog.id) throw new ContractFailure()
+    if (previous && (position.originPlacementId !== previous.originPlacementId || position.location.id !== previous.location.id ||
+        position.layer.purchaseId !== previous.layer.purchaseId || position.layer.deliveryId !== previous.layer.deliveryId ||
+        position.layer.catalogId !== previous.layer.catalogId || position.location.revision < previous.location.revision)) throw new ContractFailure()
+    for (const event of page.events) {
+      if (event.locationId !== page.location.id ||
+          (event.kind === 'count' && (event.id !== event.observationId || event.ledgerQuantityAtWitness === null)) ||
+          (event.kind === 'stock-loss' && event.id !== event.postingId)) throw new ContractFailure()
+      if (event.kind === 'transfer-in' || event.kind === 'transfer-out') {
+        const destinationId = event.kind === 'transfer-in' ? id : event.relatedPositionId
+        if (!event.relatedPositionId || event.relatedPositionId === id || !event.relatedLocationCode ||
+            !event.locationCodeAtEvent || !event.relatedLocationId || event.relatedLocationId === page.location.id ||
+            event.id !== destinationId) throw new ContractFailure()
+      } else if (event.relatedPositionId) throw new ContractFailure()
+    }
+    return page
   },
   async adjustmentReview(binId: string, positionId: string, caseId: string, after = '') {
     const params = new URLSearchParams({ limit: '25' })
