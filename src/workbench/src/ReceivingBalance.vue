@@ -53,9 +53,13 @@ const amount = (value: number | null) => money(value, props.purchase.currency)
           <div class="receipt-line-head"><strong>{{ money(offer.unitPriceMinor, offer.currency) }} per unit</strong><span>{{ offer.backedQuantity }} backed</span></div>
           <small>Offer {{ offer.id }}</small><small>{{ itemLabel(catalog, offer.catalogId, offer.catalogRevision) }}</small>
           <p v-if="offer.backedQuantity && !offer.backingCurrent" class="warning">The backing needs renewed catalog confirmation. Check the item revision before using this offer.</p>
-          <ul class="bin-rows"><li v-for="b in offer.backing" :key="b.placementId"><span>{{ positions.get(b.placementId)?.label }}
-            <a v-if="positions.has(b.placementId)" :href="draftBackingLink(positions.get(b.placementId)!.bin,b.placementId,'offers',offer.id)"
-              :aria-label="'Review draft offer '+offer.id+' at position '+b.placementId">Review backing</a></span><strong>{{ b.quantity }}</strong></li></ul>
+          <ul class="bin-rows">
+            <li v-for="b in offer.backing" :key="b.placementId">
+              <a v-if="positions.has(b.placementId)" :href="draftBackingLink(positions.get(b.placementId)!.bin,b.placementId,'offers',offer.id)"
+                :aria-label="positions.get(b.placementId)!.label+' · Review draft offer '+offer.id+' at position '+b.placementId">{{ positions.get(b.placementId)!.label }}</a>
+              <span v-else>Position {{ b.placementId }}</span><strong>{{ b.quantity }}</strong>
+            </li>
+          </ul>
         </li>
       </ul>
     </section>
