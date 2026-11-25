@@ -199,7 +199,24 @@ public sealed class StockLossRecoveryTests
         var movement = Assert.Single(timeline.Events,row=>row.Id==persisted.EntityId);
         Assert.Equal(("stock-loss-recovery",lost.EntityId,2,1,0,0),(movement.Kind,movement.PostingId,
             movement.PhysicalDelta,movement.QuarantineDelta,movement.ReservedDelta,movement.OfferBackedDelta));
-        var freshCount = await fixture.Witness(persisted.Revision,7);
+        var adjustments = new StockAdjustmentReviews(fixture.Db);
+        Task<StockAdjustmentReview> ReviewAdjustment(bool includeQuarantine = true) =>
+            adjustments.Read(fixture.Bin.EntityId,fixture.Position.EntityId,later.EntityId,null,25,token,includeQuarantine);
+        Assert.Equal("stock_recount_required",await Reject(() => ReviewAdjustment()));
+        Assert.Equal("stock_recount_required",await Reject(() => ReviewAdjustment(false)));
+        Assert.Equal("stock_loss_observation_conflict",await Reject(() => new StockLosses(fixture.Db).Save(new StockLossCommand
+        {
+            CommandId=Guid.NewGuid(),ExpectedRevision=persisted.Revision,PurchaseId=fixture.Purchase.EntityId,
+            PositionId=fixture.Position.EntityId,LocationId=fixture.Bin.EntityId,ConfirmedLocationCode=fixture.Code,
+            CaseId=later.EntityId,ExpectedObservationId=later.EntityId,Reason="Stale fictional loss projection",
+            OfferReductions=[],QuarantineAttributions=[]
+        },Guid.NewGuid(),token)));
+        var freshShortCount = await fixture.Witness(persisted.Revision,6);
+        var reviewAfterWitness = await ReviewAdjustment();
+        Assert.Equal((freshShortCount.EntityId,7,1,6),(reviewAfterWitness.LatestObservation.Id,
+            reviewAfterWitness.LedgerQuantity,reviewAfterWitness.CandidateLossQuantity,reviewAfterWitness.PostLossLedgerQuantity));
+        var freshCount = await fixture.Witness(freshShortCount.Revision,7);
+        Assert.Equal(0,(await ReviewAdjustment()).CandidateLossQuantity);
         var closure = await new StockShortageClosures(fixture.Db).Save(new StockShortageClosureCommand
         {
             CommandId=Guid.NewGuid(),ExpectedRevision=freshCount.Revision,PurchaseId=fixture.Purchase.EntityId,
@@ -229,6 +246,70 @@ public sealed class StockLossRecoveryTests
         Assert.False(roles.GetBoolean(0));
         Assert.False(roles.GetBoolean(1));
         Assert.False(roles.GetBoolean(2));
+    }
+
+    [Fact]
+    [Trait("Requires", "PostgreSQL")]
+    public async Task DepletedRecountRemainsTerminalWhenLossRecoveryRevivesThePosition()
+    {
+        var token = TestContext.Current.CancellationToken;
+        await using var fixture = await Fixture.Create(5,100,token);
+        var loss = await fixture.Lose(fixture.Position.Revision,3);
+        var recounts = new Recounts(fixture.Db);
+        async Task<(RecountCommand Command,Receipt Receipt)> Queue()
+        {
+            var preview = await recounts.Freeze(new RecountPreviewRequest
+            {
+                PreviewId=Guid.NewGuid(),Scope="selected",PositionIds=[fixture.Position.EntityId],
+                Q=null,ItemType=null,LocationId=null
+            },token);
+            var command = new RecountCommand {CommandId=Guid.NewGuid(),PreviewId=preview.PreviewId};
+            return (command,await recounts.Confirm(command,Guid.NewGuid(),token));
+        }
+        async Task<RecountResult> ReadBatch(Receipt receipt) =>
+            Assert.Single((await recounts.Batch(receipt.EntityId,null,25,token)).Rows);
+        async Task<bool> IsQueued() => (await recounts.Queue(null,100,token)).Rows
+            .Any(row=>row.Target.PositionId==fixture.Position.EntityId);
+
+        var witnessedBatch = await Queue();
+        var witness = await fixture.Witness(loss.Revision,3);
+        Assert.Equal(witness.EntityId,(await ReadBatch(witnessedBatch.Receipt)).ObservationId);
+        var depletedBatch = await Queue();
+        Assert.Equal("pending",(await ReadBatch(depletedBatch.Receipt)).TaskState);
+        Assert.True(await IsQueued());
+        var destination = await new References(fixture.Db).Save(new LocationCommand
+        {
+            CommandId=Guid.NewGuid(),ExpectedRevision=0,Code="TO-"+fixture.Code,Name="Fictional transfer destination"
+        },Guid.NewGuid(),token);
+        var transfer = await new Transfers(fixture.Db).Save(new TransferCommand
+        {
+            CommandId=Guid.NewGuid(),ExpectedRevision=witness.Revision,PurchaseId=fixture.Purchase.EntityId,
+            SourcePlacementId=fixture.Position.EntityId,SourceLocationId=fixture.Bin.EntityId,ConfirmedSourceLocationCode=fixture.Code,
+            DestinationLocationId=destination.EntityId,ConfirmedDestinationLocationCode="TO-"+fixture.Code,
+            Quantity=3,Backing=[],Reason="Move all current units from the source position"
+        },Guid.NewGuid(),token);
+        Assert.Equal("depleted",(await ReadBatch(depletedBatch.Receipt)).TaskState);
+        Assert.False(await IsQueued());
+        var recovery = await fixture.Recoveries.Save(fixture.Prepare(transfer.Revision,loss.EntityId,
+            new StockLossRecoverySelection(null,1,0)),Guid.NewGuid(),token);
+        Assert.Equal("depleted",(await ReadBatch(depletedBatch.Receipt)).TaskState);
+        Assert.False(await IsQueued());
+        Assert.Equal(witness.EntityId,(await ReadBatch(witnessedBatch.Receipt)).ObservationId);
+
+        var newBatch = await Queue();
+        var newTask = await ReadBatch(newBatch.Receipt);
+        Assert.Equal(("queued","pending"),(newTask.Outcome,newTask.TaskState));
+        Assert.True(await IsQueued());
+        var newWitness = await fixture.Witness(recovery.Revision,1);
+        var completed = await ReadBatch(newBatch.Receipt);
+        Assert.Equal("witnessed",completed.TaskState);
+        Assert.Equal(newWitness.EntityId,completed.ObservationId);
+        var retained = await ReadBatch(depletedBatch.Receipt);
+        Assert.Equal("depleted",retained.TaskState);
+        Assert.Null(retained.ObservationId);
+        Assert.False(await IsQueued());
+        Assert.Equal(depletedBatch.Receipt,await recounts.Confirm(depletedBatch.Command,Guid.NewGuid(),token));
+        Assert.Equal("depleted",(await ReadBatch(depletedBatch.Receipt)).TaskState);
     }
 
     private static async Task<string> Reject(Func<Task> action) => (await Assert.ThrowsAsync<Fault>(action)).Code;

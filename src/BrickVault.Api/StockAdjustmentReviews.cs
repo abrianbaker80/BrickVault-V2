@@ -49,12 +49,14 @@ internal sealed class StockAdjustmentReviews(NpgsqlDataSource db)
         var position = rows.Single();
         if (position.Case is null)
             throw new Fault(404, "unknown_open_shortage", "No open shortage with that identifier belongs to this receipt position.");
-        if (!quarantine && position.Quarantined > 0) throw StockQuarantines.Upgrade();
 
         var latest = (await Rows(connection, tx, StockCounts.ObservationProjection + "\n" + """
             WHERE n.position_id=$1
             ORDER BY n.expected_purchase_revision DESC LIMIT 1
             """, StockCounts.ReadObservation, token, positionId)).Single();
+        if (latest.LedgerQuantity != position.Ledger)
+            throw new Fault(409, "stock_recount_required", "Stock changed after the latest witness. Record a fresh count for this receipt position before reviewing a loss.");
+        if (!quarantine && position.Quarantined > 0) throw StockQuarantines.Upgrade();
 
         var cursor = await CheckCursor(connection, tx, caseId, positionId, position.Revision, after, token);
         var offers = await Rows(connection, tx, """

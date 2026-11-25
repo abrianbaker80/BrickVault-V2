@@ -1605,7 +1605,7 @@
             }
           },
           "409": {
-            "description": "Purchase changed after the cursor was issued. Reload the review from the first page.",
+            "description": "Purchase changed after the cursor was issued, or stock changed after the latest witness. When stock_recount_required is returned, record a fresh count before reviewing loss.",
             "content": {
               "application/json": {
                 "schema": {
