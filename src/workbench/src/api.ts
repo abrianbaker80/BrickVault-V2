@@ -508,6 +508,10 @@ export function forget(command: Command) {
   localStorage.removeItem(journalKey(command.workspaceId, command.body.commandId))
 }
 
+export function requiresFreshCount(error: unknown) {
+  return error instanceof ApiFailure && error.status === 409 && error.detail?.code === 'stock_recount_required'
+}
+
 export function explain(error: unknown) {
   if (error instanceof ApiFailure) {
     if (error.detail) return error.message + ' Reference ' + error.detail.correlationId + '.'

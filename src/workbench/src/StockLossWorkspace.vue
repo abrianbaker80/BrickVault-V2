@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { api, ApiFailure, explain, type Catalog, type Location, type QuarantineSnapshot, type TransferControls } from './api'
-import { closureLink, countReceiptLink, holdPositionLink, lossReceiptLink } from './countLinks'
+import { api, ApiFailure, explain, requiresFreshCount, type Catalog, type Location, type QuarantineSnapshot, type TransferControls } from './api'
+import { closureLink, countPositionLink, countReceiptLink, holdPositionLink, lossReceiptLink } from './countLinks'
 import { itemLabel, money } from './receiving'
 import { label, time } from './presentation'
 import StockLossReceipt from './StockLossReceipt.vue'
@@ -27,6 +27,7 @@ const code = ref('')
 const reason = ref('')
 const loading = ref(false)
 const stale = ref(false)
+const recountRequired = ref(false)
 const error = ref('')
 const attempted = ref(false)
 const sending = ref(false)
@@ -100,16 +101,26 @@ watch(() => [props.caseId, props.asOf, props.connected, requested.value, quarant
     const moved = cursors.length !== displayed.value.length
     stock.value=paired
     shownQuarantineCursors.value=qCursors
+    recountRequired.value = false
     page.value = value
     displayed.value = cursors
     if (moved) { await nextTick(); if(active) heading.value?.focus() }
   } catch (failure) {
     if (!active) return
+    if (requiresFreshCount(failure)) {
+      recountRequired.value = true
+      clearDecision()
+      stale.value = false
+      displayed.value = ['']
+      page.value = undefined
+      if (requested.value.length > 1) requested.value = ['']
+      return
+    }
     if (failure instanceof ApiFailure && failure.detail?.code === 'stale_adjustment_page') { stale.value = true; return }
     if (failure instanceof ApiFailure && failure.detail?.code === 'unknown_open_shortage') {
       try {
         const known = await api.postedLoss(props.location.id,props.position,{caseId},'',1)
-        if (active && known.complete) { resolved.value = known.postingId; return }
+        if (active && known.complete) { recountRequired.value=false; resolved.value = known.postingId; return }
       } catch (lookup) {
         if (!active) return
         if (lookup instanceof ApiFailure && lookup.status===404 && lookup.detail?.code==='unknown_stock_loss') {
@@ -117,7 +128,7 @@ watch(() => [props.caseId, props.asOf, props.connected, requested.value, quarant
             const closed=await api.closure(props.location.id,props.position,caseId)
             if (!active) return
             if (!closed.complete) {error.value='Incomplete shortage closure receipt.';return}
-            closedWithoutLoss.value=closed.id
+            recountRequired.value=false; closedWithoutLoss.value=closed.id
             return
           } catch (e) {if(active) {error.value=explain(e);emit('failure',e)};return}
         }
@@ -127,9 +138,14 @@ watch(() => [props.caseId, props.asOf, props.connected, requested.value, quarant
     if (active) { error.value = explain(failure); emit('failure',failure) }
   } finally { if (active) loading.value = false }
 }, {immediate:true})
-function restart() {
+function clearDecision() {
   selections.value = {}; code.value = ''; reason.value = ''; attempted.value = false
-  stock.value=undefined; mode.value=''; entries.value={}; quarantineCursors.value=['']; shownQuarantineCursors.value=['']
+  stock.value=undefined; mode.value=''; entries.value={}
+  if (quarantineCursors.value.length > 1) quarantineCursors.value=['']
+  shownQuarantineCursors.value=['']
+}
+function restart() {
+  clearDecision()
   page.value = undefined; stale.value = false; displayed.value = ['']; requested.value = ['']; ++retry.value
 }
 function edit(offer: Offer, event: Event) {
@@ -168,7 +184,9 @@ async function post() {
         <a :href="closureLink(location.id,position,caseId,'receipt',closedWithoutLoss)">View shortage closure receipt</a></p>
       <p v-if="resolved" class="notice" role="status">The loss for this case has been posted.
         <a :href="lossReceiptLink(location.id,position,resolved)">View posted stock loss</a></p>
-      <p v-if="stale" class="warning" role="alert">The count or purchase changed. Review current quantities and choose reductions again.
+      <p v-if="recountRequired" class="warning" role="status">Stock moved after the last witnessed count. Recount this position before posting a loss.
+        <a :href="countPositionLink(location.id,position)">Record a new witnessed count</a></p>
+      <p v-if="stale && !recountRequired" class="warning" role="alert">The count or purchase changed. Review current quantities and choose reductions again.
         <button :disabled="!connected || loading" @click="restart">Review updated quantities</button></p>
       <p v-if="!connected || error" class="warning" role="status">{{ error || 'The workspace is offline.' }}
         {{ page ? 'Showing the last confirmed review.' : 'Loss review unavailable.' }}

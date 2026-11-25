@@ -124,7 +124,7 @@ async function save() {
         <dl class="details"><dt>Receipt ID</dt><dd>{{ receipt.id }}</dd><dt>Position ID</dt><dd>{{ receipt.positionId }}</dd>
           <dt>Confirmed catalog ID</dt><dd>{{ receipt.catalogId }} · Revision {{ receipt.catalogRevision }}</dd>
           <dt>Command ID</dt><dd>{{ receipt.commandId }}</dd><dt>Correlation ID</dt><dd>{{ receipt.correlationId }}</dd></dl>
-        <a v-if="receipt.recoveryPostingId" :href="recoveryLink(location.id,positionId,receipt.recoveryPostingId,receipt.id)">Recovery inspection receipt</a>
+        <a v-if="receipt.recoveryPostingId" :href="recoveryLink(location.id,positionId,receipt.recoveryPostingId,receipt.quarantineId)">Recovery inspection receipt</a>
         <a v-if="receipt.kind === 'quarantine-release'" :href="quarantineLink(location.id,positionId,receipt.quarantineId)">Original quarantine receipt</a>
         <nav aria-label="Quarantine receipt navigation"><a :href="quarantineLink(location.id,positionId)">Current position quarantine</a>
           <a :href="'#inventory/'+positionId">Position timeline</a><a :href="'#inventory/lot/'+receipt.deliveryId">Receipt lot</a></nav>
