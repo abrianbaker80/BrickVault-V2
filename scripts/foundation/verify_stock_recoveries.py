@@ -3,6 +3,7 @@
 from uuid import uuid4
 
 from verify_receiving import post, purchase_row
+from verify_recounts import read_rows
 
 RECOVER = "receiving/stock-loss-recoveries"
 
@@ -181,3 +182,56 @@ def verify_recovered_inspections(client, cases):
             assert exact_receipt(client, body, saved) == evidence
         assert purchase_row(client, purchase["id"]) == purchase
     print("Verified inspected recoveries, named quarantine sources, original loss cents, later losses and exact replay.", flush=True)
+
+
+def qualify_repopulated_recount(client, catalog):
+    where, _, revision = receive(client, catalog, "RECOVER-QUEUE", 5, 500)
+    _, loss = post_loss(client, where, revision, 3)
+    position = where["positionId"]
+    old_batch = queue_selected(client, position)
+    _, destination = post(client, "locations", 0, code="RECOVER-MOVED", name="Fictional transfer bin")
+    _, moved = post(client, "receiving/transfers", loss["revision"], purchaseId=where["purchaseId"],
+                    sourcePlacementId=position, sourceLocationId=where["locationId"],
+                    confirmedSourceLocationCode=where["confirmedLocationCode"],
+                    destinationLocationId=destination["entityId"], confirmedDestinationLocationCode="RECOVER-MOVED",
+                    quantity=3, reason="Moved the three remaining pieces", backing=[])
+    assert recount_row(client, old_batch)["taskState"] == "depleted"
+    catalog_revision = next(row["revision"] for row in client.call("workspace")["catalog"] if row["id"] == catalog)
+    _, restored = recovery(client, where, catalog, catalog_revision, moved["revision"], loss, [inspected(None, 1, 0)])
+    assert recount_row(client, old_batch)["taskState"] == "depleted"
+    assert all(row["target"]["positionId"] != position for row in read_rows(client, "inventory/recounts/queue"))
+    new_batch = queue_selected(client, position)
+    assert recount_row(client, new_batch)["outcome"] == "queued"
+    assert recount_row(client, new_batch)["taskState"] == "pending"
+    _, count = post(client, "receiving/counts", restored["revision"], **where, countedQuantity=1,
+                    reason="Witnessed the piece that returned to this position")
+    evidence = old_batch, new_batch, count["entityId"]
+    verify_repopulated_recount(client, evidence)
+    return evidence
+
+
+def queue_selected(client, position):
+    preview = dict(previewId=str(uuid4()), scope="selected", positionIds=[position],
+                   q=None, itemType=None, locationId=None)
+    result = client.call("inventory/recounts/previews", "POST", preview, expected=(200, 201))
+    assert result["complete"] and result["previewId"] == preview["previewId"]
+    body = dict(commandId=str(uuid4()), previewId=result["previewId"])
+    receipt = client.call("inventory/recounts/batches", "POST", body, expected=(200, 201))
+    assert receipt["kind"] == "recount" and receipt["entityId"] == result["previewId"]
+    return body, receipt
+
+
+def recount_row(client, batch):
+    body, saved = batch
+    assert client.call("inventory/recounts/batches", "POST", body) == saved
+    row, = read_rows(client, "inventory/recounts/batches/" + saved["entityId"])
+    return row
+
+
+def verify_repopulated_recount(client, evidence):
+    original, replacement, observed_id = evidence
+    old = recount_row(client, original)
+    new = recount_row(client, replacement)
+    assert (old["outcome"], old["taskState"], old["observationId"]) == ("queued", "depleted", None)
+    assert (new["outcome"], new["taskState"], new["observationId"]) == ("queued", "witnessed", observed_id)
+    print("Verified old depleted recount stays terminal and the new batch owns the post-recovery witness.", flush=True)

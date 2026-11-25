@@ -966,7 +966,10 @@ def verify(port):
             from verify_quarantine import qualify_quarantine, verify_recovered_quarantine
             from verify_quarantine_losses import qualify_quarantine_losses, verify_recovered_quarantine_losses
             from verify_shortage_closures import qualify_shortage_closure, verify_recovered_closure
-            from verify_stock_recoveries import qualify_recoveries, verify_recovered_inspections
+            from verify_stock_recoveries import (
+                qualify_recoveries, qualify_repopulated_recount,
+                verify_recovered_inspections, verify_repopulated_recount,
+            )
             from verify_withdrawals import qualify_withdrawals, verify_recovered_withdrawals
 
             receiving = qualify_receiving(s, first, rec["entityId"])
@@ -983,6 +986,7 @@ def verify(port):
             closure = qualify_shortage_closure(first, rec["entityId"])
             withdrawals = qualify_withdrawals(first, rec["entityId"])
             found = qualify_recoveries(first, rec["entityId"])
+            repopulated = qualify_repopulated_recount(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -1151,6 +1155,7 @@ def verify(port):
                 verify_recovered_closure(recovered, closure)
                 verify_recovered_withdrawals(recovered, withdrawals)
                 verify_recovered_inspections(recovered, found)
+                verify_repopulated_recount(recovered, repopulated)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]
