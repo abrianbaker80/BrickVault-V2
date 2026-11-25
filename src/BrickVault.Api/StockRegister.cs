@@ -17,7 +17,8 @@ internal sealed record PositionMovementPage(string Scope, Guid PositionId, DateT
 internal sealed class StockRegister(NpgsqlDataSource db)
 {
     internal const string Filtered = PositionRows.RegisterFrom + "\n" + """
-            WHERE (p.quantity>0 OR p.id=$2 OR p.id=$5)
+            LEFT JOIN brickvault.stock_build_holds exact_hold ON exact_hold.id=$2 AND exact_hold.position_id=p.id
+            WHERE (p.quantity>0 OR p.id=$2 OR p.id=$5 OR exact_hold.id IS NOT NULL)
               AND ($5::uuid IS NULL OR p.id=$5)
               AND ($3::text IS NULL OR c.item_type=$3)
               AND ($4::uuid IS NULL OR loc.id=$4)
@@ -25,7 +26,10 @@ internal sealed class StockRegister(NpgsqlDataSource db)
                    OR strpos(lower(c.item_number),lower($1))>0
                    OR strpos(lower(c.name),lower($1))>0 OR strpos(lower(c.item_type),lower($1))>0
                    OR strpos(lower(loc.code),lower($1))>0 OR strpos(lower(buy.reference),lower($1))>0
-                   OR strpos(lower(d.reference),lower($1))>0)
+                   OR strpos(lower(d.reference),lower($1))>0 OR exact_hold.id IS NOT NULL
+                   OR EXISTS (SELECT 1 FROM brickvault.current_build_holds h
+                              WHERE h.position_id=p.id AND h.remaining_quantity>0
+                                AND strpos(lower(h.purpose),lower($1))>0))
             """;
 
     internal static object[] Filters(string? query, string? itemType, Guid? locationId, Guid? positionId)
