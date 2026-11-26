@@ -84,6 +84,10 @@ def qualify_part_outs(client):
         client.call(PART_OUT, "POST", dict(invalid, residualItemCostMinor=1), expected=409)
         client.call(PART_OUT, "POST", dict(invalid, confirmedSourceLocationCode="OTHER"), expected=409)
         client.call(PART_OUT, "POST", dict(invalid, sourceCatalogRevision=source["revision"] + 1), expected=409)
+        copies = [output(source, where, 1, axle_cost, "stock"), output(source, tray, 1, driver_cost, "retained")]
+        for duplicate in (copies, [*copies, output(axle, tray, 1, None, "stock")]):
+            failure = client.call(PART_OUT, "POST", dict(invalid, outputs=duplicate), expected=409)
+            assert failure["code"] == "part_out_identity_gain"
         body, receipt = post(client, PART_OUT, rev, **fields)
         page = exact(client, body, receipt)
         assert page["sourceItemCostMinor"] == selected and page["receipt"]["deliveryId"] == delivery

@@ -192,6 +192,7 @@ CREATE FUNCTION brickvault.require_stock_part_out() RETURNS trigger LANGUAGE plp
 DECLARE
     source_digest bytea;
     produced bigint;
+    same_identity_quantity bigint;
     described bigint;
     allocated bigint;
     known_outputs bigint;
@@ -200,9 +201,14 @@ BEGIN
     WHERE c.command_id=NEW.command_id AND c.kind='part-out' AND c.entity_id=NEW.id
         AND c.revision-1=NEW.expected_purchase_revision;
     IF NOT FOUND THEN RAISE check_violation USING CONSTRAINT='part_out_receipt_required'; END IF;
-    SELECT COALESCE(sum(quantity),0),COALESCE(sum(item_cost_minor),0),count(item_cost_minor)
-    INTO produced,allocated,known_outputs FROM brickvault.stock_part_out_outputs WHERE part_out_id=NEW.id;
+    SELECT COALESCE(sum(quantity),0),COALESCE(sum(item_cost_minor),0),count(item_cost_minor),
+        COALESCE(sum(quantity) FILTER (WHERE catalog_id=NEW.source_catalog_id),0)
+    INTO produced,allocated,known_outputs,same_identity_quantity
+    FROM brickvault.stock_part_out_outputs WHERE part_out_id=NEW.id;
     SELECT COALESCE(sum(quantity),0) INTO described FROM brickvault.stock_part_out_residuals WHERE part_out_id=NEW.id;
+    IF same_identity_quantity>NEW.quantity THEN
+        RAISE check_violation USING CONSTRAINT='part_out_identity_gain';
+    END IF;
     IF produced NOT BETWEEN 1 AND 1000000 OR described>1000000 THEN
         RAISE check_violation USING CONSTRAINT='part_out_amount';
     END IF;

@@ -144,7 +144,7 @@ internal sealed class StockPartOuts(NpgsqlDataSource db)
             return receipt;
         }
         catch (PostgresException error) when (error.ConstraintName is "part_out_revision" or "part_out_scope" or "part_out_bin" or
-            "part_out_catalog" or "part_out_amount" or "part_out_cost_mismatch" or "stock_shortage_open")
+            "part_out_catalog" or "part_out_amount" or "part_out_identity_gain" or "part_out_cost_mismatch" or "stock_shortage_open")
         {
             throw error.ConstraintName switch
             {
@@ -152,6 +152,8 @@ internal sealed class StockPartOuts(NpgsqlDataSource db)
                 "part_out_scope"=>new Fault(409,"part_out_scope","Choose a current source position from the specified purchase and bin."),
                 "part_out_bin"=>new Fault(409,"part_out_bin","Confirm the current registered code for the source and each output bin."),
                 "part_out_catalog"=>new Fault(409,"part_out_catalog","Review the current source identity and each eligible output identity."),
+                "part_out_identity_gain"=>new Fault(409,"part_out_identity_gain",
+                    "Outputs with the same catalog identity as the input cannot exceed the input quantity."),
                 "part_out_cost_mismatch"=>new Fault(409,"part_out_cost_mismatch",
                     "Document output basis and residual that conserve the selected source basis. Preserve unknown amounts."),
                 "stock_shortage_open"=>new Fault(409,"stock_shortage_open","Review the open shortage before consuming this stock."),
