@@ -173,7 +173,8 @@ BEGIN
     ) THEN RAISE check_violation USING CONSTRAINT='part_out_amount'; END IF;
     IF TG_TABLE_NAME='stock_part_out_outputs' THEN
         SELECT * INTO catalog FROM brickvault.catalog
-        WHERE id=NEW.catalog_id AND revision=NEW.catalog_revision AND integration_eligible FOR SHARE;
+        WHERE id=NEW.catalog_id AND revision=NEW.catalog_revision
+            AND (NEW.disposition='retained' OR integration_eligible) FOR SHARE;
         IF NOT FOUND THEN RAISE check_violation USING CONSTRAINT='part_out_catalog'; END IF;
         PERFORM 1 FROM brickvault.locations WHERE id=NEW.location_id AND code=NEW.location_code FOR SHARE;
         IF NOT FOUND THEN RAISE check_violation USING CONSTRAINT='part_out_bin'; END IF;
@@ -293,6 +294,50 @@ BEGIN
         IF NOT FOUND THEN
             RAISE check_violation USING CONSTRAINT = 'receiving_catalog';
         END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION brickvault.guard_placement() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    delivery brickvault.deliveries%ROWTYPE;
+BEGIN
+    UPDATE brickvault.purchases SET revision = revision WHERE id = NEW.purchase_id;
+    SELECT * INTO delivery FROM brickvault.deliveries
+    WHERE id = NEW.delivery_id AND purchase_id = NEW.purchase_id;
+    IF NOT FOUND THEN
+        RAISE check_violation USING CONSTRAINT = 'receiving_delivery';
+    END IF;
+    IF NEW.quantity + COALESCE((SELECT sum(quantity) FROM brickvault.placements
+                               WHERE delivery_id = NEW.delivery_id), 0) > delivery.quantity THEN
+        RAISE check_violation USING CONSTRAINT = 'receiving_quantity';
+    END IF;
+
+    SELECT revision INTO NEW.catalog_revision FROM brickvault.catalog
+    WHERE id=NEW.catalog_id AND (integration_eligible OR EXISTS (
+        SELECT 1 FROM brickvault.stock_part_out_outputs o
+        JOIN brickvault.stock_part_outs p ON p.id=o.part_out_id
+        JOIN brickvault.commands c ON c.command_id=o.child_command_id
+        WHERE o.disposition='retained' AND o.position_id=NEW.id AND o.delivery_id=delivery.id
+            AND o.child_command_id=NEW.command_id AND c.kind='part-out-output' AND c.entity_id=delivery.id
+            AND p.purchase_id=NEW.purchase_id AND o.catalog_id=NEW.catalog_id
+            AND o.catalog_revision=NEW.confirmed_catalog_revision AND o.catalog_revision=delivery.catalog_revision
+            AND o.quantity=NEW.quantity AND o.location_id=NEW.location_id AND o.location_code=NEW.location_code
+    )) FOR SHARE;
+    IF NOT FOUND OR (delivery.catalog_id IS NOT NULL AND delivery.catalog_id <> NEW.catalog_id) THEN
+        RAISE check_violation USING CONSTRAINT = 'receiving_catalog';
+    END IF;
+    -- A mixed receipt has no recorded catalog version to stand in for explicit operator confirmation.
+    IF NEW.confirmed_catalog_revision IS DISTINCT FROM NEW.catalog_revision
+        AND (NEW.confirmed_catalog_revision IS NOT NULL OR delivery.catalog_id IS NULL
+            OR delivery.catalog_revision <> NEW.catalog_revision) THEN
+        RAISE check_violation USING CONSTRAINT = 'receiving_catalog_reconfirmation';
+    END IF;
+    PERFORM 1 FROM brickvault.locations
+    WHERE id = NEW.location_id AND code = NEW.location_code FOR SHARE;
+    IF NOT FOUND THEN
+        RAISE check_violation USING CONSTRAINT = 'receiving_bin';
     END IF;
     RETURN NEW;
 END;

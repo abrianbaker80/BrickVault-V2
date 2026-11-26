@@ -62,7 +62,7 @@ def qualify_part_outs(client):
     for kind, name in (("set", "Source set"), ("part", "Axle"), ("minifigure", "Driver")):
         _, row = post(client, "catalog", 0, itemType=kind, itemNumber="TRANSFORM-" + kind, variant=None,
                       name=name, colorId=0, colorState="known", condition="new", completeness="complete",
-                      source="Fictional part-out", license="operator-owned", mapping="confirmed")
+                      source="Fictional part-out", license="restricted" if kind == "minifigure" else "operator-owned", mapping="confirmed")
         catalog.append(row)
     source, axle, driver = catalog
     _, bin_row = post(client, "locations", 0, code="OUTPUT-TRAY", name="Inspected output tray")
@@ -88,6 +88,8 @@ def qualify_part_outs(client):
         for duplicate in (copies, [*copies, output(axle, tray, 1, None, "stock")]):
             failure = client.call(PART_OUT, "POST", dict(invalid, outputs=duplicate), expected=409)
             assert failure["code"] == "part_out_identity_gain"
+        forbidden = dict(lines[1], disposition="stock")
+        assert client.call(PART_OUT, "POST", dict(invalid, outputs=[lines[0], forbidden]), expected=409)["code"] == "part_out_catalog"
         body, receipt = post(client, PART_OUT, rev, **fields)
         page = exact(client, body, receipt)
         assert page["sourceItemCostMinor"] == selected and page["receipt"]["deliveryId"] == delivery
@@ -109,6 +111,14 @@ def qualify_part_outs(client):
             assert events[0]["transformationId"] == receipt["entityId"] and events[0]["physicalDelta"] == line["quantity"]
             assert events[0]["relatedPositionId"] == where["positionId"]
             assert lot["quarantinedQuantity"] == (line["quantity"] if line["disposition"] == "retained" else 0)
+            if line["disposition"] == "retained":
+                assert not line["recordedCatalog"]["integrationEligible"] and lot["freeToBackQuantity"] == 0
+                release = dict(commandId=str(uuid4()), expectedRevision=receipt["revision"], purchaseId=where["purchaseId"],
+                               positionId=line["positionId"], locationId=line["location"]["id"],
+                               confirmedLocationCode=line["confirmedLocationCode"], catalogId=driver["entityId"],
+                               catalogRevision=driver["revision"], quarantineId=line["quarantineId"], quantity=1,
+                               inspectionResult="passed", reason="Confirmed condition while licensing remains unresolved")
+                assert client.call("inventory/quarantine-releases", "POST", release, expected=409)["code"] == "quarantine_catalog_conflict"
         source_events = client.call(f"inventory/positions/{where['positionId']}/timeline?{HISTORY}&partOuts=true")["events"]
         assert [(e["transformationId"], e["physicalDelta"]) for e in source_events if e["kind"] == "part-out"] == [(receipt["entityId"], -1)]
         client.call(f"inventory/receipt-lots/{delivery}?{HISTORY}", expected=426)
