@@ -7,9 +7,10 @@ import PositionInspector from './PositionInspector.vue'
 import ReceiptLotInspector from './ReceiptLotInspector.vue'
 import RecountPreview from './RecountPreview.vue'
 import RecountWork from './RecountWork.vue'
+import PartOut from './PartOut.vue'
 
 const props = defineProps<{ workspace: Workspace; connected: boolean; controls: TransferControls; csrf: string }>()
-const emit = defineEmits<{ failure: [reason: unknown] }>()
+const emit = defineEmits<{ failure: [reason: unknown]; refresh: [] }>()
 const search = ref<HTMLInputElement>()
 const host = ref<HTMLElement>()
 const inspector = ref<HTMLElement>()
@@ -30,6 +31,11 @@ const recountRoute = () => {
   if (hash.startsWith('#inventory/recounts/')) return hash.slice('#inventory/recounts/'.length).toLowerCase()
   return ''
 }
+const partOutRoute = () => {
+  const match = /^#inventory\/part-out\/([a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})(?:\/([a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}))?$/i.exec(location.hash)
+  return match ? {source:match[1].toLowerCase(),receipt:match[2]?.toLowerCase()} : undefined
+}
+const partOut = ref(partOutRoute())
 const recountView = ref(recountRoute())
 const checked = ref(new Set<string>())
 const outsidePage = computed(() => checked.value.size - (result.value?.rows.filter(r => checked.value.has(r.layer.placementId)).length ?? 0))
@@ -48,7 +54,7 @@ async function closePreview() {
   if (opener && !opener.disabled) opener.focus()
   else search.value?.focus()
 }
-const routeId = () => !recountRoute() && !location.hash.startsWith('#inventory/lot/') && location.hash.startsWith('#inventory/')
+const routeId = () => !partOutRoute() && !recountRoute() && !location.hash.startsWith('#inventory/lot/') && location.hash.startsWith('#inventory/')
   ? location.hash.slice('#inventory/'.length).toLowerCase() : ''
 const selected = ref(routeId())
 const selectedLot = ref(lotRoute())
@@ -123,6 +129,7 @@ async function close() {
   else search.value?.focus()
 }
 function routeChanged() {
+  partOut.value = partOutRoute()
   recountView.value = recountRoute()
   preview.value = undefined
   selected.value = routeId()
@@ -161,7 +168,8 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <RecountWork v-if="recountView" :key="recountView" :route="recountView" :as-of="workspace.asOf" :state="connected ? 'ready' : 'unavailable'" @failure="emit('failure',$event)" />
+  <PartOut v-if="partOut" :key="[controls.workspaceId,partOut.source,partOut.receipt].join('/')" :source="partOut.source" :receipt-id="partOut.receipt" :workspace="workspace" :connected="connected" :controls="controls" @failure="emit('failure',$event)" @refresh="emit('refresh')" />
+  <RecountWork v-else-if="recountView" :key="recountView" :route="recountView" :as-of="workspace.asOf" :state="connected ? 'ready' : 'unavailable'" @failure="emit('failure',$event)" />
   <template v-else>
   <div class="metrics inventory-metrics" role="group" :aria-label="lastRead ? 'Last received matching totals' : 'Matching inventory totals'">
     <div><span>Matching positions</span><strong>{{ totalsKnown ? result?.matchingPositions : '—' }}</strong></div>

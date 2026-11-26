@@ -8,7 +8,7 @@ type Step = 'receive' | 'putaway' | 'offer'
 const pendingLines = computed(() => props.purchase.deliveries.filter(d => d.intakeQuantity > 0))
 const remaining = computed(() => props.purchase.orderedQuantity - props.purchase.deliveries.reduce((total, delivery) => total + delivery.quantity, 0))
 const eligible = computed(() => props.workspace.catalog.filter(c => c.integrationEligible))
-const placements = computed(() => props.purchase.deliveries.flatMap(d => d.placements.map(p => ({ ...p, delivery: d.reference }))))
+const placements = computed(() => [...props.purchase.deliveries,...(props.purchase.derivedLayers ?? [])].flatMap(d => d.placements.map(p => ({ ...p, delivery: d.reference }))))
 const step = ref<Step>(pendingLines.value.length ? 'putaway' : remaining.value ? 'receive' : 'offer')
 const baseRevision = ref(props.purchase.revision)
 const stale = computed(() => props.purchase.revision !== baseRevision.value)

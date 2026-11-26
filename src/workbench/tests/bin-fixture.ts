@@ -72,7 +72,7 @@ export async function audit(page: Page) {
   expect(scan.violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target) }))).toEqual([])
 }
 export async function purchases(page: Page, ids: string[]) {
-  const response = await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true')
+  const response = await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true')
   expect(response.ok()).toBe(true)
   const snapshot: ReceivingWorkspace = await response.json()
   return snapshot.purchases.filter(p => ids.includes(p.id))

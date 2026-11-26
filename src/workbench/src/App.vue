@@ -138,6 +138,7 @@ function openForm() {
             <a v-if="notice.quarantineReceipt" :href="notice.quarantineReceipt">View quarantine receipt</a>
             <a v-if="notice.withdrawalLink" :href="notice.withdrawalLink">View withdrawal receipt</a>
             <a v-if="notice.recountLink" :href="notice.recountLink">View recount receipt</a>
+            <a v-if="notice.partOutReceipt" :href="notice.partOutReceipt">View part-out receipt</a>
             <a v-if="notice.recoveryReceipt" :href="notice.recoveryReceipt">View recovery receipt</a>
             <a v-if="notice.closureReceipt" :href="notice.closureReceipt">View shortage closure receipt</a>
             <a v-if="notice.lossLink" :href="notice.lossLink">View posted stock loss</a>
@@ -167,7 +168,7 @@ function openForm() {
             </div>
             <Activity v-if="page === 'activity'" :workspace="workspace" :connected="readState === 'ready'" @failure="expired" />
             <Inventory v-else-if="page === 'inventory'" :key="session.workspaceId" :workspace="workspace" :connected="readState !== 'disconnected'"
-              :csrf="session.csrfToken" :controls="{ enabled: canCreate, pending: pending.length > 0, feedback: error || journalError, workspaceId: session.workspaceId, dispatch: record }" @failure="expired" />
+              :csrf="session.csrfToken" :controls="{ enabled: canCreate, pending: pending.length > 0, feedback: error || journalError, workspaceId: session.workspaceId, dispatch: record }" @failure="expired" @refresh="refresh()" />
             <template v-else-if="page === 'receiving'">
               <Receiving v-if="receiving" :key="session.workspaceId" :stock="receiving" :workspace="workspace" :workspace-id="session.workspaceId" :enabled="canCreate" :uncertain="pending.length > 0 && !submitting" :dispatch="record" />
               <p v-else role="status">{{ readState === 'loading' ? 'Loading receiving records…' : 'Receiving records are unavailable.' }}</p>

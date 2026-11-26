@@ -1,7 +1,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import { api, ApiFailure, commandLabel, explain, forget, InvalidCommand, readJournal, remember } from './api'
+import { recoverPartOut } from './recoverPartOut'
 import { recoverInspection } from './recoverInspection'
-import { recoveryLink, closureLink, countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink } from './countLinks'
+import { partOutLink, recoveryLink, closureLink, countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink } from './countLinks'
 import { recoverStockLoss } from './stockLoss'
 import type { CatalogInput, Command, Held, LocationInput, ReceivingWorkspace, Session, Workspace } from './api'
 
@@ -13,7 +14,7 @@ export function useWorkbench(page: Ref<string>) {
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
   const error = ref('')
-  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string; recountLink?: string; quarantineReceipt?: string; withdrawalLink?: string; closureReceipt?:string; recoveryReceipt?:string } | null>(null)
+  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string; recountLink?: string; quarantineReceipt?: string; withdrawalLink?: string; closureReceipt?:string; recoveryReceipt?:string; partOutReceipt?:string } | null>(null)
   const pending = shallowRef<Command[]>([])
   const held = shallowRef<Held[]>([])
   const journalError = ref('')
@@ -149,6 +150,7 @@ export function useWorkbench(page: Ref<string>) {
     if (!firstAttempt) {
       try {
         let committed: { correlationId: string } | undefined
+        let partOutReceipt: string | undefined
         let recoveryReceipt: string | undefined
         let closureReceipt: string | undefined
         let countLink: string | undefined
@@ -190,6 +192,12 @@ export function useWorkbench(page: Ref<string>) {
             recountLink = '#inventory/recounts/' + result.batchId
           } catch (failure) {
             if (!(failure instanceof ApiFailure && failure.status === 404 && failure.detail?.code === 'unknown_recount_batch')) throw failure
+          }
+        } else if (command.kind === 'part-out') {
+          const row = await recoverPartOut(command.body)
+          if (row) {
+            committed = row
+            partOutReceipt = partOutLink(row.sourcePositionId,row.id)
           }
         } else if (command.kind === 'stock-loss-recovery') {
           const row=await recoverInspection(command.body)
@@ -261,7 +269,7 @@ export function useWorkbench(page: Ref<string>) {
           forget(command)
           loadPending()
           notice.value = { message: 'Confirmed the original ' + commandLabel(command) + '.',
-            correlationId: committed.correlationId, countLink, lossLink, recountLink, quarantineReceipt, withdrawalLink, closureReceipt, recoveryReceipt, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
+            correlationId: committed.correlationId, countLink, lossLink, recountLink, quarantineReceipt, withdrawalLink, closureReceipt, recoveryReceipt, partOutReceipt, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
           await refresh()
           return
         }
@@ -290,6 +298,7 @@ export function useWorkbench(page: Ref<string>) {
       notice.value = { message: 'Saved ' + commandLabel(command) + ' · revision ' + receipt.revision + '.',
         quarantineReceipt: command.kind === 'quarantine' || command.kind === 'quarantine-release' ? quarantineLink(command.body.locationId, command.body.positionId, receipt.entityId) : undefined,
         withdrawalLink: command.kind === 'offer-withdrawal' ? draftBackingLink(command.body.locationId,command.body.positionId,'receipts',receipt.entityId) : undefined,
+        partOutReceipt: command.kind==='part-out' ? partOutLink(command.body.sourcePositionId,receipt.entityId) : undefined,
         recoveryReceipt: command.kind==='stock-loss-recovery' ? recoveryLink(command.body.locationId,command.body.positionId,command.body.postingId,receipt.entityId) : undefined,
         closureReceipt: command.kind==='shortage-closure' ? closureLink(command.body.locationId,command.body.positionId,command.body.caseId,'receipt',receipt.entityId) : undefined,
         recountLink: command.kind === 'recount' ? '#inventory/recounts/' + receipt.entityId : undefined,
@@ -320,7 +329,8 @@ export function useWorkbench(page: Ref<string>) {
             'stock_loss_offer_reduction_mismatch','stock_loss_quarantine_attribution_mismatch','invalid_shortage_closure','shortage_closure_position_mismatch',
             'shortage_closure_bin_conflict','shortage_closure_case_conflict','shortage_closure_observation_conflict',
             'shortage_closure_count_not_exact','shortage_closure_commitments_inconsistent','invalid_stock_loss_recovery','stock_loss_recovery_scope',
-            'stock_loss_recovery_bin','stock_loss_recovery_catalog','stock_loss_recovery_amount'].includes(reason.detail.code)) {
+            'stock_loss_recovery_bin','stock_loss_recovery_catalog','stock_loss_recovery_amount','invalid_stock_part_out','part_out_scope','part_out_bin',
+            'part_out_catalog','part_out_amount','part_out_cost_mismatch'].includes(reason.detail.code)) {
         forget(command)
         loadPending()
         if (reason.status === 409) await refresh()
