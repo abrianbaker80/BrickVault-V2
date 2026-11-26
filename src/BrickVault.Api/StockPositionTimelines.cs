@@ -11,7 +11,8 @@ internal sealed record StockPositionTimelineEvent(string Kind, Guid Id, Guid Com
     string? LocationCodeAtEvent, string? Reason, Guid? RelatedPositionId, Guid? RelatedLocationId,
     string? RelatedLocationCode, Guid? ObservationId, Guid? CaseId, Guid? PostingId, Guid? HoldId, string? HoldPurpose,
     Guid? OfferId, int? LedgerQuantityAtWitness,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantineDelta = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantineDelta = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? TransformationId = null);
 internal sealed record StockPositionTimeline(string Scope, DateTime AsOf, bool Complete, bool HasUndatedEvents, Guid PositionId,
     Guid PurchaseId, Guid OriginPlacementId, Guid DeliveryId, LocationRow Location,
     string? NextAfter, IReadOnlyList<StockPositionTimelineEvent> Events, StockRegisterRow Position);
@@ -33,6 +34,19 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
                 p.location_id,p.location_code,NULL::text,NULL::uuid,NULL::uuid,NULL::text,
                 NULL::uuid,NULL::uuid,NULL::uuid,NULL::uuid,NULL::text,NULL::uuid,NULL::integer
             FROM brickvault.placements p JOIN scope_positions s ON s.id=p.id
+            WHERE NOT EXISTS (SELECT 1 FROM brickvault.stock_part_out_outputs o WHERE o.position_id=p.id)
+
+            UNION ALL
+            SELECT t.source_position_id,'part-out',t.id,t.command_id,NULL,t.quantity,-t.quantity,0,0,
+                t.source_location_id,t.source_location_code,t.reason,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL
+            FROM brickvault.stock_part_outs t JOIN scope_positions s ON s.id=t.source_position_id
+
+            UNION ALL
+            SELECT o.position_id,'part-out-output',o.delivery_id,o.child_command_id,NULL,o.quantity,o.quantity,0,0,
+                o.location_id,o.location_code,t.reason,t.source_position_id,t.source_location_id,t.source_location_code,
+                NULL,NULL,NULL,NULL,NULL,NULL,NULL
+            FROM brickvault.stock_part_out_outputs o JOIN scope_positions s ON s.id=o.position_id
+            JOIN brickvault.stock_part_outs t ON t.id=o.part_out_id
 
             UNION ALL
             SELECT s.id,CASE WHEN t.id=s.id THEN 'transfer-in' ELSE 'transfer-out' END,t.id,t.command_id,NULL,
@@ -68,6 +82,7 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
                 q.location_id,q.location_code,q.reason,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL
             FROM brickvault.stock_quarantines q JOIN scope_positions s ON s.id=q.position_id
             WHERE NOT EXISTS (SELECT 1 FROM brickvault.stock_loss_recoveries r WHERE r.id=q.id AND r.command_id=q.command_id)
+              AND NOT EXISTS (SELECT 1 FROM brickvault.stock_part_out_outputs o WHERE o.position_id=q.id AND o.child_command_id=q.command_id)
 
             UNION ALL
             SELECT r.position_id,'quarantine-release',r.id,r.command_id,NULL,r.quantity,0,0,0,
@@ -109,7 +124,7 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
         )
         """;
 
-    public async Task<StockPositionTimeline> Read(Guid positionId, string? after, int limit, CancellationToken token, bool withdrawals = false, bool quarantine = false, bool closures = false, bool recoveries = false)
+    public async Task<StockPositionTimeline> Read(Guid positionId, string? after, int limit, CancellationToken token, bool withdrawals = false, bool quarantine = false, bool closures = false, bool recoveries = false, bool partOuts = false)
     {
         if (limit is < 1 or > 100)
             throw new Fault(400, "invalid_timeline_page", "Choose a timeline page size between 1 and 100.");
@@ -128,12 +143,16 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
                 EXISTS (SELECT 1 FROM events WHERE kind IN ('quarantine','quarantine-release')),
                 EXISTS (SELECT 1 FROM events WHERE kind='offer-withdrawal'),
                 EXISTS (SELECT 1 FROM events WHERE kind='shortage-closure'),
-                EXISTS (SELECT 1 FROM events WHERE kind='stock-loss-recovery')
-            """, r => (AsOf: r.GetDateTime(0), HasUndatedEvents: r.GetBoolean(1), HasQuarantine: r.GetBoolean(2), HasWithdrawals: r.GetBoolean(3), HasClosures: r.GetBoolean(4), HasRecoveries: r.GetBoolean(5)), token, positionId)).Single();
+                EXISTS (SELECT 1 FROM events WHERE kind='stock-loss-recovery'),
+                EXISTS (SELECT 1 FROM events WHERE kind IN ('part-out','part-out-output'))
+                    OR EXISTS (SELECT 1 FROM brickvault.stock_part_out_outputs o
+                        JOIN brickvault.placement_positions p ON p.origin_placement_id=o.position_id WHERE p.id=$1)
+            """, r => (AsOf: r.GetDateTime(0), HasUndatedEvents: r.GetBoolean(1), HasQuarantine: r.GetBoolean(2), HasWithdrawals: r.GetBoolean(3), HasClosures: r.GetBoolean(4), HasRecoveries: r.GetBoolean(5), HasPartOuts: r.GetBoolean(6)), token, positionId)).Single();
         if (!quarantine && metadata.HasQuarantine) throw StockQuarantines.Upgrade();
         if (!withdrawals && metadata.HasWithdrawals) throw DraftBackingWithdrawals.Upgrade();
         if (!closures && metadata.HasClosures) throw StockShortageClosures.Upgrade();
         if (!recoveries && metadata.HasRecoveries) throw StockLossRecoveries.Upgrade();
+        if (!partOuts && metadata.HasPartOuts) throw LayerPartOut.Upgrade();
 
         var cursor = await Cursor(connection, tx, positionId, after, token);
         var rows = await ReadEvents(connection, tx, positionId, false, cursor?.Revision, cursor?.Kind, cursor?.Id,
@@ -168,17 +187,20 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
                         AND (s.resolved_by_command_id IS NULL OR e.purchase_revision<closing.revision)
                     ORDER BY opening.expected_purchase_revision DESC LIMIT 1
                 ) ELSE e.case_id END,
-                e.posting_id,e.hold_id,e.hold_purpose,e.offer_id,e.ledger_at_witness,e.purchase_revision,e.position_id,recovery.quarantine_quantity
+                e.posting_id,e.hold_id,e.hold_purpose,e.offer_id,e.ledger_at_witness,e.purchase_revision,e.position_id,
+                CASE WHEN output.disposition='retained' THEN output.quantity ELSE recovery.quarantine_quantity END,
+                CASE WHEN e.kind='part-out' THEN e.id ELSE output.part_out_id END
             FROM (
                 SELECT * FROM events
                 WHERE $2::integer IS NULL OR (purchase_revision,kind COLLATE "C",id,position_id)<($2,$3::text COLLATE "C",$4::uuid,$5::uuid)
                 ORDER BY purchase_revision DESC,kind COLLATE "C" DESC,id DESC,position_id DESC LIMIT $6
             ) e LEFT JOIN brickvault.stock_loss_recoveries recovery ON e.kind='stock-loss-recovery' AND recovery.id=e.id
+            LEFT JOIN brickvault.stock_part_out_outputs output ON e.kind='part-out-output' AND output.delivery_id=e.id
             ORDER BY e.purchase_revision DESC,e.kind COLLATE "C" DESC,e.id DESC,e.position_id DESC
             """, r => new StockTimelineAtPosition(r.GetGuid(23), new StockPositionTimelineEvent(r.GetString(0),r.GetGuid(1),r.GetGuid(2),r.GetGuid(3),r.GetInt32(22),Optional<DateTime>(r,4),
                 r.GetInt32(5),r.GetInt32(6),r.GetInt32(7),r.GetInt32(8),r.GetGuid(9),Text(r,10),Text(r,11),
                 Optional<Guid>(r,12),Optional<Guid>(r,13),Text(r,14),Optional<Guid>(r,15),Optional<Guid>(r,16),
-                Optional<Guid>(r,17),Optional<Guid>(r,18),Text(r,19),Optional<Guid>(r,20),Optional<int>(r,21),Optional<int>(r,24))),
+                Optional<Guid>(r,17),Optional<Guid>(r,18),Text(r,19),Optional<Guid>(r,20),Optional<int>(r,21),Optional<int>(r,24),Optional<Guid>(r,25))),
             token, scope, Nullable(NpgsqlDbType.Integer,revision), Nullable(NpgsqlDbType.Text,kind),
             Nullable(NpgsqlDbType.Uuid,eventId), Nullable(NpgsqlDbType.Uuid,positionId), limit);
 
@@ -193,7 +215,8 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
         var parts = after.Split('.');
         if (parts.Length != 3 || !Guid.TryParseExact(parts[0],"N",out var scope) || scope != positionId ||
             parts[1] is not ("putaway" or "transfer-in" or "transfer-out" or "count" or "hold" or "hold-release" or
-            "stock-loss" or "offer-backing" or "quarantine" or "quarantine-release" or "offer-withdrawal" or "shortage-closure" or "stock-loss-recovery") ||
+            "stock-loss" or "offer-backing" or "quarantine" or "quarantine-release" or "offer-withdrawal" or "shortage-closure" or "stock-loss-recovery"
+            or "part-out" or "part-out-output") ||
             !Guid.TryParseExact(parts[2],"N",out var id)) throw InvalidCursor();
         await using var anchor = Query(connection, tx, ScopedEvents(false) + "\n" + """
             SELECT purchase_revision FROM events WHERE kind=$2 AND id=$3
