@@ -12,7 +12,7 @@ public sealed partial class StockLossRecoveryTests
     public async Task ManualPartOutConservesBasisAcrossLossRecoveryAndLaterLoss(int? inputBasis)
     {
         var token = TestContext.Current.CancellationToken;
-        await using var fixture = await Fixture.Create(3, inputBasis, token);
+        await using var fixture = await Fixture.Create(3, inputBasis, token, partOut: true);
         var first = await fixture.Lose(fixture.Position.Revision, 2);
         var second = await fixture.Lose(first.Revision, 1);
         var restored = await fixture.Recoveries.Save(fixture.Prepare(second.Revision,first.EntityId,new StockLossRecoverySelection(null,1,0)),

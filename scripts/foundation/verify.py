@@ -909,12 +909,17 @@ def verify(port):
                 flush=True,
             )
             migration_test(s)
+            # A transformed layer permanently changes what a legacy workspace-wide reader can represent.
+            # Keep compatibility tests on their own workspace regardless of xUnit execution order.
             testdb = "bv_m2_test_contract"
-            s.create_db(testdb)
-            s.migrate(testdb)
-            s.grants(testdb)
+            part_out_db = "bv_m2_test_part_out"
+            for database in (testdb, part_out_db):
+                s.create_db(database)
+                s.migrate(database)
+                s.grants(database)
             testenv = s.app_env("bv_api", testdb)
             testenv["BV_TEST_DB"] = testenv["BV_DB"]
+            testenv["BV_TEST_PART_OUT_DB"] = s.app_env("bv_api", part_out_db)["BV_DB"]
             project = ROOT / "tests/BrickVault.Api.Tests"
             subprocess.run(
                 [DOTNET, "restore", project, "--locked-mode"],
