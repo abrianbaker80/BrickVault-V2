@@ -115,5 +115,46 @@ public sealed partial class StockLossRecoveryTests
         var lineage = await parts.Evidence(available.PositionId,written.EntityId,null,null,25,null,25,token);
         Assert.Equal(available.DeliveryId,lineage.Receipt.DeliveryId);
         Assert.Null(Assert.Single(lineage.Outputs).ItemCostMinor);
+        var descendant = Assert.Single(lineage.Outputs);
+        var diagnostic = await references.Diagnostic(descendant.CorrelationId,token);
+        Assert.Equal(("part-out-output",descendant.CommandId,descendant.DeliveryId,written.CommandId,written.CorrelationId),
+            (diagnostic.Kind,diagnostic.CommandId,diagnostic.EntityId,diagnostic.ParentCommandId,diagnostic.ParentCorrelationId));
+
+        var hold = await new BuildHolds(fixture.Db).Save(new StockHoldCommand
+        {
+            CommandId=Guid.NewGuid(),ExpectedRevision=written.Revision,PurchaseId=fixture.Purchase.EntityId,
+            PositionId=descendant.PositionId,LocationId=destination.EntityId,ConfirmedLocationCode=registeredCode,
+            Quantity=1,Purpose="Fictional model",Reason="Reserve derived stock"
+        },Guid.NewGuid(),token);
+        var supplied = await new Receiving(fixture.Db).LossSnapshot(token,quarantine:true,recoveries:true,partOuts:true);
+        var purchase = Assert.Single(supplied.Purchases,row=>row.Id==fixture.Purchase.EntityId);
+        Assert.Equal(fixture.Delivery.EntityId,Assert.Single(purchase.Deliveries).Id);
+        Assert.Contains(purchase.DerivedLayers!,row=>row.Id==descendant.DeliveryId && row.ItemCostMinor is null);
+        var rival = chained with
+        {
+            CommandId=Guid.NewGuid(),ExpectedRevision=hold.Revision,SourcePositionId=descendant.PositionId,
+            SourceLocationId=destination.EntityId,ConfirmedSourceLocationCode=registeredCode,
+            SourceCatalogId=retained.EntityId,SourceCatalogRevision=retained.Revision,ResidualItemCostMinor=null,
+            Outputs=[chained.Outputs[0] with { ConfirmedLocationCode=registeredCode,CatalogId=child.EntityId,CatalogRevision=child.Revision }]
+        };
+        Assert.Equal("part_out_amount",await Reject(()=>Save(rival)));
+        var released = await new BuildHolds(fixture.Db).Save(new StockHoldReleaseCommand
+        {
+            CommandId=Guid.NewGuid(),ExpectedRevision=hold.Revision,PurchaseId=fixture.Purchase.EntityId,
+            Quantity=1,HoldId=hold.EntityId,Reason="Release specific derived hold"
+        },Guid.NewGuid(),token);
+        rival=rival with {ExpectedRevision=released.Revision};
+        async Task<(Receipt? Receipt,string? Error)> TrySave(StockPartOutCommand choice)
+        {
+            try { return (await Save(choice),null); }
+            catch (Fault fault) { return (null,fault.Code); }
+        }
+
+        var competitor=rival with {CommandId=Guid.NewGuid()};
+        var claims=await Task.WhenAll(TrySave(rival),TrySave(competitor));
+        var winner=Assert.Single(claims,result=>result.Receipt is not null).Receipt!;
+        Assert.Equal("revision_conflict",Assert.Single(claims,result=>result.Receipt is null).Error);
+        Assert.Equal(0,(await parts.Review(descendant.PositionId,1,null,25,token)).AvailableQuantity);
+        Assert.Equal(winner,await Save(winner.CommandId==rival.CommandId?rival:competitor));
     }
 }
