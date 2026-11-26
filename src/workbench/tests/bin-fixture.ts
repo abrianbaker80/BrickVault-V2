@@ -60,6 +60,23 @@ export async function fixture(page: Page) {
   }) }
 }
 
+export async function duringBackgroundRead(page: Page, path: (url: URL) => boolean, inspect: () => Promise<void>) {
+  let arrived!: () => void, release!: () => void
+  const started = new Promise<void>(resolve => { arrived = resolve })
+  const resumed = new Promise<void>(resolve => { release = resolve })
+  await page.route(path, async route => {
+    const reply = await route.fetch()
+    arrived()
+    try { await resumed; await route.fulfill({ response: reply }) }
+    finally { await reply.dispose() }
+  }, { times: 1 })
+  const completed = page.waitForResponse(response => path(new URL(response.url())))
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await started
+  try { await inspect() }
+  finally { release(); await completed }
+}
+
 export const stock = (page: Page) => page.getByRole('region', { name: 'Stock in this bin' })
 export const open = (page: Page, bin: { name: string }) => page.getByRole('button', { name: 'Inspect ' + bin.name }).click()
 export const endpoint = (bin: { id: string }) => '**/api/v1/receiving/bins/' + bin.id + '/movements?*'

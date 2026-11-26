@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 import { test } from './trusted'
-import { audit, endpoint, fixture, open, purchases, stock, totals } from './bin-fixture'
+import { audit, duringBackgroundRead, endpoint, fixture, open, purchases, stock, totals } from './bin-fixture'
 import type { BinTransferSnapshot } from '../src/api'
 
 const transfer = (page: Page) => page.getByRole('dialog', { name: 'Transfer stock' })
@@ -35,7 +35,15 @@ test('a counted transfer replays the same receipt and carries the chosen offers 
   await form.getByLabel('Confirm destination bin code').fill(f.b.code)
   await form.getByRole('button', { name: 'Confirm transfer' }).click()
   await expect(form.getByRole('alert')).toContainText('Choose backing')
-  await form.getByLabel('Move backed units for offer ' + f.firstOffer).fill('1')
+  const allocation=form.getByLabel('Move backed units for offer ' + f.firstOffer)
+  await allocation.focus()
+  await duringBackgroundRead(page,u=>u.pathname.endsWith('/bins/'+f.a.id+'/movements'), async()=>{
+    await expect(form.getByRole('button',{name:'Confirm transfer'})).toBeDisabled()
+    await expect(allocation).toBeFocused()
+    await page.keyboard.type('1')
+    await expect(allocation).toHaveValue('1')
+  })
+  await expect(form.getByRole('button',{name:'Confirm transfer'})).toBeEnabled()
   await form.getByLabel('Move backed units for offer ' + offer2).fill('2')
   await expect(form).toContainText('4 units to move · 3 backed')
   await expect(form.getByRole('alert')).toHaveCount(0)

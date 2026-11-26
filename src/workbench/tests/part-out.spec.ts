@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { test } from './trusted'
-import { audit, fixture, purchases } from './bin-fixture'
+import { audit, duringBackgroundRead, fixture, purchases } from './bin-fixture'
 import { partOutLink, quarantineLink } from '../src/countLinks'
 import type { PartOutCommand, PartOutEvidence } from '../src/api'
 
@@ -166,6 +166,15 @@ test('stale and partial part-out reviews fence unknown basis and an ambiguous re
   await form(page).getByRole('checkbox').check()
   await expect(submit(page)).toBeEnabled()
   const path=(url:URL)=>url.pathname.endsWith('/'+x.position+'/part-out-review')
+  const reason=form(page).getByLabel('Reason for part-out')
+  await reason.focus();await reason.press('End')
+  await duringBackgroundRead(page,path,async()=>{
+    await expect(submit(page)).toBeDisabled()
+    await expect(reason).toBeFocused()
+    await page.keyboard.type(' verified')
+    await expect(reason).toHaveValue('Unknown acquisition amount verified')
+  })
+  await expect(submit(page)).toBeEnabled()
   await page.route(path,async route=>{
     const r=await route.fetch();await route.fulfill({json:{...await r.json(),complete:false}});await r.dispose()
   },{times:1})

@@ -28,8 +28,9 @@ const catalog=(id:string)=>props.workspace.catalog.find(c=>c.id===id)
 const location=(id:string)=>props.workspace.locations.find(l=>l.id===id)
 const changedOutput=computed(()=>outputs.value.some(o=>(o.catalog && catalog(o.catalog)?.revision!==o.revision) ||
   (o.bin && location(o.bin)?.revision!==o.binRevision)))
-const live=computed(()=>props.connected && props.workspace.complete && !loading.value && !error.value && !stale.value && !changedOutput.value)
-const editable=computed(()=>live.value && props.controls.enabled && !sending.value)
+const confirmedRead=computed(()=>props.connected && props.workspace.complete && !error.value && !stale.value && !changedOutput.value)
+const live=computed(()=>confirmedRead.value && !loading.value)
+const editable=computed(()=>confirmedRead.value && props.controls.enabled && !sending.value)
 const selected=computed(()=>page.value?.selectionAvailable && integer(input.value) && Number(input.value)===page.value.requestedQuantity)
 const known=computed(()=>selected.value && page.value!.sourceItemCostMinor!==null)
 function amount(text:string) {
@@ -50,7 +51,7 @@ const validOutputs=computed(()=>!repeatsInput.value && outputs.value.length>0 &&
   outputs.value.reduce((n,o)=>n+Number(o.quantity),0)<=1_000_000)
 const validResiduals=computed(()=>residualMode.value==='none' || (residualMode.value==='record' && physical.value.length>0 &&
   physical.value.every(r=>r.disposition && r.description.trim() && integer(r.quantity)) && physical.value.reduce((n,r)=>n+Number(r.quantity),0)<=1_000_000))
-const allowed=computed(()=>editable.value && selected.value && !page.value?.hasOpenShortage && code.value===page.value?.position.location.code &&
+const allowed=computed(()=>editable.value && !loading.value && selected.value && !page.value?.hasOpenShortage && code.value===page.value?.position.location.code &&
   validOutputs.value && validResiduals.value && balanced.value && !!reason.value.trim() && acknowledged.value)
 function selectCatalog(o:Output,event:Event) {
   o.catalog=(event.target as HTMLSelectElement).value; o.revision=catalog(o.catalog)?.revision ?? 0;acknowledged.value=false
