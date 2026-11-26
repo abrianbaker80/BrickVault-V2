@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Added manual part-out in Inventory. Confirm the source and output bins, assign documented costs, and record retained, discarded or missing material. Each output links back to its purchase and source position. [Manual part-out](https://github.com/abrianbaker80/BrickVault-V2/issues/41)
+
 - Added inspection when recording pieces found after a posted stock loss. Workbench tracks saleable and quarantined quantities against their original loss records and restores the receipt cost assigned to those pieces. [Recovery inspection](https://github.com/abrianbaker80/BrickVault-V2/issues/39)
 
 - Added a separate confirmation for a shortage when a later count finds every piece in the same receipt position. Operators can reopen the resolution receipt from count history. [Exact recount resolution](https://github.com/abrianbaker80/BrickVault-V2/issues/37)

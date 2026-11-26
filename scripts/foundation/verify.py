@@ -981,6 +981,7 @@ def verify(port):
                 verify_recovered_inspections, verify_repopulated_recount,
             )
             from verify_withdrawals import qualify_withdrawals, verify_recovered_withdrawals
+            from verify_part_outs import qualify_part_outs, verify_restored_part_outs
 
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
@@ -997,6 +998,7 @@ def verify(port):
             withdrawals = qualify_withdrawals(first, rec["entityId"])
             found = qualify_recoveries(first, rec["entityId"])
             repopulated = qualify_repopulated_recount(first, rec["entityId"])
+            transformations = qualify_part_outs(first)
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -1166,6 +1168,7 @@ def verify(port):
                 verify_recovered_withdrawals(recovered, withdrawals)
                 verify_recovered_inspections(recovered, found)
                 verify_repopulated_recount(recovered, repopulated)
+                verify_restored_part_outs(recovered, transformations)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]
