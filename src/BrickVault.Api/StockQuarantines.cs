@@ -56,7 +56,9 @@ internal sealed record StockQuarantineReleaseCommand : StockQuarantineCommand
 internal sealed record StockQuarantineRow(Guid Id, int Quantity, int ReleasedQuantity, int RemainingQuantity,
     string Reason, Guid CommandId, Guid CorrelationId, DateTime RecordedAt,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? LostQuantity = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? RecoveryPostingId = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? RecoveryPostingId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? PartOutId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? PartOutSourcePositionId = null);
 
 internal sealed record StockQuarantineSnapshot(string Scope, DateTime AsOf, bool Complete, StockRegisterRow Position,
     int PurchaseRevision, bool HasOpenShortage, int OnHandQuantity, int QuarantinedQuantity, int HeldQuantity,
@@ -68,7 +70,9 @@ internal sealed record StockQuarantineEvidence(string Scope, DateTime AsOf, bool
     Guid DeliveryId, Guid PurchaseId,
     string Kind, Guid Id, Guid CommandId, Guid CorrelationId, int Revision, Guid QuarantineId, string? InspectionResult,
     int Quantity, string Reason, DateTime RecordedAt,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? RecoveryPostingId = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? RecoveryPostingId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? PartOutId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? PartOutSourcePositionId = null);
 
 internal sealed class StockQuarantines(NpgsqlDataSource db)
 {
@@ -129,7 +133,7 @@ internal sealed class StockQuarantines(NpgsqlDataSource db)
 
     private static Fault Conflict(string code, string message) => new(409, code, message);
 
-    public async Task<StockQuarantineSnapshot> Snapshot(Guid positionId, Guid? after, int limit, CancellationToken token, bool lossAttribution = false, bool recoveries = false)
+    public async Task<StockQuarantineSnapshot> Snapshot(Guid positionId, Guid? after, int limit, CancellationToken token, bool lossAttribution = false, bool recoveries = false, bool partOuts = false)
     {
         if (limit is < 1 or > 100)
             throw new Fault(400, "invalid_quarantine_page", "Choose a quarantine page size from 1 to 100.");
@@ -162,6 +166,17 @@ internal sealed class StockQuarantines(NpgsqlDataSource db)
             if ((bool)(await recovered.ExecuteScalarAsync(token))!) throw StockLossRecoveries.Upgrade();
         }
 
+        if (!partOuts)
+        {
+            await using var transformed = Query(connection, tx, """
+                SELECT EXISTS (
+                    SELECT 1 FROM brickvault.stock_part_out_outputs
+                    WHERE position_id=$1 AND disposition='retained'
+                )
+                """, positionId);
+            if ((bool)(await transformed.ExecuteScalarAsync(token))!) throw StockPartOuts.Upgrade();
+        }
+
         int? previous = null;
         if (after.HasValue)
         {
@@ -173,14 +188,17 @@ internal sealed class StockQuarantines(NpgsqlDataSource db)
                 throw new Fault(400, "invalid_quarantine_cursor", "Use a continuation from this position's quarantine history.");
         }
         var rows = await Rows(connection, tx, """
-            SELECT q.id,q.quantity,q.released_quantity,q.remaining_quantity,q.reason,q.command_id,c.correlation_id,a.occurred_at,q.lost_quantity,recovery.loss_id
+            SELECT q.id,q.quantity,q.released_quantity,q.remaining_quantity,q.reason,q.command_id,c.correlation_id,a.occurred_at,q.lost_quantity,recovery.loss_id,transformed.id,transformed.source_position_id
             FROM brickvault.current_stock_quarantines q JOIN brickvault.commands c USING(command_id)
             JOIN brickvault.audit a ON a.command_id=q.command_id
             LEFT JOIN brickvault.stock_loss_recoveries recovery ON recovery.id=q.id AND recovery.command_id=q.command_id
+            LEFT JOIN brickvault.stock_part_out_outputs output ON output.position_id=q.id AND output.child_command_id=q.command_id
+            LEFT JOIN brickvault.stock_part_outs transformed ON transformed.id=output.part_out_id
             WHERE q.position_id=$1 AND ($2::integer IS NULL OR q.expected_purchase_revision<$2)
             ORDER BY q.expected_purchase_revision DESC LIMIT $3
             """, r => new StockQuarantineRow(r.GetGuid(0),r.GetInt32(1),r.GetInt32(2),r.GetInt32(3),r.GetString(4),
-                r.GetGuid(5),r.GetGuid(6),r.GetDateTime(7),lossAttribution ? r.GetInt32(8) : null,recoveries ? Optional<Guid>(r,9) : null),
+                r.GetGuid(5),r.GetGuid(6),r.GetDateTime(7),lossAttribution ? r.GetInt32(8) : null,recoveries ? Optional<Guid>(r,9) : null,
+                partOuts ? Optional<Guid>(r,10) : null,partOuts ? Optional<Guid>(r,11) : null),
             token, positionId, Nullable(NpgsqlDbType.Integer, previous), limit + 1);
         Guid? next = null;
         if (rows.Count > limit)
@@ -197,7 +215,7 @@ internal sealed class StockQuarantines(NpgsqlDataSource db)
             sellable, position.Open ? 0 : sellable - layer.BackedQuantity, rows, next);
     }
 
-    public async Task<StockQuarantineEvidence> Evidence(Guid positionId, Guid? receiptId, Guid? commandId, CancellationToken token, bool recoveries = false)
+    public async Task<StockQuarantineEvidence> Evidence(Guid positionId, Guid? receiptId, Guid? commandId, CancellationToken token, bool recoveries = false, bool partOuts = false)
     {
         if (receiptId.HasValue == commandId.HasValue)
             throw new Fault(400, "invalid_quarantine_lookup", "Select exactly one quarantine receipt or command.");
@@ -215,20 +233,24 @@ internal sealed class StockQuarantines(NpgsqlDataSource db)
                 FROM brickvault.stock_quarantine_releases r WHERE r.position_id=$1
             )
             SELECT transaction_timestamp(),j.location_id,l.revision,l.code,l.name,j.location_code,j.catalog_id,j.catalog_revision,
-                p.delivery_id,j.purchase_id,CASE WHEN c.kind='stock-loss-recovery' THEN 'quarantine' ELSE c.kind END,
+                p.delivery_id,j.purchase_id,CASE WHEN c.kind IN ('stock-loss-recovery','part-out-output') THEN 'quarantine' ELSE c.kind END,
                 j.id,j.command_id,c.correlation_id,c.revision,j.quarantine_id,
-                j.inspection_result,j.quantity,j.reason,a.occurred_at,j.recorded_catalog,recovery.loss_id
+                j.inspection_result,j.quantity,j.reason,a.occurred_at,j.recorded_catalog,recovery.loss_id,transformed.id,transformed.source_position_id
             FROM journal j JOIN brickvault.commands c USING(command_id) JOIN brickvault.audit a ON a.command_id=j.command_id
             JOIN brickvault.locations l ON l.id=j.location_id JOIN brickvault.current_placement_stock p ON p.id=j.position_id
             LEFT JOIN brickvault.stock_loss_recoveries recovery ON recovery.id=j.quarantine_id
+            LEFT JOIN brickvault.stock_part_out_outputs output ON output.position_id=j.quarantine_id AND output.disposition='retained'
+            LEFT JOIN brickvault.stock_part_outs transformed ON transformed.id=output.part_out_id
             WHERE ($2::uuid IS NULL OR j.id=$2) AND ($3::uuid IS NULL OR j.command_id=$3)
             """, r => new StockQuarantineEvidence("quarantine-receipt",r.GetDateTime(0),true,positionId,
                 new LocationRow(r.GetGuid(1),r.GetInt32(2),r.GetString(3),r.GetString(4)),r.GetString(5),r.GetGuid(6),r.GetInt32(7),
                 JsonSerializer.Deserialize<CatalogRow>(r.GetString(20), Wire.Json)!, r.GetGuid(8),r.GetGuid(9),r.GetString(10),r.GetGuid(11),r.GetGuid(12),r.GetGuid(13),r.GetInt32(14),r.GetGuid(15),
-                r.IsDBNull(16) ? null : r.GetString(16),r.GetInt32(17),r.GetString(18),r.GetDateTime(19),Optional<Guid>(r,21)), token, positionId,
+                r.IsDBNull(16) ? null : r.GetString(16),r.GetInt32(17),r.GetString(18),r.GetDateTime(19),Optional<Guid>(r,21),
+                Optional<Guid>(r,22),Optional<Guid>(r,23)), token, positionId,
             Nullable(NpgsqlDbType.Uuid, receiptId), Nullable(NpgsqlDbType.Uuid, commandId))).SingleOrDefault() ??
             throw new Fault(404, "unknown_quarantine_receipt", "No matching quarantine receipt belongs to this position.");
         if (!recoveries && result.RecoveryPostingId.HasValue) throw StockLossRecoveries.Upgrade();
+        if (!partOuts && result.PartOutId.HasValue) throw StockPartOuts.Upgrade();
         return result;
     }
 }

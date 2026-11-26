@@ -4,7 +4,7 @@ using Xunit;
 namespace BrickVault.Api.Tests;
 
 [Collection("Build holds")]
-public sealed class StockLossRecoveryTests
+public sealed partial class StockLossRecoveryTests
 {
     [Theory]
     [InlineData(100)]

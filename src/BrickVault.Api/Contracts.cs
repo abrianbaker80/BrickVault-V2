@@ -116,7 +116,9 @@ internal sealed record AuditRow(Guid CommandId, Guid EntityId, int Revision, str
 internal sealed record Health(string WorkerState, DateTime? LastHeartbeat, int PendingJobs, int CompletedJobs,
     int BlockedJobs, int SchemaVersion, int ApiVersion);
 internal sealed record Diagnostic(Guid CommandId, Guid EntityId, int Revision, string Kind, Guid CorrelationId,
-    string JobState, int PayloadVersion, DateTime? ProcessedAt);
+    string JobState, int PayloadVersion, DateTime? ProcessedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? ParentCommandId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? ParentCorrelationId = null);
 internal sealed record ReferenceExport(string Scope, DateTime AsOf, bool Complete,
     List<CatalogRow> Catalog, List<LocationRow> Locations);
 internal sealed record Workspace(string Scope, DateTime AsOf, bool Complete,

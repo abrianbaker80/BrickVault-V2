@@ -107,7 +107,7 @@ internal sealed class References(NpgsqlDataSource db)
         var audit = await Rows(connection, tx, """
             SELECT c.command_id,c.entity_id,c.revision,c.kind,c.correlation_id,a.actor,a.occurred_at
             FROM brickvault.audit a JOIN brickvault.commands c USING (command_id)
-            WHERE c.kind NOT IN ('transfer','count','hold','hold-release','stock-loss','recount','quarantine','quarantine-release','offer-withdrawal','shortage-closure','stock-loss-recovery')
+            WHERE c.kind NOT IN ('transfer','count','hold','hold-release','stock-loss','recount','quarantine','quarantine-release','offer-withdrawal','shortage-closure','stock-loss-recovery','part-out','part-out-output')
               AND ($1 OR c.kind IN ('catalog','location')) ORDER BY a.occurred_at DESC,c.command_id
             """, r => new AuditRow(r.GetGuid(0),r.GetGuid(1),r.GetInt32(2),r.GetString(3),r.GetGuid(4),
                 r.GetString(5),r.GetDateTime(6)), token, allAudit);
@@ -119,13 +119,18 @@ internal sealed class References(NpgsqlDataSource db)
     {
         await using var connection = await db.OpenConnectionAsync(token);
         await using var cmd = Query(connection, null, """
-            SELECT c.command_id,c.entity_id,c.revision,c.kind,c.correlation_id,j.status,j.payload_version,e.processed_at
-            FROM brickvault.commands c JOIN brickvault.jobs j USING (command_id)
-            LEFT JOIN brickvault.job_effects e USING (command_id) WHERE c.correlation_id=$1
+            SELECT c.command_id,c.entity_id,c.revision,c.kind,c.correlation_id,j.status,j.payload_version,e.processed_at,
+                parent.command_id,parent.correlation_id
+            FROM brickvault.commands c
+            LEFT JOIN brickvault.stock_part_out_outputs o ON o.child_command_id=c.command_id
+            LEFT JOIN brickvault.stock_part_outs p ON p.id=o.part_out_id
+            LEFT JOIN brickvault.commands parent ON parent.command_id=p.command_id
+            JOIN brickvault.jobs j ON j.command_id=COALESCE(parent.command_id,c.command_id)
+            LEFT JOIN brickvault.job_effects e ON e.command_id=j.command_id WHERE c.correlation_id=$1
             """, correlationId);
         await using var r = await cmd.ExecuteReaderAsync(token);
         if (!await r.ReadAsync(token)) throw new Fault(404, "unknown_command", "No command has that correlation ID.");
         return new Diagnostic(r.GetGuid(0),r.GetGuid(1),r.GetInt32(2),r.GetString(3),r.GetGuid(4),
-            r.GetString(5),r.GetInt32(6),Optional<DateTime>(r,7));
+            r.GetString(5),r.GetInt32(6),Optional<DateTime>(r,7),Optional<Guid>(r,8),Optional<Guid>(r,9));
     }
 }
