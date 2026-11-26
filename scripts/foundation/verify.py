@@ -3,6 +3,7 @@
 import base64
 import errno
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from unittest.mock import patch
 import http.cookiejar
 import hashlib
@@ -679,11 +680,34 @@ def legacy_grants_test(s, archive):
     print("Stopped-instance grant refresh and repeat: passed.", flush=True)
 
 
+@contextmanager
+def keep_verifier_awake():
+    """Keep a timed Windows qualification running while the display can turn off."""
+    if not WIN:
+        yield
+        return
+
+    import ctypes
+
+    set_state = ctypes.WinDLL("kernel32", use_last_error=True).SetThreadExecutionState
+    set_state.argtypes = [ctypes.c_uint32]
+    set_state.restype = ctypes.c_uint32
+    continuous, system_required = 0x80000000, 0x00000001
+    previous = set_state(continuous | system_required)
+    if not previous:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        yield
+    finally:
+        if not set_state(continuous | previous):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
 def verify(port):
     if not 1024 <= port <= 65527:
         raise ValueError("Qualification needs nine consecutive unprivileged ports.")
     qualify_listener_probe()
-    with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
+    with keep_verifier_awake(), tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
         for source_version in range(2, 13):
             qualify_staged_upgrade(lab, port, source_version)
