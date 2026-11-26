@@ -260,6 +260,16 @@ def migration_test(s):
         "An interrupted recovery upgrade changed the previous database.",
     )
     s.sql("DROP TABLE brickvault.stock_loss_recovery_allocations;", db, "bv_migrator")
+    s.migrate(db, to=12)
+    s.sql("CREATE TABLE brickvault.stock_part_out_outputs(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "12"
+        and s.sql("SELECT to_regclass('brickvault.stock_part_outs') IS NULL", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted part-out upgrade changed the previous database.",
+    )
+    s.sql("DROP TABLE brickvault.stock_part_out_outputs;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -273,11 +283,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "12",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "13",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v12, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v13, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -327,7 +337,7 @@ def qualify_staged_upgrade(lab, port, source_version):
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "12"), (original, str(source_version))):
+    for inst, schema in ((candidate, "13"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -675,7 +685,7 @@ def verify(port):
     qualify_listener_probe()
     with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in range(2, 12):
+        for source_version in range(2, 13):
             qualify_staged_upgrade(lab, port, source_version)
         from verify_withdrawals import verify_legacy_allocation
         legacy = init(lab / "legacy-withdrawal", lab / "legacy-keys", port)
