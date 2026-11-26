@@ -330,7 +330,7 @@ export function useWorkbench(page: Ref<string>) {
             'shortage_closure_bin_conflict','shortage_closure_case_conflict','shortage_closure_observation_conflict',
             'shortage_closure_count_not_exact','shortage_closure_commitments_inconsistent','invalid_stock_loss_recovery','stock_loss_recovery_scope',
             'stock_loss_recovery_bin','stock_loss_recovery_catalog','stock_loss_recovery_amount','invalid_stock_part_out','part_out_scope','part_out_bin',
-            'part_out_catalog','part_out_amount','part_out_cost_mismatch'].includes(reason.detail.code)) {
+            'part_out_catalog','part_out_amount','part_out_identity_gain','part_out_cost_mismatch'].includes(reason.detail.code)) {
         forget(command)
         loadPending()
         if (reason.status === 409) await refresh()

@@ -20,6 +20,14 @@ const receipt=(page:Page)=>page.getByRole('region',{name:'Part-out receipt',exac
 const line=(page:Page,n:number)=>form(page).getByRole('group',{name:'Output '+n,exact:true})
 const submit=(page:Page)=>form(page).getByRole('button',{name:'Record part-out',exact:true})
 const post='**/api/v1/receiving/part-outs'
+async function reopenPending(page:Page,workspaceId:string,body:PartOutCommand) {
+  await page.evaluate(({workspaceId,body})=>localStorage.setItem('brickvault.v2.pending.'+workspaceId+'.'+body.commandId,
+    JSON.stringify({workspaceId,kind:'part-out',body})),{workspaceId,body})
+  await page.reload()
+  const pending=page.getByRole('region',{name:'Pending confirmations'})
+  await expect(pending.getByRole('button',{name:'Retry command'})).toBeEnabled()
+  return pending
+}
 async function output(page:Page,n:number,catalog:string,bin:{id:string;code:string},quantity:string,
  disposition:'stock'|'retained',cost?:string) {
   const row=line(page,n)
@@ -270,10 +278,8 @@ test('reconciliation on every output page keeps a pending command when its full 
       confirmedLocationCode:x.f.b.code,quantity:1,itemCostMinor:1,disposition:'stock'}))}
   const saved=await page.request.post('/api/v1/receiving/part-outs',{headers:x.f.headers,data:body})
   expect(saved.status()).toBe(200)
-  const {entityId}=await saved.json(),workspaceId=x.f.headers['X-Workspace-Id']
-  await page.evaluate(({workspaceId,body})=>localStorage.setItem('brickvault.v2.pending.'+workspaceId+'.'+body.commandId,
-    JSON.stringify({workspaceId,kind:'part-out',body})),{workspaceId,body})
-  await page.reload()
+  const {entityId}=await saved.json()
+  const pending=await reopenPending(page,x.f.headers['X-Workspace-Id'],body)
   await page.route(post,async route=>{
     expect(route.request().postDataJSON()).toEqual(body)
     await route.fulfill({status:413,json:{code:'request_too_large',message:'Request too large',correlationId:randomUUID()}})
@@ -286,17 +292,46 @@ test('reconciliation on every output page keeps a pending command when its full 
     await route.fulfill({json:{...data,sourceItemCostMinor:wrongBasis ? 104 : data.sourceItemCostMinor}})
     await reply.dispose()
   })
-  const pending=page.getByRole('region',{name:'Pending confirmations'})
   await pending.getByRole('button',{name:'Retry command'}).press('Enter')
   await expect(page.getByRole('alert')).toContainText('verify the original command')
   expect(pages).toEqual([100,1])
   await expect(pending).toBeVisible()
   wrongBasis=false
   await page.getByRole('button',{name:'Refresh',exact:true}).press('Enter')
+  await expect(pending.getByRole('button',{name:'Retry command'})).toBeEnabled()
   await pending.getByRole('button',{name:'Retry command'}).press('Enter')
+  await expect(page.getByRole('link',{name:'View part-out receipt'})).toHaveAttribute('href',partOutLink(x.position,entityId))
   await expect(pending).toHaveCount(0)
   expect(pages).toEqual([100,1,100,1])
-  await expect(page.getByRole('link',{name:'View part-out receipt'})).toHaveAttribute('href',partOutLink(x.position,entityId))
+})
+
+test('the server rejects an old pending input identity gain and a corrected decision posts the original stock once',async({page})=>{
+  const x=await layer(page,1,null)
+  const body:PartOutCommand={commandId:randomUUID(),expectedRevision:3,purchaseId:x.purchaseId,sourcePositionId:x.position,
+    sourceLocationId:x.f.a.id,confirmedSourceLocationCode:x.f.a.code,sourceCatalogId:x.set,sourceCatalogRevision:1,
+    quantity:1,reason:'Prior draft multiplied source identity',residualItemCostMinor:null,physicalResiduals:[],
+    outputs:[{lineId:randomUUID(),catalogId:x.set,catalogRevision:1,locationId:x.f.b.id,
+      confirmedLocationCode:x.f.b.code,quantity:2,itemCostMinor:null,disposition:'retained'}]}
+  const pending=await reopenPending(page,x.f.headers['X-Workspace-Id'],body)
+  const response=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/receiving/part-outs'))
+  await pending.getByRole('button',{name:'Retry command'}).press('Enter')
+  const rejected=await response
+  expect(rejected.status()).toBe(409)
+  expect((await rejected.json()).code).toBe('part_out_identity_gain')
+  await expect(pending).toHaveCount(0)
+  const [before]=await purchases(page,[x.purchaseId])
+  expect(before.revision).toBe(3);expect(before.derivedLayers).toHaveLength(0)
+  expect(before.balances.physicalOnHand).toBe(1)
+  await review(page,x.position,x.f.a.code)
+  await output(page,1,x.axle,x.f.b,'2','stock')
+  await form(page).getByRole('combobox',{name:'Discarded or lost material'}).selectOption('none')
+  await form(page).getByLabel('Reason for part-out').fill('Two actual axles')
+  await form(page).getByRole('checkbox').check()
+  await submit(page).press('Enter')
+  await expect(receipt(page)).toContainText('Two actual axles')
+  const [after]=await purchases(page,[x.purchaseId])
+  expect(after.revision).toBe(4);expect(after.derivedLayers).toHaveLength(1)
+  expect(after.balances.physicalOnHand).toBe(2)
 })
 
 test('part-out receipt pages preserve their independent positions and keep the last verified evidence on partial reads',async({page})=>{
