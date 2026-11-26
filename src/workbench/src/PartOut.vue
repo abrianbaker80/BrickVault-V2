@@ -40,7 +40,13 @@ function amount(text:string) {
 function outputCost(o:Output) {return !known.value || o.basis==='unassigned' ? null : amount(o.amount)}
 const assigned=computed(()=>outputs.value.reduce((total,o)=>total+(outputCost(o) ?? 0),0))
 const balanced=computed(()=>!known.value || (amount(residualCost.value)!==undefined && page.value!.sourceItemCostMinor===assigned.value+amount(residualCost.value)!))
-const validOutputs=computed(()=>outputs.value.length>0 && outputs.value.every(o=>catalog(o.catalog)?.integrationEligible && o.revision===catalog(o.catalog)?.revision &&
+const repeatsInput=computed(()=>{
+  const inputCatalogId=page.value?.position.layer.catalogId
+  if (!inputCatalogId || !integer(input.value)) return false
+  const matching=outputs.value.filter(o=>o.catalog===inputCatalogId && integer(o.quantity))
+  return matching.reduce((total,o)=>total+Number(o.quantity),0)>Number(input.value)
+})
+const validOutputs=computed(()=>!repeatsInput.value && outputs.value.length>0 && outputs.value.every(o=>catalog(o.catalog)?.integrationEligible && o.revision===catalog(o.catalog)?.revision &&
   location(o.bin)?.code===o.code && integer(o.quantity) && !!o.disposition && (!known.value || (o.basis && outputCost(o)!==undefined))) &&
   outputs.value.reduce((n,o)=>n+Number(o.quantity),0)<=1_000_000)
 const validResiduals=computed(()=>residualMode.value==='none' || (residualMode.value==='record' && physical.value.length>0 &&
@@ -161,6 +167,7 @@ async function save() {
             <small v-else-if="selected">Input cost is unknown. This output retains unknown basis.</small>
             <button v-if="outputs.length>1" type="button" @click="outputs.splice(index,1)">Remove output {{ index+1 }}</button>
           </fieldset>
+          <p v-if="repeatsInput" class="warning" role="status">Outputs matching the input item exceed the number of input units consumed. Check their identities and quantities across all bins.</p>
           <button type="button" @click="outputs.push(makeOutput())">Add another output</button>
         </fieldset>
         <fieldset :disabled="!editable || !selected"><legend>Physical remainder or loss</legend>
