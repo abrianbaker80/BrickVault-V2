@@ -3,6 +3,7 @@
 import base64
 import errno
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from unittest.mock import patch
 import http.cookiejar
 import hashlib
@@ -260,6 +261,16 @@ def migration_test(s):
         "An interrupted recovery upgrade changed the previous database.",
     )
     s.sql("DROP TABLE brickvault.stock_loss_recovery_allocations;", db, "bv_migrator")
+    s.migrate(db, to=12)
+    s.sql("CREATE TABLE brickvault.stock_part_out_outputs(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "12"
+        and s.sql("SELECT to_regclass('brickvault.stock_part_outs') IS NULL", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted part-out upgrade changed the previous database.",
+    )
+    s.sql("DROP TABLE brickvault.stock_part_out_outputs;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -273,11 +284,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "12",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "13",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v12, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v13, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -327,7 +338,7 @@ def qualify_staged_upgrade(lab, port, source_version):
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "12"), (original, str(source_version))):
+    for inst, schema in ((candidate, "13"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -669,13 +680,36 @@ def legacy_grants_test(s, archive):
     print("Stopped-instance grant refresh and repeat: passed.", flush=True)
 
 
+@contextmanager
+def keep_verifier_awake():
+    """Keep a timed Windows qualification running while the display can turn off."""
+    if not WIN:
+        yield
+        return
+
+    import ctypes
+
+    set_state = ctypes.WinDLL("kernel32", use_last_error=True).SetThreadExecutionState
+    set_state.argtypes = [ctypes.c_uint32]
+    set_state.restype = ctypes.c_uint32
+    continuous, system_required = 0x80000000, 0x00000001
+    previous = set_state(continuous | system_required)
+    if not previous:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        yield
+    finally:
+        if not set_state(continuous | previous):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
 def verify(port):
     if not 1024 <= port <= 65527:
         raise ValueError("Qualification needs nine consecutive unprivileged ports.")
     qualify_listener_probe()
-    with tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
+    with keep_verifier_awake(), tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in range(2, 12):
+        for source_version in range(2, 13):
             qualify_staged_upgrade(lab, port, source_version)
         from verify_withdrawals import verify_legacy_allocation
         legacy = init(lab / "legacy-withdrawal", lab / "legacy-keys", port)
@@ -899,12 +933,17 @@ def verify(port):
                 flush=True,
             )
             migration_test(s)
+            # A transformed layer permanently changes what a legacy workspace-wide reader can represent.
+            # Keep compatibility tests on their own workspace regardless of xUnit execution order.
             testdb = "bv_m2_test_contract"
-            s.create_db(testdb)
-            s.migrate(testdb)
-            s.grants(testdb)
+            part_out_db = "bv_m2_test_part_out"
+            for database in (testdb, part_out_db):
+                s.create_db(database)
+                s.migrate(database)
+                s.grants(database)
             testenv = s.app_env("bv_api", testdb)
             testenv["BV_TEST_DB"] = testenv["BV_DB"]
+            testenv["BV_TEST_PART_OUT_DB"] = s.app_env("bv_api", part_out_db)["BV_DB"]
             project = ROOT / "tests/BrickVault.Api.Tests"
             subprocess.run(
                 [DOTNET, "restore", project, "--locked-mode"],
@@ -971,6 +1010,7 @@ def verify(port):
                 verify_recovered_inspections, verify_repopulated_recount,
             )
             from verify_withdrawals import qualify_withdrawals, verify_recovered_withdrawals
+            from verify_part_outs import qualify_part_outs, verify_restored_part_outs
 
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
@@ -987,6 +1027,7 @@ def verify(port):
             withdrawals = qualify_withdrawals(first, rec["entityId"])
             found = qualify_recoveries(first, rec["entityId"])
             repopulated = qualify_repopulated_recount(first, rec["entityId"])
+            transformations = qualify_part_outs(first)
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -1156,6 +1197,7 @@ def verify(port):
                 verify_recovered_withdrawals(recovered, withdrawals)
                 verify_recovered_inspections(recovered, found)
                 verify_repopulated_recount(recovered, repopulated)
+                verify_restored_part_outs(recovered, transformations)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]

@@ -101,9 +101,9 @@ internal sealed record DeliveryRow(Guid Id, string Reference, int Quantity, Guid
     int? CatalogRevision, int? ItemCostMinor, int IntakeQuantity, IReadOnlyList<PlacementRow> Placements);
 internal sealed record OfferRow(Guid Id, Guid CatalogId, int CatalogRevision, string Currency,
     int UnitPriceMinor, IReadOnlyList<BackingRow> Backing, int BackedQuantity, int PublishedQuantity, bool BackingCurrent);
-internal sealed record StockBalances(int PhysicalOnHand, int Unavailable, int Reserved, int Free,
-    int BackedQuantity, int WithheldQuantity, int PublishedQuantity, int KnownCostFreeQuantity,
-    int UnknownCostFreeQuantity, long? KnownItemCostMinor, long? KnownPurchaseComponentsMinor);
+internal sealed record StockBalances(long PhysicalOnHand, long Unavailable, long Reserved, long Free,
+    long BackedQuantity, long WithheldQuantity, int PublishedQuantity, long KnownCostFreeQuantity,
+    long UnknownCostFreeQuantity, long? KnownItemCostMinor, long? KnownPurchaseComponentsMinor);
 internal sealed record PurchaseRow(Guid Id, int Revision, string Reference, string Source, string Currency,
     int OrderedQuantity, int? PendingChargeMinor, IReadOnlyList<DeliveryRow> Deliveries,
     IReadOnlyList<OfferRow> Offers, StockBalances Balances);
@@ -125,14 +125,36 @@ internal sealed record DeliveryRecoveryTotals(long GrossLostQuantity, long Recov
     }
 }
 
+internal sealed record LayerPartOut(Guid? ParentTransformationId, Guid? SourceDeliveryId, Guid? SourcePositionId,
+    int ConsumedQuantity, int? ConsumedItemCostMinor)
+{
+    internal static LayerPartOut? Read(NpgsqlDataReader row, int first, bool partOuts)
+    {
+        var parent = Database.Optional<Guid>(row, first);
+        var consumed = row.GetInt32(first + 3);
+        if (!partOuts)
+        {
+            if (parent.HasValue || consumed > 0) throw Upgrade();
+            return null;
+        }
+        return new(parent, Database.Optional<Guid>(row, first + 1), Database.Optional<Guid>(row, first + 2),
+            consumed, Database.Optional<int>(row, first + 4));
+    }
+
+    internal static Fault Upgrade() => new(426, "part_out_client_upgrade_required",
+        "Update Workbench to see transformed stock and its original receipt layers.");
+}
+
 internal sealed record LossDeliveryRow(Guid Id, string Reference, int Quantity, Guid? CatalogId, int? CatalogRevision,
     int? ItemCostMinor, int IntakeQuantity, IReadOnlyList<PlacementRow> Placements, int LostQuantity,
     int? AllocatedLostItemCostMinor, int? RemainingItemCostMinor,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DeliveryRecoveryTotals? RecoveryTotals = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DeliveryRecoveryTotals? RecoveryTotals = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LayerPartOut? PartOut = null);
 internal sealed record LossPurchaseRow(Guid Id, int Revision, string Reference, string Source, string Currency,
     int OrderedQuantity, int? PendingChargeMinor, IReadOnlyList<LossDeliveryRow> Deliveries,
-    IReadOnlyList<OfferRow> Offers, StockBalances Balances);
+    IReadOnlyList<OfferRow> Offers, StockBalances Balances,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<LossDeliveryRow>? DerivedLayers = null);
 internal sealed record LossReceivingWorkspace(string Scope, DateTime AsOf, bool Complete, IReadOnlyList<LossPurchaseRow> Purchases);
 
 internal sealed record BinStockSnapshot(string Scope, DateTime AsOf, bool Complete, LocationRow Location,

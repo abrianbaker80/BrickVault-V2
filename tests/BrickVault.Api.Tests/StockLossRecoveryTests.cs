@@ -4,7 +4,7 @@ using Xunit;
 namespace BrickVault.Api.Tests;
 
 [Collection("Build holds")]
-public sealed class StockLossRecoveryTests
+public sealed partial class StockLossRecoveryTests
 {
     [Theory]
     [InlineData(100)]
@@ -328,10 +328,18 @@ public sealed class StockLossRecoveryTests
         public StockQuarantines Quarantines { get; } = new(db);
         public StockReceiptLots Lots { get; } = new(db);
 
-        public static async Task<Fixture> Create(int quantity,int? cost,CancellationToken token)
+        public static async Task<Fixture> Create(int quantity,int? cost,CancellationToken token, bool partOut = false)
         {
-            var connection=Environment.GetEnvironmentVariable("BV_TEST_DB");
-            Assert.SkipWhen(string.IsNullOrEmpty(connection),"BV_TEST_DB with a dedicated bv_m2_test_ database is required.");
+            var contractConnection = Environment.GetEnvironmentVariable("BV_TEST_DB");
+            Assert.SkipWhen(string.IsNullOrEmpty(contractConnection),"BV_TEST_DB with a dedicated bv_m2_test_ database is required.");
+            var connection = partOut ? Environment.GetEnvironmentVariable("BV_TEST_PART_OUT_DB") : contractConnection;
+            Assert.False(string.IsNullOrEmpty(connection), "Initialize the separate part-out test database with foundation verification.");
+            if (partOut)
+            {
+                var main = new NpgsqlConnectionStringBuilder(contractConnection!);
+                var separate = new NpgsqlConnectionStringBuilder(connection!);
+                Assert.NotEqual(main.Database, separate.Database);
+            }
             var settings=new NpgsqlConnectionStringBuilder(connection);
             Assert.True(settings.Host is "127.0.0.1" or "::1" && settings.Username=="bv_api" &&
                 settings.Database?.StartsWith("bv_m2_test_",StringComparison.Ordinal)==true);

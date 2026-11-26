@@ -15,7 +15,9 @@ const loading = ref(false)
 const error = ref('')
 const shortageRead = ref<'loading' | 'current' | 'partial' | 'failed'>('loading')
 const retryShortages = ref(0)
-const ready = computed(() => props.connected && !error.value && !loading.value && stock.value?.complete === true && shortageRead.value === 'current')
+const readingShortages = ref(false)
+const confirmedBin = computed(() => props.connected && !error.value && stock.value?.complete === true && shortageRead.value === 'current')
+const ready = computed(() => confirmedBin.value && !loading.value && !readingShortages.value)
 const inspectingCount = computed(() => props.countLink?.binId === props.location.id && Boolean(props.countLink.positionId || props.countLink.receiptId))
 const selected = shallowRef<TransferPosition>()
 const selectedReserved = ref(0)
@@ -78,8 +80,11 @@ const binScope = () => [props.location.id, props.location.revision, props.asOf, 
 watch([binScope, retryShortages], async ([[id, revision, , connected, inspecting]], _, onCleanup) => {
   let current = true
   onCleanup(() => { current = false })
-  shortageRead.value = 'loading'
-  if (!connected || inspecting) return
+  readingShortages.value = connected && !inspecting
+  if (!readingShortages.value) {
+    shortageRead.value = 'loading'
+    return
+  }
   try {
     // Open cases cover the whole bin independently of the observation history page.
     const result = await api.binCounts(id, { limit: '1' })
@@ -95,7 +100,7 @@ watch([binScope, retryShortages], async ([[id, revision, , connected, inspecting
     if (!current) return
     shortageRead.value = 'failed'
     emit('failure', failure)
-  }
+  } finally { if (current) readingShortages.value = false }
 }, { immediate: true })
 
 watch(binScope,
@@ -198,7 +203,7 @@ watch(binScope,
       :as-of="asOf" :connected="connected" :controls="transfers" :catalog="catalog"
       @failure="emit('failure', $event)" @fenced="fenced.add($event)" @close="closeCount" @recover="recoverCount" />
     <TransferForm v-if="selected" :source="location" :reserved="selectedReserved" :locations="locations" :original="selected"
-      :current="stock?.positions.find(p => p.layer.placementId === selected?.layer.placementId)" :ready="ready && !fenced.has(selected.layer.placementId)" :controls="transfers"
+      :current="stock?.positions.find(p => p.layer.placementId === selected?.layer.placementId)" :ready="ready && !fenced.has(selected.layer.placementId)" :confirmed-bin="confirmedBin && !fenced.has(selected.layer.placementId)" :controls="transfers"
       @close="closeTransfer" @recover="emit('recover')" />
   </section>
 </template>

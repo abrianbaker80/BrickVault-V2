@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Catalog, Purchase } from './api'
-import { draftBackingLink } from './countLinks'
+import { draftBackingLink, partOutLink } from './countLinks'
 import { itemLabel, money } from './receiving'
 const props = defineProps<{ purchase: Purchase; catalog: Catalog[] }>()
 const balances = computed(() => props.purchase.balances)
-const positions = computed(() => new Map(props.purchase.deliveries.flatMap(d => d.placements.map(p =>
+const layers=computed(()=>[...props.purchase.deliveries,...(props.purchase.derivedLayers ?? [])])
+const positions = computed(() => new Map(layers.value.flatMap(d => d.placements.map(p =>
   [p.id, { bin:p.locationId, label:p.locationCode + ' · ' + d.reference }] as const))))
 const amount = (value: number | string | null) => money(value, props.purchase.currency)
 </script>
@@ -20,9 +21,11 @@ const amount = (value: number | string | null) => money(value, props.purchase.cu
         <div><dt>Free</dt><dd>{{ balances.free }}</dd></div>
       </dl>
       <ul v-if="purchase.deliveries.length" class="receipt-lines" aria-label="Deliveries and bin positions">
-        <li v-for="d in purchase.deliveries" :key="d.id">
-          <div class="receipt-line-head"><strong>{{ d.reference }}</strong><span>{{ d.quantity }} received</span></div>
+        <li v-for="d in layers" :key="d.id">
+          <div class="receipt-line-head"><strong>{{ d.reference }}</strong><span>{{ d.quantity }} {{ d.partOut?.parentTransformationId ? 'produced' : 'received' }}</span></div>
           <small>{{ d.catalogId ? itemLabel(catalog, d.catalogId, d.catalogRevision) : 'Mixed delivery' }} · Item cost {{ amount(d.itemCostMinor) }}</small>
+          <small v-if="d.partOut?.parentTransformationId && d.partOut.sourcePositionId"><a :href="partOutLink(d.partOut.sourcePositionId,d.partOut.parentTransformationId)">Part-out output receipt</a> · <a :href="'#inventory/lot/'+d.id">Inspect output lot</a></small>
+          <small v-if="d.partOut?.consumedQuantity">{{ d.partOut.consumedQuantity }} used in part-outs · Input cost consumed {{ amount(d.partOut.consumedItemCostMinor) }} · Remaining layer cost {{ amount(d.remainingItemCostMinor) }}</small>
           <small v-if="d.quarantinedQuantity">{{ d.quarantinedQuantity }} quarantined in bin positions</small>
           <template v-if="d.recoveryTotals?.recoveredQuantity"><small>{{ d.recoveryTotals.grossLostQuantity }} originally lost · {{ d.recoveryTotals.recoveredQuantity }} recovered · {{ d.lostQuantity }} still missing</small>
             <small>Gross loss cost {{ amount(d.recoveryTotals.grossAllocatedItemCostMinor) }} · Restored {{ amount(d.recoveryTotals.restoredItemCostMinor) }} · Remaining loss {{ amount(d.allocatedLostItemCostMinor) }} · Remaining delivery cost {{ amount(d.remainingItemCostMinor) }}</small></template>

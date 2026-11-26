@@ -148,7 +148,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
                 p.Deliveries.Select(d => new DeliveryRow(d.Id, d.Reference, d.Quantity, d.CatalogId, d.CatalogRevision,
                     d.ItemCostMinor, d.IntakeQuantity, d.Placements)).ToList(), p.Offers, p.Balances)).ToList());
 
-    public async Task<LossReceivingWorkspace> LossSnapshot(CancellationToken token, bool quarantine = false, bool recoveries = false)
+    public async Task<LossReceivingWorkspace> LossSnapshot(CancellationToken token, bool quarantine = false, bool recoveries = false, bool partOuts = false)
     {
         await using var connection = await db.OpenConnectionAsync(token);
         await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
@@ -185,10 +185,13 @@ internal sealed class Receiving(NpgsqlDataSource db)
         var deliveries = (await Rows(connection, tx, """
             SELECT d.purchase_id,d.id,d.reference,d.quantity,d.catalog_id,d.catalog_revision,d.item_cost_minor,
                 losses.active_lost_quantity::integer,losses.active_allocated_item_cost_minor::integer,
-                d.item_cost_minor-losses.active_allocated_item_cost_minor::integer,
+                d.item_cost_minor-losses.active_allocated_item_cost_minor::integer-po.transformed_out_item_cost_minor,
                 losses.gross_lost_quantity::bigint,losses.recovered_quantity::bigint,
-                losses.gross_allocated_item_cost_minor::text,losses.restored_item_cost_minor::text
+                losses.gross_allocated_item_cost_minor::text,losses.restored_item_cost_minor::text,
+                po.parent_transformation_id,po.source_delivery_id,po.source_position_id,
+                po.transformed_out_quantity,po.transformed_out_item_cost_minor
             FROM brickvault.deliveries d JOIN brickvault.delivery_loss_balances losses ON losses.delivery_id=d.id
+            JOIN brickvault.delivery_part_out_balances po ON po.delivery_id=d.id
             ORDER BY d.reference,d.id
             """, r =>
         {
@@ -196,10 +199,11 @@ internal sealed class Receiving(NpgsqlDataSource db)
             var positions = placements[r.GetGuid(1)];
             var values = positions.Select(p => p.Value).ToList();
             var lost = r.GetInt32(7);
+            var transformed = LayerPartOut.Read(r, 14, partOuts);
             return (PurchaseId: r.GetGuid(0), Reserved: positions.Sum(p => p.Reserved), Quarantined: positions.Sum(p => p.Quarantined),
                 Value: new LossDeliveryRow(r.GetGuid(1), r.GetString(2), quantity, Optional<Guid>(r,4), Optional<int>(r,5),
-                    Optional<int>(r,6), quantity - lost - values.Sum(p => p.Quantity), values, lost,
-                    Optional<int>(r,8), Optional<int>(r,9), RecoveryTotals: DeliveryRecoveryTotals.Read(r, 10, recoveries)));
+                    Optional<int>(r,6), quantity - lost - (transformed?.ConsumedQuantity ?? 0) - values.Sum(p => p.Quantity), values, lost,
+                    Optional<int>(r,8), Optional<int>(r,9), RecoveryTotals: DeliveryRecoveryTotals.Read(r, 10, recoveries), PartOut: transformed));
         }, token)).ToLookup(r => r.PurchaseId);
         var backing = (await Rows(connection, tx, """
             SELECT offer_id,placement_id,quantity FROM brickvault.current_offer_backing ORDER BY offer_id,placement_id
@@ -220,23 +224,27 @@ internal sealed class Receiving(NpgsqlDataSource db)
         return new LossReceivingWorkspace("receiving", asOf, true, purchases.Select(p =>
         {
             var layers = deliveries[p.Id];
-            var received = layers.Select(d => quarantine ? d.Value with { QuarantinedQuantity = d.Quarantined } : d.Value).ToList();
+            var all = layers.Select(d => quarantine ? d.Value with { QuarantinedQuantity = d.Quarantined } : d.Value).ToList();
+            var supplier = all.Where(d => d.PartOut?.ParentTransformationId is null).ToList();
+            var derived = partOuts ? all.Where(d => d.PartOut?.ParentTransformationId is not null).ToList() : null;
             return new LossPurchaseRow(p.Id, p.Revision, p.Reference, p.Source, p.Currency, p.Ordered, p.Charge,
-                received, offers[p.Id].ToList(), Balance(received, layers.Sum(d => d.Reserved), layers.Sum(d => d.Quarantined),
-                    layers.Where(d => d.Value.ItemCostMinor.HasValue).Sum(d => d.Reserved + d.Quarantined), p.Charge));
+                supplier, offers[p.Id].ToList(), Balance(all, supplier, layers.Sum(d => (long)d.Reserved),
+                    layers.Sum(d => (long)d.Quarantined),
+                    layers.Where(d => d.Value.ItemCostMinor.HasValue).Sum(d => (long)d.Reserved + d.Quarantined), p.Charge), derived);
         }).ToList());
     }
 
-    private static StockBalances Balance(IReadOnlyList<LossDeliveryRow> deliveries, int reserved, int quarantined, int knownBlocked,
-        int? pendingChargeMinor)
+    private static StockBalances Balance(IReadOnlyList<LossDeliveryRow> deliveries, IReadOnlyList<LossDeliveryRow> supplier,
+        long reserved, long quarantined, long knownBlocked, int? pendingChargeMinor)
     {
-        var onHand = deliveries.Sum(d => d.Quantity - d.LostQuantity);
-        var unavailable = deliveries.Sum(d => d.IntakeQuantity) + quarantined;
+        var onHand = deliveries.Sum(d => (long)d.Quantity - d.LostQuantity - (d.PartOut?.ConsumedQuantity ?? 0));
+        var unavailable = deliveries.Sum(d => (long)d.IntakeQuantity) + quarantined;
         var free = onHand - unavailable - reserved;
-        var backed = deliveries.SelectMany(d => d.Placements).Sum(p => p.BackedQuantity);
-        var documented = deliveries.Where(d => d.ItemCostMinor.HasValue).ToList();
-        var knownFree = documented.Sum(d => d.Quantity - d.LostQuantity - d.IntakeQuantity) - knownBlocked;
-        long? known = documented.Count == 0 ? null : documented.Sum(d => (long)d.ItemCostMinor!.Value);
+        var backed = deliveries.SelectMany(d => d.Placements).Sum(p => (long)p.BackedQuantity);
+        var knownFree = deliveries.Where(d => d.ItemCostMinor.HasValue)
+            .Sum(d => (long)d.Quantity - d.LostQuantity - (d.PartOut?.ConsumedQuantity ?? 0) - d.IntakeQuantity) - knownBlocked;
+        var documentedPurchaseCosts = supplier.Where(d => d.ItemCostMinor.HasValue).ToList();
+        long? known = documentedPurchaseCosts.Count == 0 ? null : documentedPurchaseCosts.Sum(d => (long)d.ItemCostMinor!.Value);
         long? components = known.HasValue || pendingChargeMinor.HasValue
             ? known.GetValueOrDefault() + pendingChargeMinor.GetValueOrDefault() : null;
         return new StockBalances(onHand, unavailable, reserved, free, backed, free - backed,

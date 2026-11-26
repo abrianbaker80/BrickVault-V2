@@ -4,7 +4,7 @@ import type { Location, TransferControls, TransferPosition } from './api'
 import { itemLabel, money } from './receiving'
 
 const props = defineProps<{ source: Location; locations: Location[]; original: TransferPosition;
-  current?: TransferPosition; reserved: number; ready: boolean; controls: TransferControls }>()
+  current?: TransferPosition; reserved: number; ready: boolean; confirmedBin: boolean; controls: TransferControls }>()
 const emit = defineEmits<{ close: []; recover: [] }>()
 const dialog = ref<HTMLDialogElement>()
 const destinationId = ref('')
@@ -29,7 +29,8 @@ const backing = computed(() => props.original.backing.map(offer => ({
   offerId: offer.offerId, quantity: Number(quantities.value[offer.offerId] || 0)
 })).filter(row => row.quantity > 0))
 const movedBacking = computed(() => moveAll.value ? line.backedQuantity : backing.value.reduce((total, row) => total + row.quantity, 0))
-const available = computed(() => movable.value > 0 && props.ready && props.controls.enabled && !stale.value && !sending.value)
+const editable = computed(() => movable.value > 0 && props.confirmedBin && props.controls.enabled && !stale.value && !sending.value)
+const available = computed(() => editable.value && props.ready)
 watch(() => destination.value?.code, () => { destinationCode.value = ''; issue.value = '' })
 watch([sourceCode, destinationCode, count, reason, moveAll, movedBacking], () => { issue.value = ''; attempted.value = false })
 onMounted(() => dialog.value?.showModal())
@@ -81,7 +82,7 @@ async function submit() {
       </p>
       <p v-if="stale" class="warning" role="status">This layer or its source changed. Close this form and review the latest bin stock before starting another transfer.</p>
       <p v-else-if="!ready || !controls.enabled" role="status">{{ sending ? 'Recording transfer…' : 'Waiting for a complete, connected bin and register read.' }}</p>
-      <fieldset class="fields" :disabled="!available">
+      <fieldset class="fields" :disabled="!editable">
         <label class="span">Destination bin<select v-model="destinationId" required autofocus>
           <option disabled value="">Choose a different bin</option>
           <option v-for="bin in locations.filter(l => l.id !== source.id)" :key="bin.id" :value="bin.id">{{ bin.code }} · {{ bin.name }}</option>
@@ -92,12 +93,12 @@ async function submit() {
         <label class="span">Reason<input v-model="reason" required maxlength="200" /></label>
       </fieldset>
       <label v-if="original.backing.length" class="whole-position">
-        <input v-model="moveAll" type="checkbox" :disabled="!available || restricted > 0" />
+        <input v-model="moveAll" type="checkbox" :disabled="!editable || restricted > 0" />
         <span>Move the whole position with all offer backing
           <small>{{ line.quantity }} units in this position · {{ line.backedQuantity }} backed across {{ original.backing.length }} {{ original.backing.length === 1 ? 'offer' : 'offers' }}</small>
         </span>
       </label>
-      <fieldset v-if="original.backing.length && !moveAll" class="backing-list" :disabled="!available">
+      <fieldset v-if="original.backing.length && !moveAll" class="backing-list" :disabled="!editable">
         <legend>Offer backing to move</legend>
         <p class="field-hint">Enter units for each offer that follows this stock. A blank count leaves that offer’s backing in the source bin.</p>
         <label v-for="offer in original.backing" :key="offer.offerId">

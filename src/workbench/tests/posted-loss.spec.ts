@@ -106,7 +106,7 @@ test('one cross-page loss decision reduces only the chosen offers at the selecte
   await page.setViewportSize({width:1440,height:900})
   await page.screenshot({path:info.outputPath('posted-stock-loss-desktop.png')})
   await audit(page)
-  const response=await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true')
+  const response=await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true')
   const purchase=((await response.json()) as ReceivingWorkspace).purchases.find(p=>p.id===purchaseId)!
   expect(purchase.balances.physicalOnHand).toBe(4)
   expect(purchase.balances.reserved).toBe(1)
@@ -233,7 +233,7 @@ test('a protected hold blocks posting and a newly arrived witness rejects a prev
   await work.getByRole('button',{name:'Review updated quantities'}).click()
   await expect(work.getByRole('link',{name:'Latest witnessed count'})).toHaveAttribute('href',countReceiptLink(f.a.id,newer))
   await expect(work.getByLabel('Reduce units for offer '+f.firstOffer,{exact:true})).toHaveValue('')
-  const response=await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true')
+  const response=await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true')
   const current=((await response.json()) as ReceivingWorkspace).purchases.find(p=>p.id===base.purchaseId)!
   expect(current.balances).toMatchObject({physicalOnHand:8,reserved:1,backedQuantity:3})
   expect(current.deliveries[0].lostQuantity).toBe(0)

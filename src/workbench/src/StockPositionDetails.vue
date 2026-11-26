@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { StockPosition } from './api'
-import { countPositionLink, draftBackingLink, quarantineLink } from './countLinks'
+import { partOutLink, countPositionLink, draftBackingLink, quarantineLink } from './countLinks'
 import { money } from './receiving'
 import { label, time } from './presentation'
 
@@ -22,6 +22,7 @@ const layer = computed(() => props.record.layer)
       <template v-if="layer.quarantinedQuantity"><dt>Quarantined in bin</dt><dd>{{ layer.quarantinedQuantity }}</dd></template>
       <dt>Unbacked</dt><dd>{{ layer.unbackedQuantity }}</dd><dt>Available to back</dt><dd>{{ layer.freeToBackQuantity }}</dd>
     </dl>
+    <p><a :href="partOutLink(layer.placementId)">{{ layer.quantity ? 'Record a manual part-out' : 'Inspect part-out history' }}</a></p>
     <p><a :href="countPositionLink(record.location.id, layer.placementId)">Inspect counts and stock-loss receipts</a></p>
     <p><a :href="quarantineLink(record.location.id,layer.placementId)">Inspect position quarantine</a></p>
     <p><a :href="draftBackingLink(record.location.id,layer.placementId)">Review draft offer backing at this position</a></p>

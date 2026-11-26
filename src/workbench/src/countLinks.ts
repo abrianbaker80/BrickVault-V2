@@ -9,6 +9,8 @@ export const lossCaseLink = (bin: string, position: string, id: string) => '#loc
 export const lossReceiptLink = (bin: string, position: string, id: string) => '#locations/' + bin + '/positions/' + position + '/posted-loss/' + id
 export const closureLink = (bin:string,position:string,caseId:string,mode:'review'|'receipt',id:string) =>
   '#locations/'+bin+'/positions/'+position+'/shortages/'+caseId+'/'+mode+'/'+id
+export const partOutLink = (source: string, receipt?: string) =>
+  '#inventory/part-out/' + source + (receipt ? '/' + receipt : '')
 export const recoveryLink = (bin:string,position:string,posting:string,receipt?:string) =>
   '#locations/'+bin+'/positions/'+position+'/posted-loss/'+posting+'/recoveries'+(receipt ? '/'+receipt : '')
 export type CountLink = { binId: string; receiptId?: string; positionId?: string; holdPositionId?: string;

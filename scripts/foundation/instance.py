@@ -374,6 +374,15 @@ class Instance:
                     GRANT INSERT (recovery_id,quarantine_id,saleable_quantity,quarantine_quantity)
                         ON brickvault.stock_loss_recovery_allocations TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 13 THEN
+                    GRANT INSERT (id,command_id,purchase_id,source_position_id,source_location_id,
+                        source_location_code,source_catalog_id,source_catalog_revision,expected_purchase_revision,
+                        quantity,reason,residual_item_cost_minor) ON brickvault.stock_part_outs TO bv_api;
+                    GRANT INSERT (part_out_id,line_id,catalog_id,catalog_revision,location_id,location_code,
+                        quantity,item_cost_minor,disposition) ON brickvault.stock_part_out_outputs TO bv_api;
+                    GRANT INSERT (part_out_id,line_id,disposition,description,quantity)
+                        ON brickvault.stock_part_out_residuals TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,
