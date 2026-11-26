@@ -44,6 +44,8 @@ export async function recoverPartOut(command: PartOutCommand) {
       seenResiduals.add(residualAfter); readResiduals=!!residualAfter
     }
   } while (readOutputs || readResiduals)
-  if (outputs.size || residuals.size) throw new ContractFailure()
+  const expectedCost=command.residualItemCostMinor===null ? null : command.outputs.reduce(
+    (sum,row)=>sum+(row.itemCostMinor ?? 0),command.residualItemCostMinor)
+  if (outputs.size || residuals.size || !evidence || evidence.sourceItemCostMinor!==expectedCost) throw new ContractFailure()
   return evidence
 }

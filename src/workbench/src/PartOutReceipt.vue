@@ -49,6 +49,7 @@ watch(()=>[props.asOf,props.connected,requested.value,attempt.value] as const,as
         <section aria-label="Recorded outputs"><h3 ref="outputHeading" tabindex="-1">Recorded outputs</h3>
           <ul class="receipt-lines"><li v-for="o in page.outputs" :key="o.lineId"><strong>{{ o.quantity }} × {{ itemLabel([o.recordedCatalog],o.recordedCatalog.id) }}</strong>
             <small>{{ o.disposition==='retained' ? 'Retained in quarantine' : 'Accepted stock' }} · Confirmed bin {{ o.confirmedLocationCode }} · {{ o.itemCostMinor===null && page.sourceItemCostMinor!==null ? 'Cost basis unassigned' : 'Assigned cost '+money(o.itemCostMinor,page.receipt.currency) }}</small>
+            <small v-if="!o.recordedCatalog.integrationEligible">Recorded mapping {{ o.recordedCatalog.mapping }} · License {{ o.recordedCatalog.license }} · Color {{ o.recordedCatalog.colorState }}</small>
             <nav aria-label="Output evidence"><a :href="'#inventory/'+o.positionId">Output position</a><a :href="'#inventory/lot/'+o.deliveryId">Output lot</a>
               <a v-if="o.quarantineId" :href="quarantineLink(o.location.id,o.positionId,o.quarantineId)">Retained quarantine receipt</a></nav>
           </li></ul>

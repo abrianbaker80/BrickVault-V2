@@ -232,6 +232,73 @@ test('recorded zero and unassigned outputs keep distinct basis and a later open 
   await expect(submit(page)).toBeDisabled()
 })
 
+test('a restricted local identity is quarantined alongside accepted stock and stays held for eligible inspection release',async({page})=>{
+  const x=await layer(page,1,null)
+  const restricted=await x.f.write('catalog',0,{itemType:'part',itemNumber:'LOCAL-'+x.f.a.code,name:'Locally identified shell',
+    variant:null,colorState:'unknown',colorId:null,condition:'used',completeness:'complete',
+    source:'Fictional catalog for inspection',license:'restricted',mapping:'unmapped'})
+  await review(page,x.position,x.f.a.code)
+  await output(page,1,x.axle,x.f.b,'2','stock')
+  await form(page).getByRole('button',{name:'Add another output'}).press('Enter')
+  await output(page,2,restricted,x.f.empty,'1','stock')
+  await form(page).getByRole('combobox',{name:'Discarded or lost material'}).selectOption('none')
+  await form(page).getByLabel('Reason for part-out').fill('Retain identified local shell for inspection')
+  await form(page).getByRole('checkbox').check()
+  await expect(submit(page)).toBeDisabled()
+  await expect(line(page,2)).toContainText('Mapping unmapped · License restricted · Color unknown')
+  await expect(line(page,2)).toContainText('This item cannot enter accepted stock.')
+  await line(page,2).getByRole('combobox',{name:'Output disposition'}).selectOption('retained')
+  await expect(line(page,2).getByRole('combobox',{name:'Output item'})).toHaveValue(restricted)
+  await form(page).getByRole('checkbox').check()
+  await submit(page).press('Enter')
+  const saved=receipt(page)
+  await expect(saved).toContainText('Recorded mapping unmapped · License restricted · Color unknown')
+  await expect(saved).toContainText('Accepted stock')
+  await saved.getByRole('link',{name:'Retained quarantine receipt'}).press('Enter')
+  await page.getByRole('link',{name:'Current position quarantine'}).press('Enter')
+  const quarantine=page.getByRole('dialog')
+  await expect(quarantine).toContainText('1 still quarantined')
+  await expect(quarantine.getByRole('button',{name:/Inspect and release from/})).toBeDisabled()
+})
+
+test('reconciliation on every output page keeps a pending command when its full source cost disagrees',async({page})=>{
+  const x=await layer(page,1,103)
+  const body:PartOutCommand={commandId:randomUUID(),expectedRevision:3,purchaseId:x.purchaseId,sourcePositionId:x.position,
+    sourceLocationId:x.f.a.id,confirmedSourceLocationCode:x.f.a.code,sourceCatalogId:x.set,sourceCatalogRevision:1,
+    quantity:1,reason:'Record 101 inspected axle outputs',residualItemCostMinor:2,physicalResiduals:[],
+    outputs:Array.from({length:101},()=>({lineId:randomUUID(),catalogId:x.axle,catalogRevision:1,locationId:x.f.b.id,
+      confirmedLocationCode:x.f.b.code,quantity:1,itemCostMinor:1,disposition:'stock'}))}
+  const saved=await page.request.post('/api/v1/receiving/part-outs',{headers:x.f.headers,data:body})
+  expect(saved.status()).toBe(200)
+  const {entityId}=await saved.json(),workspaceId=x.f.headers['X-Workspace-Id']
+  await page.evaluate(({workspaceId,body})=>localStorage.setItem('brickvault.v2.pending.'+workspaceId+'.'+body.commandId,
+    JSON.stringify({workspaceId,kind:'part-out',body})),{workspaceId,body})
+  await page.reload()
+  await page.route(post,async route=>{
+    expect(route.request().postDataJSON()).toEqual(body)
+    await route.fulfill({status:413,json:{code:'request_too_large',message:'Request too large',correlationId:randomUUID()}})
+  },{times:2})
+  let wrongBasis=true
+  const pages:number[]=[]
+  await page.route(u=>u.pathname.endsWith('/part-out-receipt') && u.searchParams.get('commandId')===body.commandId,async route=>{
+    const reply=await route.fetch(),data:PartOutEvidence=await reply.json()
+    pages.push(data.outputs.length)
+    await route.fulfill({json:{...data,sourceItemCostMinor:wrongBasis ? 104 : data.sourceItemCostMinor}})
+    await reply.dispose()
+  })
+  const pending=page.getByRole('region',{name:'Pending confirmations'})
+  await pending.getByRole('button',{name:'Retry command'}).press('Enter')
+  await expect(page.getByRole('alert')).toContainText('verify the original command')
+  expect(pages).toEqual([100,1])
+  await expect(pending).toBeVisible()
+  wrongBasis=false
+  await page.getByRole('button',{name:'Refresh',exact:true}).press('Enter')
+  await pending.getByRole('button',{name:'Retry command'}).press('Enter')
+  await expect(pending).toHaveCount(0)
+  expect(pages).toEqual([100,1,100,1])
+  await expect(page.getByRole('link',{name:'View part-out receipt'})).toHaveAttribute('href',partOutLink(x.position,entityId))
+})
+
 test('part-out receipt pages preserve their independent positions and keep the last verified evidence on partial reads',async({page})=>{
   const x=await layer(page,1,26)
   const outputs=Array.from({length:26},()=>({lineId:randomUUID(),catalogId:x.axle,catalogRevision:1,locationId:x.f.b.id,

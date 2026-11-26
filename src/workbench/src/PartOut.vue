@@ -24,7 +24,6 @@ const integer=(s:string)=>/^\d{1,7}$/.test(s) && Number(s)>0 && Number(s)<=1_000
 const dirty=computed(()=>!!(input.value || code.value || reason.value || residualMode.value || acknowledged.value ||
   outputs.value.length!==1 || outputs.value.some(o=>o.catalog || o.bin || o.quantity || o.amount || o.disposition)))
 const current=computed(()=>page.value?.position.layer.currentCatalog)
-const eligible=computed(()=>props.workspace.catalog.filter(c=>c.integrationEligible))
 const catalog=(id:string)=>props.workspace.catalog.find(c=>c.id===id)
 const location=(id:string)=>props.workspace.locations.find(l=>l.id===id)
 const changedOutput=computed(()=>outputs.value.some(o=>(o.catalog && catalog(o.catalog)?.revision!==o.revision) ||
@@ -46,7 +45,7 @@ const repeatsInput=computed(()=>{
   const matching=outputs.value.filter(o=>o.catalog===inputCatalogId && integer(o.quantity))
   return matching.reduce((total,o)=>total+Number(o.quantity),0)>Number(input.value)
 })
-const validOutputs=computed(()=>!repeatsInput.value && outputs.value.length>0 && outputs.value.every(o=>catalog(o.catalog)?.integrationEligible && o.revision===catalog(o.catalog)?.revision &&
+const validOutputs=computed(()=>!repeatsInput.value && outputs.value.length>0 && outputs.value.every(o=>(o.disposition==='retained' || catalog(o.catalog)?.integrationEligible) && o.revision===catalog(o.catalog)?.revision &&
   location(o.bin)?.code===o.code && integer(o.quantity) && !!o.disposition && (!known.value || (o.basis && outputCost(o)!==undefined))) &&
   outputs.value.reduce((n,o)=>n+Number(o.quantity),0)<=1_000_000)
 const validResiduals=computed(()=>residualMode.value==='none' || (residualMode.value==='record' && physical.value.length>0 &&
@@ -152,11 +151,13 @@ async function save() {
           <p>Confirm each actual item, its count and the bin where you placed it. Identify retained material and place it in quarantine.</p>
           <fieldset v-for="(o,index) in outputs" :key="o.id" class="line">
             <legend>Output {{ index+1 }}</legend>
-            <label>Output item<select :value="o.catalog" @change="selectCatalog(o,$event)" required><option disabled value="">Choose confirmed catalog item</option>
-              <option v-for="c in eligible" :key="c.id" :value="c.id">{{ itemLabel([c],c.id) }}</option></select></label>
+            <label>Output item<select :value="o.catalog" @change="selectCatalog(o,$event)" required><option disabled value="">Choose registered catalog item</option>
+              <option v-for="c in workspace.catalog" :key="c.id" :value="c.id">{{ itemLabel([c],c.id) }}{{ c.integrationEligible ? '' : ' · Quarantine only' }}</option></select></label>
             <small v-if="o.catalog" class="narrow-identity">{{ itemLabel(workspace.catalog,o.catalog) }} · Revision {{ o.revision }}</small>
+            <small v-if="catalog(o.catalog) && !catalog(o.catalog)?.integrationEligible">Quarantine only · Mapping {{ catalog(o.catalog)?.mapping }} · License {{ catalog(o.catalog)?.license }} · Color {{ catalog(o.catalog)?.colorState }}</small>
             <div class="pair"><label>Output quantity<input v-model="o.quantity" inputmode="numeric" maxlength="7" required /></label>
               <label>Output disposition<select v-model="o.disposition" required><option disabled value="">Choose disposition</option><option value="stock">Accepted stock</option><option value="retained">Retain in quarantine</option></select></label></div>
+            <p v-if="o.catalog && o.disposition==='stock' && !catalog(o.catalog)?.integrationEligible" class="warning" role="status">This item cannot enter accepted stock. Choose Retain in quarantine or confirm an eligible item.</p>
             <div class="pair"><label>Output bin<select :value="o.bin" @change="selectBin(o,$event)" required><option disabled value="">Choose registered bin</option>
               <option v-for="l in workspace.locations" :key="l.id" :value="l.id">{{ l.code }} · {{ l.name }}</option></select></label>
               <label>Confirm output bin code<input v-model="o.code" maxlength="48" autocomplete="off" spellcheck="false" required /></label></div>
