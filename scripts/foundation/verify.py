@@ -354,6 +354,9 @@ def qualify_staged_upgrade(lab, port, source_version):
         require(not output.exists(), "Running source created a staged directory.")
     finally:
         original.pg_stop()
+    if WIN and source_version == 2:
+        from verify_windows_pg_stop import qualify_windows_pg_stop
+        qualify_windows_pg_stop(original)
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
     for inst, schema in ((candidate, "15"), (original, str(source_version))):
