@@ -2,6 +2,7 @@
 using System.Data;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Npgsql;
 using NpgsqlTypes;
@@ -29,7 +30,8 @@ internal sealed record LocationArchiveCommand
 }
 
 internal sealed record LocationRegistryRow(LocationRow Location, bool Archived, DateTime? ArchivedAt, Guid? ArchiveEventId,
-    long PhysicalQuantity, long PositionCount);
+    long PhysicalQuantity, long PositionCount,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LocationCapacityState? Capacity = null);
 internal sealed record LocationRegistryLabel(string Label, bool IsCanonical, int ClaimedRevision);
 internal sealed record LocationRegistryEvent(Guid Id, Guid CommandId, Guid CorrelationId, int Revision,
     string Kind, string? Label, string? PreviousCode, string CanonicalCode, string Name, string? Reason,
@@ -137,16 +139,20 @@ internal sealed partial class LocationRegistry(NpgsqlDataSource db)
     internal static Fault DuplicateLabel() => new(409, "duplicate_location_label", "That physical label is already registered.");
     internal static Fault ArchivedDestination() => new(409, "location_destination_archived",
         "The destination bin is archived. Select an active destination.");
-    private static Fault UnknownLocation() => new(404, "unknown_location", "No bin has that identifier.");
+    internal static Fault UnknownLocation() => new(404, "unknown_location", "No bin has that identifier.");
     private static Fault InvalidCursor() => new(400, "invalid_location_registry_cursor", "Use a continuation from this bin registry read.");
 
     private const string BinSelect = """
-        l.id,l.revision,l.code,l.name,archive.id,a.occurred_at,stock.physical_quantity,stock.position_count
+        l.id,l.revision,l.code,l.name,archive.id,a.occurred_at,stock.physical_quantity,stock.position_count,capacity.piece_limit
         """;
     private const string BinJoins = """
         LEFT JOIN brickvault.location_registry_events archive ON archive.location_id=l.id AND archive.kind='archived'
         LEFT JOIN brickvault.audit a ON a.command_id=archive.command_id
         CROSS JOIN LATERAL brickvault.location_physical_stock(l.id) stock
+        LEFT JOIN LATERAL (
+            SELECT e.piece_limit FROM brickvault.location_capacity_events e
+            WHERE e.location_id=l.id ORDER BY e.revision DESC LIMIT 1
+        ) capacity ON true
         """;
     private const string EventSelect = """
         SELECT e.id,e.command_id,c.correlation_id,e.revision,e.kind,e.label,e.previous_code,e.canonical_code,e.name,
@@ -155,9 +161,22 @@ internal sealed partial class LocationRegistry(NpgsqlDataSource db)
         JOIN brickvault.audit a ON a.command_id=e.command_id
         """;
 
-    private static LocationRegistryRow ReadBin(NpgsqlDataReader r) =>
-        new(new LocationRow(r.GetGuid(0), r.GetInt32(1), r.GetString(2), r.GetString(3)), !r.IsDBNull(4),
-            Optional<DateTime>(r,5), Optional<Guid>(r,4), r.GetInt64(6), r.GetInt64(7));
+    private static LocationRegistryRow ReadBin(NpgsqlDataReader r, bool includeCapacity)
+    {
+        var physicalQuantity = r.GetInt64(6);
+        var limit = Optional<long>(r,8);
+        var capacity = includeCapacity ? LocationCapacityState.From(limit,physicalQuantity) : null;
+        return new(new LocationRow(r.GetGuid(0),r.GetInt32(1),r.GetString(2),r.GetString(3)),!r.IsDBNull(4),
+            Optional<DateTime>(r,5),Optional<Guid>(r,4),physicalQuantity,r.GetInt64(7),capacity);
+    }
+
+    internal static async Task<LocationRegistryRow> ReadBin(NpgsqlConnection connection,NpgsqlTransaction tx,
+        Guid locationId,bool includeCapacity,CancellationToken token)
+    {
+        var bins = await Rows(connection,tx,"SELECT " + BinSelect + "\nFROM brickvault.locations l\n" + BinJoins
+            + "\nWHERE l.id=$1",r=>ReadBin(r,includeCapacity),token,locationId);
+        return bins.SingleOrDefault() ?? throw UnknownLocation();
+    }
 
     private static LocationRegistryEvent ReadEvent(NpgsqlDataReader r) =>
         new(r.GetGuid(0),r.GetGuid(1),r.GetGuid(2),r.GetInt32(3),r.GetString(4),
@@ -166,20 +185,20 @@ internal sealed partial class LocationRegistry(NpgsqlDataSource db)
 
     private static string? ReadText(NpgsqlDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
 
-    private static void CheckLimit(int limit)
+    internal static void CheckLimit(int limit)
     {
         if (limit is < 1 or > 100)
             throw new Fault(400, "invalid_location_registry_page", "Choose a page size between 1 and 100.");
     }
 
-    private static TKey? TrimPage<T,TKey>(List<T> rows, int limit, Func<T,TKey> key) where TKey : struct
+    internal static TKey? TrimPage<T,TKey>(List<T> rows, int limit, Func<T,TKey> key) where TKey : struct
     {
         if (rows.Count <= limit) return null;
         rows.RemoveAt(limit);
         return key(rows[^1]);
     }
 
-    private static async Task<DateTime> BeginRead(NpgsqlConnection connection, NpgsqlTransaction tx, CancellationToken token)
+    internal static async Task<DateTime> BeginRead(NpgsqlConnection connection, NpgsqlTransaction tx, CancellationToken token)
     {
         await using (var readOnly = Query(connection, tx, "SET TRANSACTION READ ONLY"))
             await readOnly.ExecuteNonQueryAsync(token);
@@ -188,7 +207,7 @@ internal sealed partial class LocationRegistry(NpgsqlDataSource db)
         return (DateTime)(await clock.ExecuteScalarAsync(token))!;
     }
 
-    public async Task<LocationRegistryPage> List(Guid? after, int limit, CancellationToken token)
+    public async Task<LocationRegistryPage> List(Guid? after, int limit, CancellationToken token, bool includeCapacity = false)
     {
         CheckLimit(limit);
         await using var connection = await db.OpenConnectionAsync(token);
@@ -206,12 +225,12 @@ internal sealed partial class LocationRegistry(NpgsqlDataSource db)
             )
             SELECT
             """ + " " + BinSelect + "\nFROM bins l\n" + BinJoins + "\nORDER BY l.id",
-            ReadBin, token, Nullable(NpgsqlDbType.Uuid, after), limit+1);
+            r=>ReadBin(r,includeCapacity), token, Nullable(NpgsqlDbType.Uuid, after), limit+1);
         var next = TrimPage(rows, limit, row => row.Location.Id);
         return new("location-registry", asOf, true, rows, next);
     }
 
-    public async Task<LocationLabelLookup> Lookup(string label, CancellationToken token)
+    public async Task<LocationLabelLookup> Lookup(string label, CancellationToken token, bool includeCapacity = false)
     {
         var key = LabelKey(label);
         await using var connection = await db.OpenConnectionAsync(token);
@@ -221,21 +240,19 @@ internal sealed partial class LocationRegistry(NpgsqlDataSource db)
             ,match.label_key=l.code,CASE WHEN match.label_key=l.code THEN l.code ELSE match.label END
             FROM brickvault.location_labels match JOIN brickvault.locations l ON l.id=match.location_id
             """ + "\n" + BinJoins + "\nWHERE match.label_key=$1",
-            r => new LocationLabelLookup("location-label-lookup",asOf,true,ReadBin(r),r.GetString(9),r.GetBoolean(8)), token, key);
+            r => new LocationLabelLookup("location-label-lookup",asOf,true,ReadBin(r,includeCapacity),r.GetString(10),r.GetBoolean(9)), token, key);
         return rows.SingleOrDefault() ?? throw new Fault(404, "unknown_location_label", "No bin has that registered label.");
     }
 
     public async Task<LocationRegistrySnapshot> Detail(Guid locationId, string? labelAfter, int labelLimit,
-        Guid? eventAfter, int eventLimit, CancellationToken token)
+        Guid? eventAfter, int eventLimit, CancellationToken token, bool includeCapacity = false)
     {
         CheckLimit(labelLimit);
         CheckLimit(eventLimit);
         await using var connection = await db.OpenConnectionAsync(token);
         await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
         var asOf = await BeginRead(connection, tx, token);
-        var bins = await Rows(connection, tx, "SELECT " + BinSelect + "\nFROM brickvault.locations l\n" + BinJoins
-            + "\nWHERE l.id=$1", ReadBin, token, locationId);
-        var bin = bins.SingleOrDefault() ?? throw UnknownLocation();
+        var bin = await ReadBin(connection,tx,locationId,includeCapacity,token);
         string? key = null;
         if (labelAfter is not null)
         {

@@ -74,11 +74,12 @@ internal sealed class Receiving(NpgsqlDataSource db)
         catch (PostgresException ex) when (ex.ConstraintName is
             "receiving_quantity" or "receiving_catalog" or "receiving_catalog_reconfirmation" or
             "receiving_delivery" or "receiving_bin" or "receiving_backing" or "stock_shortage_open" or "reserved_stock_unavailable" or
-            "quarantine_capacity_unavailable" or "location_destination_archived")
+            "quarantine_capacity_unavailable" or "location_destination_archived" or "location_capacity_exceeded")
         {
             throw ex.ConstraintName switch
             {
                 "location_destination_archived" => LocationRegistry.ArchivedDestination(),
+                "location_capacity_exceeded" => LocationCapacities.Rejection(ex),
                 "stock_shortage_open" => Fault.StockShortageOpen(),
                 "quarantine_capacity_unavailable" => StockQuarantines.ProtectedCapacity(),
                 "reserved_stock_unavailable" => Rejected("reserved_stock_unavailable", "Choose units that are free of build holds and other backing."),
