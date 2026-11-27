@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount,ref,shallowRef,watch } from 'vue'
 import { api,explain } from './api'
+import { capacityLabel } from './binCapacity'
 import { registryLink,validLabel } from './binLabels'
 const props=defineProps<{ready:boolean;asOf:string}>()
 const emit=defineEmits<{failure:[reason:unknown]}>()
@@ -34,7 +35,7 @@ async function find() {
     <button :disabled="!ready || busy || !validLabel(raw)">Find bin</button>
     <p v-if="busy || error" role="status">{{ error || 'Looking up the label…' }}</p>
     <p v-if="result" role="status"><span v-if="error || !ready || busy">Last confirmed match · </span>Matched {{ result.isCanonical ? 'canonical code' : 'alternate label' }} <strong>{{ result.matchedLabel }}</strong>
-      · <a :href="registryLink(result.bin.location.id)">{{ result.bin.location.code }} · {{ result.bin.location.name }}</a> · {{ result.bin.archived ? 'Archived' : 'Active' }}</p>
+      · <a :href="registryLink(result.bin.location.id)">{{ result.bin.location.code }} · {{ result.bin.location.name }}</a> · {{ result.bin.archived ? 'Archived' : 'Active' }} · {{ capacityLabel(result.bin) }}</p>
   </form>
 </template>
 <style scoped>

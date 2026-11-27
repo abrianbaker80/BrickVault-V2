@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import BinStock from './BinStock.vue'
 import BinLookup from './BinLookup.vue'
 import BinRegistry from './BinRegistry.vue'
+import BinCapacity from './BinCapacity.vue'
+import {capacityLink,capacityLabel} from './binCapacity'
 import {registryLink} from './binLabels'
 import {useBinRegistry} from './useBinRegistry'
 import StockQuarantine from './StockQuarantine.vue'
@@ -87,8 +89,9 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <div ref="host" class="register-workspace" :class="{ docked: inspected && !compact && !countLink?.registry }">
-  <BinRegistry v-if="countLink?.registry" :key="[transfers.workspaceId,countLink.binId,countLink.registryEvent].join('/')" :id="countLink.binId" :event-id="countLink.registryEvent" :as-of="workspace.asOf" :connected="connected" :ready="workspaceReady" :controls="transfers" @failure="emit('failure',$event)" />
+  <div ref="host" class="register-workspace" :class="{ docked: inspected && !compact && !countLink?.registry && !countLink?.capacity }">
+  <BinCapacity v-if="countLink?.capacity" :key="[transfers.workspaceId,countLink.binId,'capacity',countLink.capacityEvent].join('/')" :id="countLink.binId" :event-id="countLink.capacityEvent" :as-of="workspace.asOf" :connected="connected" :ready="workspaceReady" :controls="transfers" @failure="emit('failure',$event)" />
+  <BinRegistry v-else-if="countLink?.registry" :key="[transfers.workspaceId,countLink.binId,countLink.registryEvent].join('/')" :id="countLink.binId" :event-id="countLink.registryEvent" :as-of="workspace.asOf" :connected="connected" :ready="workspaceReady" :controls="transfers" @failure="emit('failure',$event)" />
   <section v-else class="panel" :aria-label="title">
     <header class="panel-head"><h2>{{ title }}</h2><span class="count" aria-live="polite">{{ count }} {{ count === 1 ? 'record' : 'records' }}</span></header>
     <div class="toolbar"><label class="search">
@@ -111,10 +114,10 @@ onBeforeUnmount(() => {
       </table>
       <table v-else>
         <caption class="sr">Storage locations</caption>
-        <thead><tr><th scope="col">Location</th><th scope="col">Code</th><th scope="col">Revision</th></tr></thead>
+        <thead><tr><th scope="col">Location</th><th scope="col">Code</th><th scope="col">Piece capacity</th><th scope="col">Revision</th></tr></thead>
         <tbody><tr v-for="row in locations" :key="row.id">
           <td><button class="row-link" @click="inspect(row, $event)" :aria-label="'Inspect ' + row.name"><strong>{{ row.name }}</strong></button></td>
-          <td>{{ row.code }}<small v-if="bins.rows.value.get(row.id)?.archived">Archived</small></td><td>{{ row.revision }}</td>
+          <td>{{ row.code }}<small v-if="bins.rows.value.get(row.id)?.archived">Archived</small></td><td>{{ capacityLabel(bins.rows.value.get(row.id)) }}<small v-if="!bins.confirmed.value && bins.rows.value.has(row.id)">Last confirmed</small></td><td>{{ row.revision }}</td>
         </tr></tbody>
       </table>
     </div>
@@ -125,7 +128,7 @@ onBeforeUnmount(() => {
     </div>
   </section>
   <p v-if="countLink && !inspected && page === 'locations'" class="warning" role="status">{{ workspace.complete && connected ? 'The linked bin was not found.' : 'The linked bin is unavailable.' }}</p>
-  <component v-if="inspected && !countLink?.registry" :is="compact ? 'dialog' : 'aside'" ref="detail" class="panel inspector"
+  <component v-if="inspected && !countLink?.registry && !countLink?.capacity" :is="compact ? 'dialog' : 'aside'" ref="detail" class="panel inspector"
     aria-labelledby="item-title" @cancel.prevent="close" @keydown.esc.prevent="close">
     <header class="panel-head"><h2 id="item-title">{{ inspected.name }}</h2><button class="close" aria-label="Close details" @click="close">×</button></header>
     <p v-if="!current" class="warning" role="status">The partial register omits this record. Showing its last received details.</p>
@@ -138,7 +141,7 @@ onBeforeUnmount(() => {
         <dt>Catalog source</dt><dd>{{ inspected.source }}</dd><dt>Source license</dt><dd>{{ label(inspected.license) }}</dd>
         <dt>Catalog mapping</dt><dd>{{ label(inspected.mapping) }}</dd><dt>Integration</dt><dd>{{ inspected.integrationEligible ? 'Eligible' : 'Blocked' }}</dd>
       </template>
-      <template v-else><dt>Location code</dt><dd>{{ inspected.code }}</dd><dt>Registered labels</dt><dd><a :href="registryLink(inspected.id)">Bin labels and archive</a></dd></template>
+      <template v-else><dt>Location code</dt><dd>{{ inspected.code }}</dd><dt>Registered labels</dt><dd><a :href="registryLink(inspected.id)">Bin labels and archive</a></dd><dt>Piece capacity</dt><dd>{{ capacityLabel(bins.rows.value.get(inspected.id)) }}<small v-if="!bins.confirmed.value && bins.rows.value.has(inspected.id)">Last confirmed</small> · <a :href="capacityLink(inspected.id)">Manage piece limit</a></dd></template>
       <dt>Record ID</dt><dd>{{ inspected.id }}</dd><dt>Revision</dt><dd>{{ inspected.revision }}</dd>
     </dl>
     <BinStock v-if="'code' in inspected" :key="inspected.id" :location="inspected" :as-of="workspace.asOf"

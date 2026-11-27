@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {capacityPreview,exceedsCapacity} from './binCapacity'
 import { useBinRegistry } from './useBinRegistry'
 import { computed, ref, watch } from 'vue'
 import type { Dispatch, Purchase, Workspace } from './api'
@@ -27,6 +28,8 @@ const target = ref('')
 const scanned = ref('')
 const bins=useBinRegistry(()=>[scanned.value])
 const moved = ref<number>()
+const targetRow=computed(()=>bins.rows.value.get(target.value))
+const tooFull=computed(()=>exceedsCapacity(targetRow.value,Number(moved.value || 0)))
 const offerItem = ref('')
 const price = ref('')
 const quantities = ref<Record<string, number | ''>>({})
@@ -87,7 +90,7 @@ async function save() {
       catalogId: identity.value === 'identified' ? receiptItem.value : null, itemCostMinor } })
     if (result) { change('putaway'); deliveryId.value = result.entityId }
   } else if (step.value === 'putaway') {
-    if (!line.value || !moved.value || !location.value || !verifiedIdentity.value) return
+    if (!line.value || !moved.value || !location.value || !verifiedIdentity.value || tooFull.value) return
     if (!bins.isActive(location.value.id) || !bins.matches(location.value,scanned.value)) {
       issue.value = 'Bin code does not match the selected destination. Check the physical label before confirming.'
       return
@@ -160,10 +163,11 @@ async function save() {
             <label>Count placed<input v-model="moved" type="number" inputmode="numeric" min="1" :max="line?.intakeQuantity" required /></label>
           </fieldset>
           <p class="field-hint">Read the physical bin label and count the units placed. Unconfirmed units stay in {{ line?.catalogId ? 'intake' : 'quarantine' }}.</p>
+          <p v-if="target && bins.confirmed.value" :class="tooFull?'warning':'field-hint'" role="status">{{ capacityPreview(targetRow,Math.max(0,Number(moved || 0))) }}</p>
           <p v-if="target && bins.rows.value.get(target)?.archived" class="warning">The selected destination is archived. Choose an active bin.</p>
           <p v-if="bins.confirmed.value && !bins.destinations.value.length" class="field-hint">Register a bin in <a href="#locations">Locations</a> first.</p>
           <p v-if="!eligible.length || (line?.catalogId && !currentItem?.integrationEligible)" class="field-hint">Putaway needs an eligible item with verified identity, condition and source rights. Check the <a href="#catalog">Catalog</a>.</p>
-          <button class="primary" :disabled="!enabled || stale || !verifiedIdentity || (!bins.confirmed.value || !bins.destinations.value.length || (!!target && !bins.isActive(target)) || bins.pending(scanned))">Confirm putaway</button>
+          <button class="primary" :disabled="!enabled || stale || tooFull || !verifiedIdentity || (!bins.confirmed.value || !bins.destinations.value.length || (!!target && !bins.isActive(target)) || bins.pending(scanned))">Confirm putaway</button>
         </template>
       </template>
       <template v-else>

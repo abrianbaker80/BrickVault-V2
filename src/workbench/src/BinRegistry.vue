@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {computed,nextTick,onScopeDispose,ref,shallowRef,watch} from 'vue'
 import {api,ContractFailure,explain,type RegistrySnapshot,type RegistryEvidence,type TransferControls} from './api'
+import {capacityLink,capacityLabel} from './binCapacity'
 import {registryLink,validLabel} from './binLabels'
 import {useBinRegistry} from './useBinRegistry'
 import {time} from './presentation'
@@ -90,6 +91,7 @@ async function save(){
     <template v-else-if="snapshot">
       <h3>{{ snapshot.bin.location.code }} · {{ snapshot.bin.location.name }}</h3>
       <p><strong>{{ snapshot.bin.archived ? 'Archived' : 'Active' }}</strong> · {{ snapshot.bin.physicalQuantity }} physical units · {{ snapshot.bin.positionCount }} occupied stock positions</p>
+      <p>{{ capacityLabel(snapshot.bin) }} · <a :href="capacityLink(id)">Manage piece limit</a></p>
       <p v-if="snapshot.bin.archived">Existing stock can be counted or moved out. This bin is closed to incoming stock. <a v-if="snapshot.bin.archiveEventId" :href="registryLink(id,snapshot.bin.archiveEventId)">Archive receipt</a></p>
       <section aria-label="Registered physical labels"><h3 ref="labelsHeading" tabindex="-1">Registered physical labels</h3><ul><li v-for="l in snapshot.labels" :key="l.label"><strong>{{ l.label }}</strong> · {{ l.isCanonical ? 'Canonical code' : 'Alternate label' }} · Revision {{ l.claimedRevision }}</li></ul>
         <div class="actions" v-if="confirmed.labels.length>1 || snapshot.nextLabelAfter"><button :disabled="loading || !connected || confirmed.labels.length<2" @click="page('labels')">Previous labels</button>
