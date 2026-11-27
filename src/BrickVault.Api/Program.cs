@@ -97,7 +97,7 @@ try
             if (fault.Status >= 500) Console.Error.WriteLine($"foundation_request {fault.Code} correlation={correlation:D}");
             ctx.Response.StatusCode = fault.Status;
             if (ctx.Request.Path != "/internal/ready")
-                await ctx.Response.WriteAsJsonAsync(new ApiError(fault.Code, fault.Message, correlation), Wire.Json, ctx.RequestAborted);
+                await ctx.Response.WriteAsJsonAsync(LocationRegistry.WireError(ctx.Request, fault, correlation), Wire.Json, ctx.RequestAborted);
         }
     });
     app.MapGet("/internal/ready", async (HttpContext c, CancellationToken ct) =>

@@ -539,8 +539,12 @@ export const api = {
   },
   diagnostic: (id: string) => read('diagnostics/' + encodeURIComponent(id), valid.Diagnostic),
   async save(command: Command, csrf: string) {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Workspace-Id': command.workspaceId
+    }
+    if (['location', 'putaway', 'transfer', 'part-out'].includes(command.kind)) headers['X-BV-Location-Contract'] = '1'
     const options = {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Workspace-Id': command.workspaceId },
+      method: 'POST', headers,
       body: JSON.stringify(command.body)
     }
     const path = commands[command.kind].path

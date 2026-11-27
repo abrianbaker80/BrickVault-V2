@@ -208,6 +208,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-BV-Location-Contract",
+            "in": "header",
+            "required": false,
+            "description": "Advertise supported location error detail. Level 1 accepts archived-destination and physical-label collision codes. Without this header the server retains the earlier definitive bin and reference conflict codes.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         ],
         "requestBody": {
@@ -501,6 +511,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "X-BV-Location-Contract",
+            "in": "header",
+            "required": false,
+            "description": "Advertise supported location error detail. Level 1 accepts archived-destination and physical-label collision codes. Without this header the server retains the earlier definitive bin and reference conflict codes.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         ],
         "requestBody": {
@@ -775,6 +795,16 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "X-BV-Location-Contract",
+            "in": "header",
+            "required": false,
+            "description": "Advertise supported location error detail. Level 1 accepts archived-destination and physical-label collision codes. Without this header the server retains the earlier definitive bin and reference conflict codes.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
             }
           }
         ],
@@ -3410,6 +3440,16 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "X-BV-Location-Contract",
+            "in": "header",
+            "required": false,
+            "description": "Advertise supported location error detail. Level 1 accepts archived-destination and physical-label collision codes. Without this header the server retains the earlier definitive bin and reference conflict codes.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
             }
           }
         ],

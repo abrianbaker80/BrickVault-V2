@@ -81,8 +81,16 @@ def qualify_registry(client, catalog):
     assert lookup(client, "BOX-LEGACY")["bin"]["archived"]
     assert client.call(PUTAWAY, "POST", placed_body, expected=(200, 201)) == placed
     assert client.call(ARCHIVE, "POST", archive, expected=(200, 201)) == archived
-    assert client.call(PUTAWAY, "POST", dict(placed_body, commandId=str(uuid4()), expectedRevision=extra["revision"],
-                                              confirmedLocationCode="REG-STOCK", quantity=1), expected=409)["code"] == "location_destination_archived"
+    denied = dict(placed_body, commandId=str(uuid4()), expectedRevision=extra["revision"],
+                  confirmedLocationCode="REG-STOCK", quantity=1)
+    legacy = client.call(PUTAWAY, "POST", denied, expected=409)
+    assert legacy["code"] == "bin_confirmation_mismatch" and "archived" in legacy["message"]
+    assert set(legacy) == {"code", "message", "correlationId"}
+    headers = {"X-BV-Location-Contract": "1"}
+    assert client.call(PUTAWAY, "POST", denied, headers=headers, expected=409)["code"] == "location_destination_archived"
+    conflict = dict(commandId=str(uuid4()), expectedRevision=0, code="BOX-LEGACY", name="Already claimed")
+    assert client.call("locations", "POST", conflict, expected=409)["code"] == "duplicate_reference"
+    assert client.call("locations", "POST", conflict, headers=headers, expected=409)["code"] == "duplicate_location_label"
 
     position = placed["entityId"]
     where = dict(purchaseId=purchase, positionId=position, locationId=source, confirmedLocationCode="BOX-LEGACY")
@@ -95,7 +103,7 @@ def qualify_registry(client, catalog):
     back = dict(move_body, commandId=str(uuid4()), expectedRevision=moved["revision"], sourcePlacementId=moved["entityId"],
                 sourceLocationId=target, confirmedSourceLocationCode="BOX-NEW", destinationLocationId=source,
                 confirmedDestinationLocationCode="BOX-LEGACY")
-    assert client.call(TRANSFER, "POST", back, expected=409)["code"] == "location_destination_archived"
+    assert client.call(TRANSFER, "POST", back, headers=headers, expected=409)["code"] == "location_destination_archived"
     assert (detail(client, source)["bin"]["physicalQuantity"], detail(client, target)["bin"]["physicalQuantity"]) == (2, 1)
 
     current = next(item for item in client.call("workspace")["catalog"] if item["id"] == catalog)
@@ -103,7 +111,7 @@ def qualify_registry(client, catalog):
     selected = dict(purchaseId=purchase, positionId=moved["entityId"], locationId=target, confirmedLocationCode="BOX-NEW")
     line = output(item, where, 1, 25, "retained")
     invalid = dict(source_fields(selected, item, 1, [line], 0, []), commandId=str(uuid4()), expectedRevision=moved["revision"])
-    assert client.call(PART_OUT, "POST", invalid, expected=409)["code"] == "location_destination_archived"
+    assert client.call(PART_OUT, "POST", invalid, headers=headers, expected=409)["code"] == "location_destination_archived"
     client.call(f"locations/{target}/registry/receipts?commandId=" + archive["commandId"], expected=404)
     saved = {"purchase": purchase_row(client, purchase), "source": source, "target": target,
              "registry": detail(client, source), "other": detail(client, target),

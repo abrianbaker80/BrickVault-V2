@@ -116,6 +116,24 @@ internal sealed partial class LocationRegistry(NpgsqlDataSource db)
         }
     }
 
+    internal static bool SupportsContract(HttpRequest request, int level) =>
+        request.Headers.TryGetValue("X-BV-Location-Contract", out var values) && values.Count == 1 &&
+        int.TryParse(values[0], System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var advertised) && advertised >= level;
+
+    internal static ApiError WireError(HttpRequest request, Fault fault, Guid correlationId)
+    {
+        var code = fault.Code;
+        if (!SupportsContract(request, 1))
+        {
+            // A retained Workbench clears its pending journal only for a recognized definitive rejection.
+            if (code == "location_destination_archived") code = "bin_confirmation_mismatch";
+            if (code == "duplicate_location_label" && string.Equals(request.Path.Value?.TrimEnd('/'),
+                    "/api/v1/locations", StringComparison.OrdinalIgnoreCase)) code = "duplicate_reference";
+        }
+        return new ApiError(code, fault.Message, correlationId);
+    }
+
     internal static Fault DuplicateLabel() => new(409, "duplicate_location_label", "That physical label is already registered.");
     internal static Fault ArchivedDestination() => new(409, "location_destination_archived",
         "The destination bin is archived. Select an active destination.");
