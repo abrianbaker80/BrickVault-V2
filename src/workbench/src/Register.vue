@@ -31,7 +31,10 @@ const inspected = computed<Catalog | Location | undefined>(previous =>
 const title = computed(() => props.page === 'catalog' ? 'Catalog register' : 'Location register')
 const matches = (values: string[]) => values.some(v => v.toLowerCase().includes(query.value.trim().toLowerCase()))
 const catalog = computed(() => props.workspace.catalog.filter(r => matches([r.name, r.itemNumber, r.variant || '', r.itemType])))
-const locations = computed(() => props.workspace.locations.filter(r => matches([r.name, r.code])))
+const locations = computed(() => props.workspace.locations.filter(r => matches([r.name, r.code])).map(location => {
+  const registry = bins.rows.value.get(location.id)
+  return { location, registry, capacity: registry?.capacity }
+}))
 const count = computed(() => props.page === 'catalog' ? catalog.value.length : locations.value.length)
 let origin: HTMLButtonElement | undefined
 let resize: ResizeObserver | undefined
@@ -112,12 +115,17 @@ onBeforeUnmount(() => {
           <td><span class="tag" :class="{ held: !row.integrationEligible }">{{ row.integrationEligible ? 'Eligible' : 'Blocked' }}</span></td>
         </tr></tbody>
       </table>
-      <table v-else>
+      <table v-else class="location-table">
         <caption class="sr">Storage locations</caption>
-        <thead><tr><th scope="col">Location</th><th scope="col">Code</th><th scope="col">Piece capacity</th><th scope="col">Revision</th></tr></thead>
-        <tbody><tr v-for="row in locations" :key="row.id">
-          <td><button class="row-link" @click="inspect(row, $event)" :aria-label="'Inspect ' + row.name"><strong>{{ row.name }}</strong></button></td>
-          <td>{{ row.code }}<small v-if="bins.rows.value.get(row.id)?.archived">Archived</small></td><td>{{ capacityLabel(bins.rows.value.get(row.id)) }}<small v-if="!bins.confirmed.value && bins.rows.value.has(row.id)">Last confirmed</small></td><td>{{ row.revision }}</td>
+        <thead><tr><th scope="col">Location and code</th><th scope="col">Status</th><th scope="col">On hand</th><th scope="col">Piece limit</th><th scope="col">Room or excess</th></tr></thead>
+        <tbody><tr v-for="{ location, registry, capacity } in locations" :key="location.id">
+          <td><button class="row-link" @click="inspect(location, $event)" :aria-label="'Inspect ' + location.name"><strong>{{ location.name }}</strong></button><small>{{ location.code }}</small></td>
+          <td><span class="field state"><span>{{ !registry ? 'Unknown' : registry.archived ? 'Archived' : 'Active' }}</span></span><small>Revision {{ location.revision }}</small></td>
+          <td><span class="field amount"><span>{{ registry?.physicalQuantity ?? 'Unknown' }}</span></span>
+            <small class="field freshness"><span>{{ !registry ? (bins.error.value || !connected || !workspace.complete ? 'Unavailable' : 'Pending') : bins.confirmed.value ? 'Current' : 'Last confirmed' }}</span></small></td>
+          <td><span class="field amount"><span>{{ !capacity ? 'Unknown' : capacity.pieceLimit ?? 'No limit' }}</span></span></td>
+          <td><span class="field amount"><span>{{ !capacity ? 'Unknown' : capacity.pieceLimit === null ? 'No limit' : capacity.overCapacityQuantity || capacity.remainingQuantity }}</span></span>
+            <small class="field room"><span v-if="capacity && capacity.pieceLimit !== null">{{ capacity.overCapacityQuantity ? 'above limit' : 'remaining' }}</span></small></td>
         </tr></tbody>
       </table>
     </div>
@@ -176,3 +184,23 @@ onBeforeUnmount(() => {
     @failure="emit('failure', $event)" @recover="close" @close="inspectBin(inspected.id)" />
   </div>
 </template>
+
+<style scoped>
+.location-table th:first-child { width: 36% }
+.location-table td { vertical-align: top }
+.location-table small { display: block; color: var(--muted) }
+/* Capacity and archive reads update independently of bin selection. Reserve their
+   responsive intrinsic space so a completed read cannot move a pointer target. */
+.location-table .field { display: grid; overflow-wrap: anywhere }
+.field::before, .field > span { grid-area: 1 / 1 }
+.field::before { visibility: hidden }
+.field.amount { font-variant-numeric: tabular-nums }
+.field.amount::before { content: '0000000000000000000' } /* 19 digits in a nonnegative int64 */
+.field.state::before { content: 'Unknown' }
+.field.freshness::before { content: 'Last confirmed' }
+.field.room::before { content: 'above limit' }
+@media (max-width: 680px) {
+  .location-table th, .location-table td { padding-inline: 4px }
+  .location-table th:first-child { width: 30% }
+}
+</style>
