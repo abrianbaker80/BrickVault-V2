@@ -16,7 +16,7 @@ import StockLossWorkspace from './StockLossWorkspace.vue'
 import type { CountLink } from './countLinks'
 import { label } from './presentation'
 import type { Catalog, Location, TransferControls, Workspace } from './api'
-const props = defineProps<{ page: 'catalog' | 'locations'; workspace: Workspace; connected: boolean; workspaceReady: boolean; transfers: TransferControls; confirmedSourceId?: string; countLink?: CountLink }>()
+const props = defineProps<{ page: 'catalog' | 'locations'; workspace: Workspace; connected: boolean; workspaceReady: boolean; workspaceLoading: boolean; transfers: TransferControls; confirmedSourceId?: string; countLink?: CountLink }>()
 const emit = defineEmits<{ failure: [reason: unknown] }>()
 const bins=useBinRegistry()
 const query = ref('')
@@ -144,7 +144,7 @@ onBeforeUnmount(() => {
       <template v-else><dt>Location code</dt><dd>{{ inspected.code }}</dd><dt>Registered labels</dt><dd><a :href="registryLink(inspected.id)">Bin labels and archive</a></dd><dt>Piece capacity</dt><dd>{{ capacityLabel(bins.rows.value.get(inspected.id)) }}<small v-if="!bins.confirmed.value && bins.rows.value.has(inspected.id)">Last confirmed</small> · <a :href="capacityLink(inspected.id)">Manage piece limit</a></dd></template>
       <dt>Record ID</dt><dd>{{ inspected.id }}</dd><dt>Revision</dt><dd>{{ inspected.revision }}</dd>
     </dl>
-    <BinStock v-if="'code' in inspected" :key="inspected.id" :location="inspected" :as-of="workspace.asOf"
+    <BinStock v-if="'code' in inspected" :workspace-loading="workspaceLoading" :key="inspected.id" :location="inspected" :as-of="workspace.asOf"
       :connected="connected" :locations="workspace.locations" :catalog="workspace.catalog" :transfers="transfers" :count-link="countLink"
       @inspect="inspectBin" @recover="close" @failure="emit('failure', $event)" />
   </component>

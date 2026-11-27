@@ -180,7 +180,7 @@ function openForm() {
               <Receiving v-if="receiving" :key="session.workspaceId" :stock="receiving" :workspace="workspace" :workspace-id="session.workspaceId" :enabled="canCreate" :uncertain="pending.length > 0 && !submitting" :dispatch="record" />
               <p v-else role="status">{{ readState === 'loading' ? 'Loading receiving records…' : 'Receiving records are unavailable.' }}</p>
             </template>
-            <Register v-else :key="session.workspaceId + page" :page="page" :workspace="workspace" :connected="readState !== 'disconnected'" :workspace-ready="readState === 'ready'"
+            <Register v-else :key="session.workspaceId + page" :page="page" :workspace="workspace" :connected="readState !== 'disconnected'" :workspace-ready="readState === 'ready'" :workspace-loading="readState === 'loading'"
               :transfers="{ enabled: canCreate, pending: pending.length > 0, feedback: error || journalError, workspaceId: session.workspaceId, dispatch: record }"
               :count-link="countLink" :confirmed-source-id="notice?.sourceLocationId" @failure="expired" />
           </div>

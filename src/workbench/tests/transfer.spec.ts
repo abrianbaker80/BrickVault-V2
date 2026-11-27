@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test'
+import { expect, type Locator, type Page, type Route } from '@playwright/test'
 import { test } from './trusted'
 import { audit, duringBackgroundRead, endpoint, fixture, open, purchases, stock, totals } from './bin-fixture'
 import type { BinTransferSnapshot } from '../src/api'
@@ -125,6 +125,114 @@ test('transfer waits for a complete source and rejects a superseded layer draft'
   await totals(page, [9, 5, 4, 4])
   await expect(movements(page)).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'Pending confirmations' })).toHaveCount(0)
+})
+
+
+test('an unchanged refreshed source can open a transfer once; a changed source or partial verification cancels the same intent',async({page})=>{
+  const f=await fixture(page)
+  await open(page,f.a)
+  const row=layers(page).filter({hasText:f.paid.purchase})
+  const start=row.getByRole('button',{name:/Transfer stock/}),form=transfer(page)
+  const holds=(url:URL)=>url.pathname.endsWith('/positions/'+f.position+'/holds')
+  function gate(){
+    let arrived!:()=>void,release!:()=>void,delivered!:()=>void
+    const started=new Promise<void>(resolve=>{arrived=resolve}),resume=new Promise<void>(resolve=>{release=resolve})
+    const finished=new Promise<void>(resolve=>{delivered=resolve})
+    const handle=async(route:Route)=>{
+      const result=await route.fetch()
+      try{arrived();await resume;await route.fulfill({response:result})}
+      finally{await result.dispose();delivered()}
+    }
+    return {started,finished,release,handle}
+  }
+  let nextHolds:ReturnType<typeof gate>|undefined,nextMovement:ReturnType<typeof gate>|undefined
+  let partialMovement=false
+  const movement=(u:URL)=>u.pathname.endsWith('/bins/'+f.a.id+'/movements')
+  await page.route(u=>holds(u)||movement(u),async route=>{
+    const url=new URL(route.request().url())
+    if(holds(url) && nextHolds){const held=nextHolds;nextHolds=undefined;await held.handle(route)}
+    else if(movement(url) && nextMovement){const held=nextMovement;nextMovement=undefined;await held.handle(route)}
+    else if(movement(url) && partialMovement){
+      partialMovement=false
+      const result=await route.fetch()
+      await route.fulfill({json:{...await result.json(),complete:false}});await result.dispose()
+    }else await route.continue()
+  })
+  async function pausedCheck(refresh:()=>Promise<void>){
+    const held=gate();nextHolds=held
+    await start.click();await held.started
+    try{await refresh()}finally{held.release();await held.finished}
+  }
+  async function refreshSource(){
+    const moved=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/'+f.a.id+'/movements'))
+    const counted=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/'+f.a.id+'/counts'))
+    await page.getByRole('button',{name:'Refresh',exact:true}).click()
+    await Promise.all([moved,counted])
+    await expect(stock(page).getByText('Refreshing bin stock…')).toHaveCount(0)
+  }
+  await pausedCheck(refreshSource)
+  await expect(form).toHaveCount(1)
+  await form.getByRole('combobox',{name:'Destination bin',exact:true}).selectOption(f.b.id)
+  await form.getByRole('button',{name:'Cancel',exact:true}).press('Enter')
+
+  const heldMovement=gate()
+  await pausedCheck(async()=>{
+    nextMovement=heldMovement
+    await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
+    await heldMovement.started
+  })
+  try{
+    await expect(stock(page).getByText(/Verifying the transfer source/)).toBeVisible()
+    await expect(form).toHaveCount(0)
+  }finally{heldMovement.release();await heldMovement.finished}
+  await expect(form).toHaveCount(1)
+  await form.getByRole('button',{name:'Cancel',exact:true}).press('Enter')
+
+  await pausedCheck(async()=>{await f.secondOffer();await refreshSource()})
+  await expect(stock(page).getByRole('alert')).toContainText('Refresh this bin')
+  await expect(form).toHaveCount(0)
+  await totals(page,[9,5,4,4])
+  await pausedCheck(async()=>{
+    partialMovement=true
+    await refreshSource()
+  })
+  await expect(stock(page)).toContainText('Partial bin read')
+  await expect(form).toHaveCount(0)
+  await expect(start).toBeDisabled()
+  await expect(page.getByRole('region',{name:'Pending confirmations'})).toHaveCount(0)
+})
+
+
+test('a late cancelled hold check cannot open or replace a different transfer and a foreign purchase witness is rejected',async({page})=>{
+  const f=await fixture(page)
+  await open(page,f.a)
+  const button=(purchase:string)=>layers(page).filter({hasText:purchase}).getByRole('button',{name:/Transfer stock/})
+  const form=transfer(page)
+  let arrived!:()=>void,release!:()=>void
+  const started=new Promise<void>(resolve=>{arrived=resolve}),resume=new Promise<void>(resolve=>{release=resolve})
+  const heldRead=(u:URL)=>u.pathname.endsWith('/positions/'+f.position+'/holds')
+  await page.route(heldRead,async route=>{
+    const result=await route.fetch()
+    try{arrived();await resume;await route.fulfill({response:result})}finally{await result.dispose()}
+  },{times:1})
+  await button(f.paid.purchase).click();await started
+  await stock(page).getByRole('button',{name:'Cancel transfer preparation'}).press('Enter')
+  await button(f.unknown.purchase).click()
+  try{await expect(form).toContainText(f.unknown.purchase)}finally{
+    const returned=page.waitForResponse(r=>heldRead(new URL(r.url())))
+    release();await returned
+  }
+  await expect(form).toHaveCount(1);await expect(form).toContainText(f.unknown.purchase)
+  await form.getByRole('button',{name:'Cancel',exact:true}).press('Enter')
+  await page.route(heldRead,async route=>{
+    const response=await route.fetch()
+    await route.fulfill({json:{...await response.json(),purchaseId:f.unknown.purchaseId}})
+    await response.dispose()
+  },{times:1})
+  await button(f.paid.purchase).press('Enter')
+  await expect(stock(page).getByRole('alert')).toContainText('Refresh this bin')
+  await expect(form).toHaveCount(0)
+  await expect(page.getByRole('region',{name:'Pending confirmations'})).toHaveCount(0)
 })
 
 test('moving an unknown-cost layer preserves its recorded identity and leaves history on an empty source', async ({ page }) => {
