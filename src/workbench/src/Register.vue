@@ -109,15 +109,15 @@ onBeforeUnmount(() => {
   <div ref="host" class="register-workspace" :class="{ docked: inspected && !compact && !countLink?.registry && !countLink?.capacity }">
   <BinCapacity v-if="countLink?.capacity" :key="[transfers.workspaceId,countLink.binId,'capacity',countLink.capacityEvent].join('/')" :id="countLink.binId" :event-id="countLink.capacityEvent" :as-of="workspace.asOf" :connected="connected" :ready="workspaceReady" :controls="transfers" @failure="emit('failure',$event)" />
   <BinRegistry v-else-if="countLink?.registry" :key="[transfers.workspaceId,countLink.binId,countLink.registryEvent].join('/')" :id="countLink.binId" :event-id="countLink.registryEvent" :as-of="workspace.asOf" :connected="connected" :ready="workspaceReady" :controls="transfers" @failure="emit('failure',$event)" />
-  <section v-else-if="!operationOpen" class="panel" :aria-label="title">
+  <section v-else v-show="!operationOpen" class="panel" :aria-label="title">
     <header class="panel-head"><h2>{{ title }}</h2><span class="count" aria-live="polite">{{ count }} {{ count === 1 ? 'record' : 'records' }}</span></header>
     <div class="toolbar"><label class="search">
       <span class="lens" aria-hidden="true"></span>
       <input ref="search" v-model="query" :aria-label="'Search ' + page" type="search" :placeholder="page === 'catalog' ? 'Search item numbers, names, variants…' : 'Search location codes or names…'" />
       <kbd aria-hidden="true">/</kbd>
     </label></div>
-    <BinLookup v-if="page==='locations'" :ready="workspaceReady" :as-of="workspace.asOf" @failure="emit('failure',$event)" />
-    <div v-if="count" class="table-wrap">
+    <BinLookup v-if="page==='locations'" :ready="workspaceReady && !operationOpen" :as-of="workspace.asOf" @failure="emit('failure',$event)" />
+    <div v-if="!operationOpen && count" class="table-wrap">
       <table v-if="page === 'catalog'">
         <caption class="sr">Catalog items</caption>
         <thead><tr><th scope="col">Item</th><th scope="col">Color</th><th scope="col">Integration</th></tr></thead>
@@ -143,7 +143,7 @@ onBeforeUnmount(() => {
         </tr></tbody>
       </table>
     </div>
-    <div v-else class="empty">
+    <div v-else-if="!operationOpen" class="empty">
       <strong>{{ !workspace.complete ? 'No records in the partial read' : query ? 'No matching records' : page === 'catalog' ? 'No catalog items' : 'No locations' }}</strong>
       <button v-if="query" @click="query = ''; search?.focus()">Clear search</button>
       <p v-else-if="workspace.complete">{{ page === 'catalog' ? 'Add the first item to the catalog register.' : 'Add a location to start the register.' }}</p>

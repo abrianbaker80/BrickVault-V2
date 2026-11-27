@@ -158,8 +158,8 @@ export function useWorkbench(page: Ref<string>) {
   async function resolveSizeRejection(command: Command, reason: ApiFailure, firstAttempt: boolean) {
     // A previous attempt may already have committed before its response was lost.
     if (!firstAttempt) {
+      const checking = generation
       try {
-        const checking = generation
         let references: Workspace | undefined
         let committed: { correlationId: string } | undefined
         let partOutReceipt: string | undefined
@@ -306,7 +306,8 @@ export function useWorkbench(page: Ref<string>) {
           committed = history.find(row => row.commandId === command.body.commandId)
         }
         const authenticated = await api.session()
-        if (checking !== generation || authenticated.workspaceId !== command.workspaceId) throw new Error('Workspace changed')
+        if (checking !== generation) return
+        if (authenticated.workspaceId !== command.workspaceId) throw new Error('Workspace changed')
         if (committed) {
           forget(command)
           loadPending()
@@ -317,7 +318,7 @@ export function useWorkbench(page: Ref<string>) {
           return
         }
       } catch (failure) {
-        if (expired(failure)) return
+        if (checking !== generation || expired(failure)) return
         error.value = 'The server rejected the retry size. Reconnect to verify the original command before continuing.'
         readState.value = 'disconnected'
         return

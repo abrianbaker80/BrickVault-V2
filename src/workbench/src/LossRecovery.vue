@@ -51,7 +51,8 @@ function pageBy(key: 'sources' | 'history', cursor?: string | null) {
   requested.value = { ...confirmed.value, [key]: cursor ? [...stack, cursor] : stack.slice(0, -1) }
 }
 onMounted(() => dialog.value?.showModal())
-watch(() => [props.route.receipt ? undefined : props.asOf, props.connected, !!props.route.receipt || props.workspaceReady, props.location.revision, requested.value, attempt.value] as const,
+watch([() => props.route.receipt ? undefined : props.asOf, () => props.connected, () => !!props.route.receipt || props.workspaceReady,
+  () => props.location.revision, requested, attempt],
   async ([, connected, available, , target], _, cleanup) => {
     let active = true
     cleanup(() => { active = false })

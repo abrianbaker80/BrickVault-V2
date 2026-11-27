@@ -60,9 +60,10 @@ onMounted(async () => {
 })
 const readAt = ref(props.asOf)
 watch(() => props.asOf, asOf => {
-  if (!props.receiptId || !loading.value) readAt.value = asOf
+  if (!props.receiptId || (!loading.value && (!snapshot.value?.complete || partial.value || error.value ||
+      Date.parse(asOf) >= Date.parse(snapshot.value.asOf)))) readAt.value = asOf
 })
-watch(() => [readAt.value, props.location.revision, props.connected, requested.value, attempt.value] as const,
+watch([readAt, () => props.location.revision, () => props.connected, requested, attempt],
   async ([, revision, online, cursors], _, onCleanup) => {
     let active = true
     onCleanup(() => { active = false })
@@ -95,7 +96,7 @@ watch(() => [readAt.value, props.location.revision, props.connected, requested.v
         // The observation is immutable; its open-shortage and closure context can change.
         // Finish the scoped read first, then catch up if the directory saw a later transaction.
         if (props.receiptId && !partial.value && !error.value && snapshot.value &&
-            Date.parse(props.asOf) > Date.parse(snapshot.value.asOf)) readAt.value = props.asOf
+            Date.parse(props.asOf) >= Date.parse(snapshot.value.asOf)) readAt.value = props.asOf
       }
     }
   }, { immediate: true })
