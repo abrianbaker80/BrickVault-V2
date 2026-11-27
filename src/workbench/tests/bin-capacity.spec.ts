@@ -1,6 +1,8 @@
 import {expect,type Page} from '@playwright/test'
+import {randomUUID} from 'node:crypto'
+import type {Command} from '../src/api'
 import {test} from './trusted'
-import {audit,fixture,purchases,stock} from './bin-fixture'
+import {audit,duringBackgroundRead,fixture,purchases,stock} from './bin-fixture'
 import {capacityLink} from '../src/binCapacity'
 import {partOutLink} from '../src/countLinks'
 
@@ -119,10 +121,13 @@ test('partial or stale capacity evidence fences a draft and policy history remai
   await history.getByRole('button',{name:'Older changes'}).press('Enter')
   await expect(history.getByRole('heading')).toBeFocused();await expect(history.getByRole('link')).toHaveCount(1)
   const refresh=page.getByRole('button',{name:'Refresh',exact:true})
-  await refresh.click()
   await expect(history.getByRole('link').first()).toHaveAttribute('href',capacityLink(f.b.id,first))
-  await edit(page,'set','Retain the operator draft');await p.getByLabel('Piece limit',{exact:true}).fill('30')
   const path='/locations/'+f.b.id+'/capacity'
+  await duringBackgroundRead(page,u=>u.pathname.endsWith(path),async()=>{
+    await edit(page,'set','Retain the operator draft');await p.getByLabel('Piece limit',{exact:true}).fill('30')
+    await expect(p.getByRole('button',{name:'Save piece limit'})).toBeDisabled()
+  })
+  await expect(p.getByRole('button',{name:'Save piece limit'})).toBeEnabled()
   await page.route(u=>u.pathname.endsWith(path),async route=>{
     const r=await route.fetch();await route.fulfill({json:{...await r.json(),complete:false}});await r.dispose()
   },{times:1})
@@ -194,4 +199,96 @@ test('manual part-out combines outputs and consumed input per bin; over-limit st
   await dest.selectOption(f.empty.id);await transfer.getByLabel('Confirm destination bin code').fill(f.empty.code)
   await confirm.click();await expect(page.getByText(/Saved Transfer/)).toBeVisible()
   await page.goto('/'+capacityLink(f.a.id));await expect(policy(page)).toContainText('8 present · Piece limit 8 · 0 spaces remaining')
+})
+
+for(const kind of ['putaway','transfer','part-out'] as const){
+  test(kind+' keeps uncertain commands until a scoped capacity rejection proves the refused net quantity',async({page})=>{
+    test.setTimeout(90_000)
+    const f=await fixture(page)
+    const bin=kind==='part-out'?f.a:f.b
+    await f.write('locations/capacities',1,{locationId:bin.id,pieceLimit:kind==='part-out'?8:2,reason:'Measured capacity'})
+    const input=(await purchases(page,[f.unknown.purchaseId]))[0].deliveries[0].placements[0]
+    const common={commandId:randomUUID(),purchaseId:f.unknown.purchaseId,expectedRevision:3}
+    let command:Command
+    const ws=f.headers['X-Workspace-Id']
+    if(kind==='part-out'){
+      const catalogId=await f.write('catalog',0,{itemType:'part',itemNumber:'REPLAY-'+f.a.code,name:'Fictional pins',variant:null,colorState:'known',
+        colorId:7,condition:'used',completeness:'complete',source:'Fictional example',license:'operator-owned',mapping:'confirmed'})
+      const output=(b:typeof f.a,quantity:number)=>({lineId:randomUUID(),catalogId,catalogRevision:1,locationId:b.id,
+        confirmedLocationCode:b.code,quantity,itemCostMinor:null,disposition:'stock' as const})
+      command={kind,workspaceId:ws,body:{...common,sourcePositionId:input.id,sourceLocationId:f.a.id,confirmedSourceLocationCode:f.a.code,
+        sourceCatalogId:f.catalogId,sourceCatalogRevision:1,quantity:1,reason:'Inspected parts',outputs:[output(f.a,1),output(f.a,2),output(f.b,1)],
+        residualItemCostMinor:null,physicalResiduals:[]}}
+    }else if(kind==='transfer'){
+      command={kind,workspaceId:ws,body:{...common,sourcePlacementId:input.id,sourceLocationId:f.a.id,confirmedSourceLocationCode:f.a.code,
+        destinationLocationId:f.b.id,confirmedDestinationLocationCode:f.b.code,quantity:1,reason:'Rebalance shelf',backing:[]}}
+    }else{
+      command={kind,workspaceId:ws,body:{...common,deliveryId:f.unknown.deliveryId,catalogId:f.catalogId,locationId:f.b.id,confirmedLocationCode:f.b.code,quantity:1}}
+    }
+    const journal='brickvault.v2.pending.'+ws+'.'+common.commandId,stored=JSON.stringify(command)
+    await page.evaluate(([k,v])=>localStorage.setItem(k,v),[journal,stored]);await page.reload()
+    const pending=page.getByRole('region',{name:'Pending confirmations'}),retry=pending.getByRole('button',{name:'Retry command'})
+    const path=kind==='part-out'?'part-outs':kind==='transfer'?'transfers':kind
+    const actualNet=kind==='part-out'?2:1
+    const variants=['missing','other bin','wrong quantity','contradictory remainder','enough room','unsafe integer','wrong status']
+    let attempts=0
+    await page.route('**/api/v1/receiving/'+path,async route=>{
+      expect(route.request().postData()).toBe(JSON.stringify(command.body))
+      expect(route.request().headers()['x-bv-location-contract']).toBe('2')
+      const response=await route.fetch(),body=await response.json(),c=body.capacity
+      expect(response.status()).toBe(409);expect(c.locationId).toBe(bin.id);expect(c.requestedNetQuantity).toBe(actualNet)
+      const variant=variants[attempts++]
+      switch(variant){
+        case 'missing': delete body.capacity;break
+        case 'other bin': c.locationId=kind==='part-out'?f.b.id:f.a.id;break
+        case 'wrong quantity': c.requestedNetQuantity++;break
+        case 'contradictory remainder': c.remainingQuantity++;break
+        case 'enough room': c.remainingQuantity=actualNet;c.pieceLimit=c.physicalQuantity+actualNet;break
+        case 'unsafe integer': c.physicalQuantity=2**53;break
+      }
+      await route.fulfill({status:variant==='wrong status'?400:409,json:body});await response.dispose()
+    })
+    for(let i=0;i<variants.length;i++){
+      await retry.click()
+      await expect(page.getByRole('alert').first()).toContainText('Command confirmation is pending')
+      await expect(pending).toBeVisible()
+      expect(await page.evaluate(key=>localStorage.getItem(key),journal)).toBe(stored)
+      await expect(page.getByText(/Saved (Transfer|Putaway|Part-out)/)).toHaveCount(0)
+      if(i===0)await page.reload()
+      else await page.getByRole('button',{name:'Refresh',exact:true}).click()
+      await expect(retry).toBeEnabled()
+    }
+    await retry.click()
+    await expect(pending).toHaveCount(0)
+    await expect(page.getByRole('alert').first()).toContainText('Bin '+bin.code+' has room for 0')
+    expect(await page.evaluate(key=>localStorage.getItem(key),journal)).toBe(null)
+    expect(attempts).toBe(variants.length+1)
+    const purchase=(await purchases(page,[f.unknown.purchaseId]))[0]
+    expect(purchase.revision).toBe(3)
+    expect(purchase.deliveries[0].placements).toEqual([input])
+  })
+}
+
+test('a capacity rejection cannot settle an unrelated piece-limit command',async({page})=>{
+  const f=await fixture(page),p=policy(page)
+  await page.goto('/'+capacityLink(f.empty.id))
+  await edit(page,'set','Witnessed shelf size')
+  await p.getByLabel('Piece limit',{exact:true}).fill('4')
+  let original=''
+  await page.route('**/api/v1/locations/capacities',async route=>{
+    original=route.request().postData()!
+    await route.fulfill({status:409,json:{code:'location_capacity_exceeded',message:'No room',correlationId:randomUUID(),
+      capacity:{locationId:f.empty.id,pieceLimit:1,physicalQuantity:1,remainingQuantity:0,requestedNetQuantity:1}}})
+  },{times:1})
+  await p.getByRole('button',{name:'Save piece limit'}).click()
+  const pending=page.getByRole('region',{name:'Pending confirmations'})
+  await expect(pending).toBeVisible();await expect(page.getByRole('alert').first()).toContainText('could not be verified')
+  await expect(page.getByRole('link',{name:'View piece limit receipt'})).toHaveCount(0)
+  await page.reload()
+  const actual=page.waitForRequest(r=>r.method()==='POST' && r.url().endsWith('/locations/capacities'))
+  await pending.getByRole('button',{name:'Retry command'}).click()
+  expect((await actual).postData()).toBe(original)
+  await page.getByRole('link',{name:'View piece limit receipt'}).click()
+  await expect(p.getByRole('heading',{name:'Piece limit 4'})).toBeVisible()
+  await expect(p).toContainText('Witnessed shelf size')
 })

@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import { api, ApiFailure, commandLabel, explain, forget, InvalidCommand, readJournal, remember } from './api'
 import { recoverPartOut } from './recoverPartOut'
-import {capacityLink} from './binCapacity'
+import {capacityLink,confirmsCapacityRejection} from './binCapacity'
 import { registryLink, sameLabel } from './binLabels'
 import { recoverInspection } from './recoverInspection'
 import { partOutLink, recoveryLink, closureLink, countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink } from './countLinks'
@@ -340,11 +340,11 @@ export function useWorkbench(page: Ref<string>) {
       } else if (reason instanceof ApiFailure && reason.detail?.code === 'workspace_mismatch') {
         await refresh()
         error.value = 'The workspace changed. The original command is held for its issuing workspace.'
-      } else if (reason instanceof ApiFailure && reason.detail &&
+      } else if (reason instanceof ApiFailure && reason.detail && (confirmsCapacityRejection(command,reason) ||
           ['invalid_quarantine','unknown_quarantine_receipt','quarantine_position_mismatch','quarantine_bin_conflict','quarantine_catalog_conflict',
             'quarantine_shortage_open','quarantine_quantity_unavailable','quarantine_capacity_unavailable','stock_loss_quarantine_unresolved','invalid_draft_backing_withdrawal','draft_backing_bin_conflict','draft_backing_position_mismatch','draft_backing_offer_mismatch',
             'draft_backing_authority_unverified','draft_backing_quantity_unavailable','invalid_recount', 'empty_recount_preview', 'recount_preview_used', 'unknown_recount_preview',
-            'location_capacity_exceeded','invalid_location_capacity','invalid_location_label','invalid_location_archive','invalid_location_registry_command','duplicate_location_label','location_destination_archived',
+            'invalid_location_capacity','invalid_location_label','invalid_location_archive','invalid_location_registry_command','duplicate_location_label','location_destination_archived',
             'location_archive_stock_changed','location_already_archived','location_label_mismatch','invalid_reference', 'duplicate_reference', 'invalid_receiving', 'duplicate_receiving_reference',
             'revision_conflict', 'command_mismatch', 'catalog_ineligible', 'catalog_reconfirmation_required', 'bin_confirmation_mismatch',
             'quantity_unavailable', 'delivery_mismatch', 'backing_mismatch', 'invalid_transfer', 'transfer_source_mismatch',
@@ -357,14 +357,16 @@ export function useWorkbench(page: Ref<string>) {
             'shortage_closure_bin_conflict','shortage_closure_case_conflict','shortage_closure_observation_conflict',
             'shortage_closure_count_not_exact','shortage_closure_commitments_inconsistent','invalid_stock_loss_recovery','stock_loss_recovery_scope',
             'stock_loss_recovery_bin','stock_loss_recovery_catalog','stock_loss_recovery_amount','invalid_stock_part_out','part_out_scope','part_out_bin',
-            'part_out_catalog','part_out_amount','part_out_identity_gain','part_out_cost_mismatch'].includes(reason.detail.code)) {
+            'part_out_catalog','part_out_amount','part_out_identity_gain','part_out_cost_mismatch'].includes(reason.detail.code))) {
         forget(command)
         loadPending()
         if (reason.status === 409) await refresh()
         error.value = explain(reason,workspace.value?.locations)
       } else {
         // The gateway, transport or client may fail after commit. Keep the exact payload for replay.
-        error.value = 'Command confirmation is pending. ' + explain(reason)
+        const message=reason instanceof ApiFailure && reason.detail?.code==='location_capacity_exceeded'
+          ? 'The capacity response could not be verified for this command.' : explain(reason)
+        error.value = 'Command confirmation is pending. ' + message
         readState.value = 'disconnected'
       }
     } finally {

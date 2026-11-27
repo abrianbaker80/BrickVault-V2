@@ -1,4 +1,28 @@
-import type { RegistryRow } from './api'
+import type { ApiFailure, Command, RegistryRow } from './api'
+
+export function confirmsCapacityRejection(command:Command, failure:ApiFailure) {
+  if(failure.status!==409 || failure.detail?.code!=='location_capacity_exceeded')return false
+  const c=failure.detail.capacity
+  if(!c || !Number.isSafeInteger(c.pieceLimit) || c.pieceLimit<1 ||
+     !Number.isSafeInteger(c.physicalQuantity) || c.physicalQuantity<0 ||
+     c.remainingQuantity!==Math.max(0,c.pieceLimit-c.physicalQuantity) ||
+     !Number.isSafeInteger(c.requestedNetQuantity) || c.requestedNetQuantity<=c.remainingQuantity)return false
+
+  const bin=c.locationId.toLowerCase()
+  switch(command.kind){
+    case 'putaway':
+      return command.body.locationId.toLowerCase()===bin && command.body.quantity===c.requestedNetQuantity
+    case 'transfer':
+      return command.body.destinationLocationId.toLowerCase()===bin && command.body.sourceLocationId.toLowerCase()!==bin &&
+        command.body.quantity===c.requestedNetQuantity
+    case 'part-out': {
+      const outputPieces=command.body.outputs.reduce((sum,line)=>sum+(line.locationId.toLowerCase()===bin?line.quantity:0),0)
+      const consumed=command.body.sourceLocationId.toLowerCase()===bin?command.body.quantity:0
+      return outputPieces-consumed===c.requestedNetQuantity
+    }
+    default: return false
+  }
+}
 
 export const capacityLink=(id:string,eventId?:string)=>'#locations/'+id+'/capacity'+(eventId ? '/'+eventId : '')
 export function limitLabel(limit:number|null) {

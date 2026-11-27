@@ -43,6 +43,7 @@ async function read(){
 watch([()=>props.connected,requested,retry],read,{immediate:true})
 watch(()=>props.asOf,()=>{if(props.connected && !props.eventId && !busy.value)void read()})
 const value=computed(()=>mode.value==='clear' ? null : /^\d+$/.test(amount.value) && Number.isSafeInteger(Number(amount.value)) && Number(amount.value)>0 ? Number(amount.value) : undefined)
+const canPrepare=computed(()=>!!page.value && props.connected && !error.value && !props.controls.pending && !sending.value)
 const enabled=computed(()=>props.ready && !busy.value && !error.value && props.controls.enabled && !sending.value)
 const canSave=computed(()=>!!witness.value && enabled.value && !stale.value && !!mode.value && value.value!==undefined && !!reason.value.trim())
 async function edit(){
@@ -80,7 +81,7 @@ async function save(){
         <p v-if="page.bin.archived" class="warning">This bin is archived and closed to incoming stock.</p>
         <p v-if="page.bin.capacity?.overCapacityQuantity" class="warning">Stock already here can be counted or moved out. Additional placements need space.</p>
         <a :href="registryLink(id)">Bin labels and archive</a>
-        <button v-if="!witness" ref="editButton" :disabled="!enabled" @click="edit">Change piece limit</button>
+        <button v-if="!witness" ref="editButton" :disabled="!canPrepare" @click="edit">Change piece limit</button>
         <form v-else class="decision" @submit.prevent="save"><label>New bin policy<select ref="choice" v-model="mode"><option value="" disabled>Choose a change</option><option value="set">Set a piece limit</option><option value="clear">Clear the piece limit</option></select></label>
           <label v-if="mode==='set'">Piece limit<input v-model="amount" type="text" inputmode="numeric" maxlength="16" required /></label>
           <p v-if="mode==='set' && amount && value===undefined" class="warning">Enter a positive whole-piece limit.</p>
