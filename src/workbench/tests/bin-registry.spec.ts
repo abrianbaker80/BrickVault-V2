@@ -146,6 +146,30 @@ test('an interrupted later registry page fences a filled putaway until the entir
   await task.getByLabel('Count placed').fill('1')
   const submit=task.getByRole('button',{name:'Confirm putaway'})
   await expect(submit).toBeEnabled()
+  let arrived!:()=>void,release!:()=>void,finish!:()=>void,firstPages=0
+  const paused=new Promise<void>(resolve=>{arrived=resolve}),resume=new Promise<void>(resolve=>{release=resolve})
+  const delivered=new Promise<void>(resolve=>{finish=resolve})
+  page.on('request',request=>{
+    const url=new URL(request.url())
+    if(url.pathname.endsWith('/locations/registry') && !url.searchParams.has('after'))firstPages++
+  })
+  await page.route(u=>u.pathname.endsWith('/locations/registry') && u.searchParams.has('after'),async route=>{
+    const actual=await route.fetch()
+    try{arrived();await resume;await route.fulfill({response:actual})}
+    finally{await actual.dispose();finish()}
+  },{times:1})
+  const refresh=page.getByRole('button',{name:'Refresh',exact:true})
+  await refresh.click();await paused
+  try{
+    for(let i=0;i<2;i++){
+      const workspaceRead=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/workspace'))
+      await refresh.click();await workspaceRead
+      await expect(page.getByText('Connected',{exact:true})).toBeVisible()
+      await expect(submit).toBeDisabled()
+    }
+    expect(firstPages).toBe(1)
+  }finally{release();await delivered}
+  await expect(submit).toBeEnabled()
   await page.route(u=>u.pathname.endsWith('/locations/registry') && u.searchParams.has('after'),async route=>{
     const actual=await route.fetch();await route.fulfill({json:{...await actual.json(),complete:false}});await actual.dispose()
   },{times:1})

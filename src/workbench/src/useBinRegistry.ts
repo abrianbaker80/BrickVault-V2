@@ -1,4 +1,4 @@
-import { computed, inject, provide, ref, shallowRef, watch, type InjectionKey } from 'vue'
+import { computed, inject, onScopeDispose, provide, ref, shallowRef, watch, type InjectionKey } from 'vue'
 import { api, ApiFailure, ContractFailure, explain, type Location, type RegistryRow, type Workspace } from './api'
 import { sameLabel, validLabel } from './binLabels'
 
@@ -9,19 +9,23 @@ function registry(workspaceId:()=>string|undefined,workspace:()=>Workspace|null,
   const requests=new Map<string,Promise<void>>()
   const wanted=computed(()=>active() && online() && workspace()?.complete && !!workspaceId())
   let epoch=0,identity:string|undefined
-  watch([workspaceId,()=>workspace()?.asOf,wanted,attempt],async([id,,enabled],_,cleanup)=>{
-    let current=true
-    cleanup(()=>{current=false})
-    confirmed.value=false;error.value=''
-    if (id!==identity) {identity=id;epoch++;requests.clear();aliases.value.clear();rows.value=new Map()}
+  let reading:Map<string,number>|undefined
+  onScopeDispose(()=>{reading=undefined;epoch++})
+  watch([workspaceId,()=>workspace()?.asOf,wanted,attempt],async([id,,enabled])=>{
+    if (id!==identity) {identity=id;epoch++;reading=undefined;requests.clear();aliases.value.clear();rows.value=new Map()}
     else for(const [label,owner] of aliases.value) {if(owner===null)aliases.value.delete(label)}
-    if (!enabled) return
+    if (!enabled) {reading=undefined;confirmed.value=false;error.value='';return}
+    const locations=workspace()?.locations || []
+    const inFlight=reading
+    if (inFlight && locations.length===inFlight.size && locations.every(l=>inFlight.get(l.id)===l.revision)) return
+    const expected=new Map(locations.map(l=>[l.id,l.revision]))
+    reading=expected;confirmed.value=false;error.value=''
     try {
       const result=new Map<string,RegistryRow>(),cursors=new Set<string>()
       let after=''
       do {
         const page=await api.registryPage(after)
-        if (!current) return
+        if (reading!==expected) return
         if (!page.complete) throw new Error('The bin registry read is incomplete.')
         for (const row of page.rows) {
           if (result.has(row.location.id)) throw new ContractFailure()
@@ -31,11 +35,12 @@ function registry(workspaceId:()=>string|undefined,workspace:()=>Workspace|null,
         if (after && cursors.has(after)) throw new ContractFailure()
         cursors.add(after)
       } while (after)
-      const locations=workspace()?.locations || []
-      if (locations.length!==result.size || locations.some(l=>result.get(l.id)?.location.revision!==l.revision))
+      const latest=workspace()?.locations || []
+      if (latest.length!==result.size || latest.some(l=>result.get(l.id)?.location.revision!==l.revision))
         throw new Error('The location register changed. Refresh the workspace to verify destinations.')
       rows.value=result;confirmed.value=true
-    } catch(e) {if(current){error.value=e instanceof Error ? e.message : explain(e);onFailure(e)}}
+    } catch(e) {if(reading===expected){error.value=e instanceof Error ? e.message : explain(e);onFailure(e)}}
+    finally {if(reading===expected)reading=undefined}
   },{immediate:true})
   const canonicals=computed(()=>new Map((workspace()?.locations || []).map(l=>[l.code.toLowerCase(),l.id])))
   const destinations=computed(()=>(workspace()?.locations || []).filter(l=>rows.value.get(l.id)?.archived===false))
