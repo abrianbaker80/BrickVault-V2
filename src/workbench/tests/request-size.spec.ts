@@ -39,8 +39,15 @@ test('an authenticated size rejection releases the draft and a lost earlier save
   await expect(pending).toContainText(name)
   await page.reload()
   await page.route('**/api/v1/locations', rejectPaddedBody, { times: 1 })
+  const referenceReads: string[] = []
+  page.on('request', req => {
+    const url = new URL(req.url())
+    if (req.method() === 'GET' && url.pathname.endsWith('/workspace')) referenceReads.push(url.search)
+  })
   await pending.getByRole('button', { name: 'Retry command' }).click()
   await expect(page.getByText('Confirmed the original ' + name + '.')).toBeVisible()
+  expect(referenceReads).toContain('')
+  expect(referenceReads).not.toContain('?audit=all')
   await expect(pending).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'New location' })).toBeEnabled()
   const { audit, locations } = await (await page.request.get('/api/v1/workspace')).json()

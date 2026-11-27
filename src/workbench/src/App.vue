@@ -38,8 +38,12 @@ const hash = ref(window.location.hash)
 const countLink = computed(() => readCountLink(hash.value))
 const { session, workspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
   canSend, canCreate, refresh, signIn, signOut, create, record, send, expired } = useWorkbench(page)
+const stockReceipt = computed(() => {
+  const link = countLink.value
+  return !!(link?.receiptId || link?.quarantineReceiptId || link?.lossReceiptId || link?.recovery?.receipt)
+})
 const bins=provideBinRegistry(()=>session.value?.workspaceId,()=>workspace.value,
-  ()=>page.value==='locations' || page.value==='receiving' || hash.value.startsWith('#inventory/part-out/'),
+  ()=>(page.value==='locations' && !stockReceipt.value) || page.value==='receiving' || hash.value.startsWith('#inventory/part-out/'),
   ()=>readState.value!=='disconnected',expired)
 const referencePage = computed(() => page.value === 'catalog' || page.value === 'locations')
 const password = ref('')
@@ -54,11 +58,12 @@ watch(() => session.value?.workspaceId, async () => {
 const addButton = ref<HTMLButtonElement>()
 const status = computed(() => ({ loading: 'Loading', ready: 'Connected', disconnected: 'Disconnected', partial: 'Partial read' })[readState.value])
 async function navigate() {
+  const returningWithinLocations = page.value === 'locations' && route() === 'locations'
   hash.value = window.location.hash
   page.value = route()
   dialogKind.value = null
   await nextTick()
-  heading.value?.focus()
+  if (!returningWithinLocations) heading.value?.focus()
 }
 watch([page, session], () => {
   document.title = (session.value ? pages[page.value].title : 'Sign in') + ' · BrickVault'

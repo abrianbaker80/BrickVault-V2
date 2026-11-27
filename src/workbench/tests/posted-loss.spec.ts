@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { request } from 'node:https'
 import { expect, type Page } from '@playwright/test'
 import { test } from './trusted'
-import { audit, fixture } from './bin-fixture'
+import { audit, fixture, receiptBeforeDirectory } from './bin-fixture'
 import { countReceiptLink, lossCaseLink, lossReceiptLink } from '../src/countLinks'
 import type { CountSnapshot, ReceivingWorkspace, StockLoss, StockLossCommand } from '../src/api'
 
@@ -326,8 +326,8 @@ test('a posted shortage unblocks its remaining stock on return to the same bin a
   await page.getByText('Review stock adjustment', { exact: true }).click()
   await page.getByRole('link', { name: 'Choose reductions and post stock loss' }).click()
   await describe(page, f.a.code, 'Record the single missing unit')
-  await commit(page).click()
-  await expect(receipt(page)).toContainText('Record the single missing unit')
+  await receiptBeforeDirectory(page, 'receiving/stock-losses', () => commit(page).click(),
+    () => expect(receipt(page)).toContainText('Record the single missing unit'))
 
   const wholeBin = (url: URL) => url.pathname === countsPath && !url.searchParams.has('positionId') &&
     !url.searchParams.has('observationId') && !url.searchParams.has('commandId')

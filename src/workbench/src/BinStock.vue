@@ -201,7 +201,7 @@ watch(binScope,
     </p>
     <p v-if="checking" role="status">Verifying the transfer source… <button type="button" @click="opening = undefined">Cancel transfer preparation</button></p>
     <p v-if="transferError" class="warning" role="alert">{{ transferError }}</p>
-    <template v-if="stock">
+    <template v-if="stock && !inspectingCount">
       <p class="bin-read">Read {{ time(stock.asOf) }}</p>
       <p v-if="!stock.complete" class="warning" role="status">Partial bin read. Quantities cover the returned layers.</p>
       <p v-if="!stock.positions.length && stock.complete" class="bin-read">

@@ -15,6 +15,63 @@ async function fill(page: Page, code: string, quantity: number, reason: string) 
   await form.getByLabel('Witnessed quantity').fill(String(quantity))
   await form.getByLabel('Reason for count').fill(reason)
 }
+test('a focused bin and its search survive opening and closing count details', async ({page}) => {
+  const f = await fixture(page)
+  await page.setViewportSize({width:320,height:800})
+  const search = page.getByRole('searchbox',{name:'Search locations'})
+  await search.fill(f.a.code)
+  const inspect = page.getByRole('button',{name:'Inspect '+f.a.name,exact:true})
+  await inspect.focus()
+  await inspect.press('Enter')
+  const entry = stock(page).getByRole('link',{name:'Count stock for '+f.paid.purchase+' · '+f.paid.delivery})
+  await entry.press('Enter')
+  await expect(countForm(page)).toBeVisible()
+  await expect(page.getByRole('table',{name:'Storage locations',includeHidden:true})).toHaveCount(0)
+  await countForm(page).getByRole('button',{name:'Close count details'}).press('Enter')
+  const details = page.getByRole('dialog',{name:f.a.name,exact:true})
+  await expect(details).toBeVisible()
+  await details.getByRole('button',{name:'Close details'}).press('Enter')
+  await expect(search).toHaveValue(f.a.code)
+  await expect(inspect).toBeFocused()
+})
+
+test('switching workspace after an accepted count cannot open its observation in the other workspace', async ({page}) => {
+  const f = await fixture(page)
+  const position = countPositionLink(f.a.id,f.position)
+  await page.goto('/'+position)
+  await fill(page,f.a.code,6,'Count in issuing workspace')
+  const newWorkspace = randomUUID()
+  let submitted = false, changed = false
+  const observationReads: string[] = []
+  page.on('request',request=>{
+    const url = new URL(request.url())
+    if (request.method()==='POST' && url.pathname.endsWith('/receiving/counts')) submitted=true
+    if (submitted && url.searchParams.has('observationId')) observationReads.push(url.pathname)
+  })
+  await page.route('**/api/v1/session',async route=>{
+    const reply=await route.fetch()
+    try {
+      if (submitted) {
+        changed=true
+        await route.fulfill({response:reply,json:{...await reply.json(),workspaceId:newWorkspace}})
+      } else await route.fulfill({response:reply})
+    } finally {await reply.dispose()}
+  })
+  const saved=page.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname.endsWith('/receiving/counts'))
+  const refreshed=page.waitForResponse(r=>changed && new URL(r.url()).pathname.endsWith('/workspace'))
+  await countForm(page).getByRole('button',{name:'Record observation'}).press('Enter')
+  const reply=await saved
+  expect(reply.status()).toBe(200)
+  await refreshed
+  await expect(page.getByText('Connected',{exact:true})).toBeVisible()
+  await expect(page).toHaveURL(url=>url.hash===position)
+  await expect(page.getByRole('link',{name:'View count receipt'})).toHaveCount(0)
+  expect(observationReads).toEqual([])
+  const original=await page.request.get('/api/v1/receiving/bins/'+f.a.id+'/counts?commandId='+(await reply.json()).commandId)
+  expect(original.status()).toBe(200)
+  expect((await original.json()).observations).toHaveLength(1)
+})
+
 test('a witnessed zero opens a shortage and a later surplus remains separate from ledger and existing backing', async ({ page, context }, info) => {
   const f = await fixture(page)
   await page.setViewportSize({width:320, height:720})

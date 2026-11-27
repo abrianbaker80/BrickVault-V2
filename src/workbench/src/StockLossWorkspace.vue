@@ -159,6 +159,7 @@ async function post() {
   const current = page.value
   if (!current || !canPost.value) return
   attempted.value = true
+  const issuingHash = window.location.hash, issuingDialog = dialog.value
   sending.value = true
   try {
     const result = await props.controls.dispatch({kind:'stock-loss',workspaceId:props.controls.workspaceId,body:{
@@ -168,6 +169,7 @@ async function post() {
       reason:reason.value.trim(),offerReductions:selected.value.map(s=>({offerId:s.offer.id,quantity:Number(s.quantity)}))
     }})
     if (!mounted) return
+    if (!issuingDialog?.isConnected || window.location.hash !== issuingHash) return
     if (result) window.location.hash = lossReceiptLink(props.location.id,props.position,result.entityId)
     else if (props.controls.pending) emit('recover')
   } finally {sending.value=false}
@@ -178,7 +180,7 @@ async function post() {
   <dialog ref="dialog" aria-labelledby="loss-title" @cancel.prevent="!sending && emit('close')" @keydown.esc.stop>
     <header class="panel-head"><h2 id="loss-title">{{ posting ? 'Posted stock loss' : 'Post stock loss' }}</h2>
       <button class="close" aria-label="Close stock loss" :disabled="sending" @click="emit('close')">×</button></header>
-    <StockLossReceipt v-if="posting" :posting="posting" :bin="location.id" :position="position" :as-of="asOf" :connected="connected"
+    <StockLossReceipt v-if="posting" :posting="posting" :bin="location.id" :position="position" :as-of="String(location.revision)" :connected="connected"
       @failure="emit('failure',$event)" />
     <div v-else class="loss-body">
       <p><strong>{{ location.code }} · {{ location.name }}</strong><small>Position ID {{ position }}</small></p>

@@ -13,7 +13,7 @@ const emit = defineEmits<{ close: []; failure: [reason: unknown]; recover: [] }>
 const dialog = ref<HTMLDialogElement>()
 const create = ref<HTMLButtonElement>()
 const formTitle = ref<HTMLElement>()
-const readState = { get asOf() { return props.asOf }, get state() { return props.connected ? 'ready' as const : 'unavailable' as const } }
+const readState = { get asOf() { return props.receiptId ? String(props.location.revision) : props.asOf }, get state() { return props.connected ? 'ready' as const : 'unavailable' as const } }
 type Page = QuarantineSnapshot | (QuarantineEvidence & { nextAfter: null })
 const { page, confirmed, requested, attempt, loading, partial, error, heading, retry } = usePositionPage<Page>(readState, async after => {
   if (props.receiptId) return { ...await api.quarantineReceipt(props.location.id, props.positionId, { receiptId: props.receiptId }), nextAfter: null }

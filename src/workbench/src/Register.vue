@@ -52,23 +52,37 @@ watch(() => props.confirmedSourceId, id => {
   if (id && !inspectedId.value && props.page === 'locations') inspectedId.value = id
 })
 const separateDialog = computed(() => props.countLink?.recovery || props.countLink?.closure || props.countLink?.holdPositionId || props.countLink?.lossPositionId || props.countLink?.quarantinePositionId || props.countLink?.draftPositionId)
+const operationOpen = computed(() => !!inspected.value && !!(separateDialog.value || props.countLink?.positionId || props.countLink?.receiptId))
+let directoryScroll = 0
+watch(operationOpen, async open => {
+  if (open) directoryScroll = window.scrollY
+  else { await nextTick(); window.scrollTo(window.scrollX, directoryScroll) }
+})
 watch([inspectedId, compact, separateDialog,detail], async () => {
   await nextTick()
-  if (separateDialog.value) return
+  if (separateDialog.value) {
+    if (detail.value instanceof HTMLDialogElement && detail.value.open) detail.value.close()
+    return
+  }
   if (detail.value instanceof HTMLDialogElement) {
     if (!detail.value.open) detail.value.showModal()
-  } else detail.value?.querySelector<HTMLButtonElement>('button')?.focus()
+  } else if (!props.countLink?.positionId && !props.countLink?.receiptId) {
+    detail.value?.querySelector<HTMLButtonElement>('button')?.focus()
+  }
 }, { immediate: true })
 function inspectBin(id: string) {
   if (props.countLink) window.location.hash = 'locations/' + id
   inspectedId.value = id
 }
-function close() {
+async function close() {
   if (detail.value instanceof HTMLDialogElement) detail.value.close()
   inspectedId.value = null
   if (props.countLink && props.page === 'locations') window.location.hash = 'locations'
-  if (origin?.isConnected) origin.focus()
-  else search.value?.focus()
+  await nextTick()
+  const id = origin?.dataset.recordId
+  const previous = origin?.isConnected ? origin : id && host.value?.querySelector<HTMLButtonElement>(`button[data-record-id="${CSS.escape(id)}"]`)
+  const target = previous || search.value
+  target?.focus()
 }
 function keyboard(event: KeyboardEvent) {
   const field = event.target as HTMLElement
@@ -95,7 +109,7 @@ onBeforeUnmount(() => {
   <div ref="host" class="register-workspace" :class="{ docked: inspected && !compact && !countLink?.registry && !countLink?.capacity }">
   <BinCapacity v-if="countLink?.capacity" :key="[transfers.workspaceId,countLink.binId,'capacity',countLink.capacityEvent].join('/')" :id="countLink.binId" :event-id="countLink.capacityEvent" :as-of="workspace.asOf" :connected="connected" :ready="workspaceReady" :controls="transfers" @failure="emit('failure',$event)" />
   <BinRegistry v-else-if="countLink?.registry" :key="[transfers.workspaceId,countLink.binId,countLink.registryEvent].join('/')" :id="countLink.binId" :event-id="countLink.registryEvent" :as-of="workspace.asOf" :connected="connected" :ready="workspaceReady" :controls="transfers" @failure="emit('failure',$event)" />
-  <section v-else class="panel" :aria-label="title">
+  <section v-else-if="!operationOpen" class="panel" :aria-label="title">
     <header class="panel-head"><h2>{{ title }}</h2><span class="count" aria-live="polite">{{ count }} {{ count === 1 ? 'record' : 'records' }}</span></header>
     <div class="toolbar"><label class="search">
       <span class="lens" aria-hidden="true"></span>
@@ -119,7 +133,7 @@ onBeforeUnmount(() => {
         <caption class="sr">Storage locations</caption>
         <thead><tr><th scope="col">Location and code</th><th scope="col">Status</th><th scope="col">On hand</th><th scope="col">Piece limit</th><th scope="col">Room or excess</th></tr></thead>
         <tbody><tr v-for="{ location, registry, capacity } in locations" :key="location.id">
-          <td><button class="row-link" @click="inspect(location, $event)" :aria-label="'Inspect ' + location.name"><strong>{{ location.name }}</strong></button><small>{{ location.code }}</small></td>
+          <td><button class="row-link" :data-record-id="location.id" @click="inspect(location, $event)" :aria-label="'Inspect ' + location.name"><strong>{{ location.name }}</strong></button><small>{{ location.code }}</small></td>
           <td><span class="field state"><span>{{ !registry ? 'Unknown' : registry.archived ? 'Archived' : 'Active' }}</span></span><small>Revision {{ location.revision }}</small></td>
           <td><span class="field amount"><span>{{ registry?.physicalQuantity ?? 'Unknown' }}</span></span>
             <small class="field freshness"><span>{{ !registry ? (bins.error.value || !connected || !workspace.complete ? 'Unavailable' : 'Pending') : bins.confirmed.value ? 'Current' : 'Last confirmed' }}</span></small></td>
@@ -136,7 +150,7 @@ onBeforeUnmount(() => {
     </div>
   </section>
   <p v-if="countLink && !inspected && page === 'locations'" class="warning" role="status">{{ workspace.complete && connected ? 'The linked bin was not found.' : 'The linked bin is unavailable.' }}</p>
-  <component v-if="inspected && !countLink?.registry && !countLink?.capacity" :is="compact ? 'dialog' : 'aside'" ref="detail" class="panel inspector"
+  <component v-if="inspected && !countLink?.registry && !countLink?.capacity" v-show="!separateDialog" :is="compact ? 'dialog' : 'aside'" ref="detail" class="panel inspector"
     aria-labelledby="item-title" @cancel.prevent="close" @keydown.esc.prevent="close">
     <header class="panel-head"><h2 id="item-title">{{ inspected.name }}</h2><button class="close" aria-label="Close details" @click="close">×</button></header>
     <p v-if="!current" class="warning" role="status">The partial register omits this record. Showing its last received details.</p>
