@@ -105,6 +105,10 @@ def stage_upgrade(source, output, release=RELEASE):
                         projections += ("offer_backing_ledger", "internal_draft_offers")
                     if "stock_quarantines" in before:
                         projections += ("current_stock_quarantines", "current_position_quarantine")
+                    if "stock_loss_recoveries" in before:
+                        projections += ("delivery_loss_balances",)
+                    if "stock_part_outs" in before:
+                        projections += ("delivery_part_out_balances",)
                     opening = None
                     if "placement_positions" in before:
                         opening = row_signatures(candidate, candidate.database, projections)
@@ -121,7 +125,7 @@ def stage_upgrade(source, output, release=RELEASE):
                         )
                         or any(
                             after[t]["rows"] for t in after.keys() - before.keys()
-                            if t not in ("placement_positions", "location_labels")
+                            if t not in ("placement_positions", "location_labels", "location_capacity_fences")
                         )
                     ):
                         raise ValueError(
@@ -142,6 +146,16 @@ def stage_upgrade(source, output, release=RELEASE):
                         """)
                         if canonical != "t":
                             raise ValueError("Opening bin labels differ from the original location identities or revisions.")
+                    if "location_capacity_fences" in after and "location_capacity_fences" not in before:
+                        complete = candidate.sql("""
+                            SELECT NOT EXISTS (
+                                SELECT 1 FROM brickvault.locations l FULL JOIN brickvault.location_capacity_fences f
+                                    ON f.location_id=l.id
+                                WHERE l.id IS NULL OR f.location_id IS NULL
+                            )
+                        """)
+                        if complete != "t":
+                            raise ValueError("The capacity migration did not initialize exactly the original bins.")
                     if opening is not None:
                         if row_signatures(candidate, candidate.database, projections) != opening:
                             raise ValueError("An existing stock balance, commitment or recount task changed during upgrade.")

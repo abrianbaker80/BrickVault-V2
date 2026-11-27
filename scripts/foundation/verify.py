@@ -281,6 +281,16 @@ def migration_test(s):
         "An interrupted location registry upgrade changed the previous database.",
     )
     s.sql("DROP TABLE brickvault.location_registry_events;", db, "bv_migrator")
+    s.migrate(db, to=14)
+    s.sql("CREATE TABLE brickvault.location_capacity_events(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "14"
+        and s.sql("SELECT to_regclass('brickvault.location_capacity_fences') IS NULL", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted capacity upgrade changed the previous database.",
+    )
+    s.sql("DROP TABLE brickvault.location_capacity_events;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -294,11 +304,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "14",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "15",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v14, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v15, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -317,10 +327,8 @@ def qualify_staged_upgrade(lab, port, source_version):
     output = lab / f"upgrade-from-{source_version}"
     original.pg_start()
     try:
-        original.sql(
-            f"INSERT INTO brickvault.locations(id,revision,code,name) VALUES ('{fixture}',1,'OLD-01','Original bin')",
-            role="bv_migrator",
-        )
+        from verify_transfer import seed_location
+        seed_location(original, fixture, "OLD-01", "Original bin")
         if source_version >= 3:
             from verify_transfer import seed_opening_position
 
@@ -348,7 +356,7 @@ def qualify_staged_upgrade(lab, port, source_version):
         original.pg_stop()
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "14"), (original, str(source_version))):
+    for inst, schema in ((candidate, "15"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -719,7 +727,7 @@ def verify(port):
     qualify_listener_probe()
     with keep_verifier_awake(), tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in range(2, 14):
+        for source_version in range(2, 15):
             qualify_staged_upgrade(lab, port, source_version)
         from verify_withdrawals import verify_legacy_allocation
         legacy = init(lab / "legacy-withdrawal", lab / "legacy-keys", port)

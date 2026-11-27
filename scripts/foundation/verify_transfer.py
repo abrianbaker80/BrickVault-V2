@@ -3,6 +3,20 @@
 import uuid
 
 
+def seed_location(instance, location_id, code, name):
+    """Create a fictional bin with its matching location command and audit receipt."""
+    command = uuid.uuid4()
+    instance.sql(f"""
+        BEGIN;
+        INSERT INTO brickvault.locations(id,revision,code,name)
+            VALUES ('{location_id}',1,'{code}','{name}');
+        INSERT INTO brickvault.commands(command_id,kind,digest,entity_id,revision,correlation_id)
+            VALUES ('{command}','location',decode(repeat('00',32),'hex'),'{location_id}',1,gen_random_uuid());
+        INSERT INTO brickvault.audit(command_id,actor) VALUES ('{command}','operator');
+        COMMIT;
+    """, role="bv_migrator")
+
+
 def seed_opening_position(instance, location_id):
     """Create a backed position with valid v3 facts before the stopped-copy upgrade."""
     item, purchase, delivery, placement, offer = [str(uuid.uuid4()) for _ in range(5)]
@@ -50,10 +64,10 @@ def seed_opening_position(instance, location_id):
 def seed_previous_transfer(instance, source_bin, purchase, position, offer):
     """Qualify v4 upgrade with stock and offer backing already moved off their original position."""
     destination, transfer, command = [str(uuid.uuid4()) for _ in range(3)]
+    seed_location(instance, destination, "NEW-02", "Receiving shelf")
     instance.sql(
         f"""
         BEGIN;
-        INSERT INTO brickvault.locations(id,revision,code,name) VALUES ('{destination}',1,'NEW-02','Receiving shelf');
         UPDATE brickvault.purchases SET revision=revision+1 WHERE id='{purchase}';
         INSERT INTO brickvault.placement_transfers(id,command_id,purchase_id,source_position_id,source_location_id,
             source_location_code,destination_location_id,destination_location_code,quantity,reason)
