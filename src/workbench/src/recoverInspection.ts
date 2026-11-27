@@ -1,3 +1,4 @@
+import { sameLabel } from './binLabels'
 import { api, ApiFailure, ContractFailure, type RecoveryCommand, type RecoveryEvidence } from './api'
 
 export async function recoverInspection(command:RecoveryCommand) {
@@ -19,7 +20,7 @@ export async function recoverInspection(command:RecoveryCommand) {
     if (!page.complete || page.purchaseId!==command.purchaseId || page.revision!==command.expectedRevision+1 ||
         page.saleableQuantity!==saleable || page.quarantineQuantity!==quarantine ||
         !command.confirmedIdentity || page.recordedCatalog.id!==command.catalogId || page.recordedCatalog.revision!==command.catalogRevision ||
-        page.reason!==command.reason || page.confirmedLocationCode!==command.confirmedLocationCode ||
+        page.reason!==command.reason || !sameLabel(page.confirmedLocationCode,command.confirmedLocationCode) ||
         (receipt && (receipt.id!==page.id || receipt.correlationId!==page.correlationId || receipt.restoredItemCostMinor!==page.restoredItemCostMinor))) throw new ContractFailure()
     receipt=page
     for (const row of page.allocations) {

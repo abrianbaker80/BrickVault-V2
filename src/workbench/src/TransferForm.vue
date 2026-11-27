@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useBinRegistry } from './useBinRegistry'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Location, TransferControls, TransferPosition } from './api'
 import { itemLabel, money } from './receiving'
@@ -11,6 +12,7 @@ const destinationId = ref('')
 const destination = computed(() => props.locations.find(l => l.id === destinationId.value))
 const sourceCode = ref('')
 const destinationCode = ref('')
+const bins=useBinRegistry(()=>[sourceCode.value,destinationCode.value])
 const count = ref<number | ''>('')
 const reason = ref('')
 const moveAll = ref(false)
@@ -30,7 +32,7 @@ const backing = computed(() => props.original.backing.map(offer => ({
 })).filter(row => row.quantity > 0))
 const movedBacking = computed(() => moveAll.value ? line.backedQuantity : backing.value.reduce((total, row) => total + row.quantity, 0))
 const editable = computed(() => movable.value > 0 && props.confirmedBin && props.controls.enabled && !stale.value && !sending.value)
-const available = computed(() => editable.value && props.ready)
+const available = computed(() => editable.value && props.ready && bins.confirmed.value && (!destinationId.value || bins.isActive(destinationId.value)) && !bins.pending(sourceCode.value) && !bins.pending(destinationCode.value))
 watch(() => destination.value?.code, () => { destinationCode.value = ''; issue.value = '' })
 watch([sourceCode, destinationCode, count, reason, moveAll, movedBacking], () => { issue.value = ''; attempted.value = false })
 onMounted(() => dialog.value?.showModal())
@@ -39,7 +41,7 @@ async function submit() {
   if (!available.value || !destination.value || !count.value) return
   issue.value = ''
   attempted.value = true
-  if (sourceCode.value !== props.source.code || destinationCode.value !== destination.value.code) {
+  if (!bins.matches(props.source,sourceCode.value) || !bins.matches(destination.value,destinationCode.value)) {
     issue.value = 'The entered codes must match both physical bin labels.'
     return
   }
@@ -85,8 +87,9 @@ async function submit() {
       <fieldset class="fields" :disabled="!editable">
         <label class="span">Destination bin<select v-model="destinationId" required autofocus>
           <option disabled value="">Choose a different bin</option>
-          <option v-for="bin in locations.filter(l => l.id !== source.id)" :key="bin.id" :value="bin.id">{{ bin.code }} · {{ bin.name }}</option>
+          <option v-for="bin in bins.destinations.value.filter(l => l.id !== source.id)" :key="bin.id" :value="bin.id">{{ bin.code }} · {{ bin.name }}</option>
         </select></label>
+        <p v-if="destinationId && bins.rows.value.get(destinationId)?.archived" class="warning">The selected destination is archived. Choose an active bin.</p>
         <label>Confirm source bin code<input v-model="sourceCode" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
         <label>Confirm destination bin code<input v-model="destinationCode" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
         <label>Count moved<input v-model="count" type="number" inputmode="numeric" min="1" :max="movable" required /></label>

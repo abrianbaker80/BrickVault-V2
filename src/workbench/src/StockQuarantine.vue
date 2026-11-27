@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useBinRegistry } from "./useBinRegistry"
 import { computed, nextTick, onMounted, ref, shallowRef } from 'vue'
 import { api, ContractFailure, explain } from './api'
 import type { Location, QuarantineEvidence, QuarantineSnapshot, TransferControls } from './api'
@@ -25,6 +26,7 @@ const receipt = computed(() => page.value?.scope === 'quarantine-receipt' && pag
 const layer = computed(() => stock.value?.position.layer)
 const draft = shallowRef<{ stock: QuarantineSnapshot; record?: QuarantineSnapshot['quarantines'][number]; originalReceipt?: QuarantineEvidence; workspaceId: string }>()
 const bin = ref('')
+const bins=useBinRegistry(()=>[bin.value])
 const quantity = ref<number | ''>('')
 const reason = ref('')
 const identity = ref(false)
@@ -45,7 +47,7 @@ const stale = computed(() => {
 })
 const maximum = computed(() => draft.value?.record?.remainingQuantity ?? stock.value?.availableToQuarantineQuantity ?? 0)
 const canSave = computed(() => ready.value && !stale.value && !stock.value?.hasOpenShortage && identity.value &&
-  bin.value === stock.value?.position.location.code && Number.isInteger(quantity.value) && Number(quantity.value) > 0 &&
+  bins.matches(stock.value?.position.location,bin.value) && Number.isInteger(quantity.value) && Number(quantity.value) > 0 &&
   Number(quantity.value) <= maximum.value && Boolean(reason.value.trim()) &&
   (!draft.value?.record || (passed.value && layer.value?.currentCatalog.integrationEligible)))
 onMounted(() => dialog.value?.showModal())
@@ -179,7 +181,7 @@ async function save() {
           <p v-if="stale" role="alert" class="warning">The stock or catalog changed. Cancel and review the position again.</p>
           <fieldset :disabled="!ready || stale">
             <label>Confirm physical bin code<input v-model="bin" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
-            <small v-if="bin && bin !== stock.position.location.code" class="warning">Enter the code printed on the selected bin.</small>
+            <small v-if="bin && !bins.pending(bin) && !bins.matches(stock.position.location,bin)" class="warning">Enter the code printed on the selected bin.</small>
             <label>{{ draft.record ? 'Quantity inspected and approved' : 'Quantity to quarantine' }}<input type="number" v-model="quantity" inputmode="numeric" min="1" :max="maximum" required /></label>
             <small v-if="quantity !== '' && (!Number.isInteger(quantity) || Number(quantity) < 1 || Number(quantity) > maximum)" class="warning">Enter 1–{{ maximum }} whole units.</small>
             <label>{{ draft.record ? 'Inspection evidence and reason' : 'Reason for quarantine' }}<input v-model="reason" required maxlength="200" /></label>

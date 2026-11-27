@@ -1,3 +1,4 @@
+import { sameLabel } from './binLabels'
 import { api, ApiFailure, ContractFailure, type StockLoss, type StockLossCommand } from './api'
 
 export async function recoverStockLoss(command: StockLossCommand) {
@@ -19,7 +20,7 @@ export async function recoverStockLoss(command: StockLossCommand) {
     }
     if (!page.complete || (receipt && (page.postingId !== receipt.postingId || page.correlationId !== receipt.correlationId)) ||
         page.reviewedObservation.id !== command.expectedObservationId || page.caseId !== command.caseId || page.purchaseId !== command.purchaseId ||
-        page.revision !== command.expectedRevision + 1 || page.reason !== command.reason || page.confirmedLocationCode !== command.confirmedLocationCode ||
+        page.revision !== command.expectedRevision + 1 || page.reason !== command.reason || !sameLabel(page.confirmedLocationCode,command.confirmedLocationCode) ||
         page.quarantineAttributionRecorded !== (command.quarantineAttributions != null))
       throw new ContractFailure()
     receipt = page

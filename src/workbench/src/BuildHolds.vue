@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useBinRegistry } from "./useBinRegistry"
 import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ContractFailure, explain } from './api'
 import { countReceiptLink } from './countLinks'
@@ -29,6 +30,7 @@ const historyId = ref('')
 const draft = shallowRef<{ revision: number; catalogRevision: number; workspace: string; locationCode: string; selected?: Hold; caseId: string | null; observation: string | null }>()
 const amount = ref<number | ''>('')
 const binCode = ref('')
+const bins=useBinRegistry(()=>[binCode.value])
 const purpose = ref('')
 const reason = ref('')
 const message = ref('')
@@ -41,7 +43,7 @@ const ready = computed(() => props.connected && props.controls.enabled && !readi
 const maximum = computed(() => draft.value?.selected?.remainingQuantity ?? snapshot.value?.availableToHoldQuantity ?? 0)
 const canSave = computed(() => ready.value && !stale.value && draft.value && Number.isInteger(amount.value) &&
   Number(amount.value) > 0 && Number(amount.value) <= maximum.value && reason.value.trim().length > 0 &&
-  (draft.value.selected || (purpose.value.trim().length > 0 && binCode.value === props.location.code)))
+  (draft.value.selected || (purpose.value.trim().length > 0 && bins.matches(props.location,binCode.value))))
 
 watch(() => [props.positionId, props.location.id, props.connected, props.asOf, requested.value, change.value, props.location.revision] as const,
   async ([position, bin, connected, , cursors], _, clean) => {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useBinRegistry } from "./useBinRegistry"
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, ContractFailure, explain, requiresFreshCount, type Location, type TransferControls } from './api'
 import { closureLink, countPositionLink, countReceiptLink, lossReceiptLink, type CountLink } from './countLinks'
@@ -23,6 +24,7 @@ const error=ref('')
 const loading=ref(false)
 const retry=ref(0)
 const bin=ref('')
+const bins=useBinRegistry(()=>[bin.value])
 const reason=ref('')
 const acknowledged=ref(false)
 const sending=ref(false)
@@ -35,7 +37,7 @@ const commitmentsFit=computed(()=>review.value && review.value.quarantinedQuanti
   review.value.quarantinedQuantity+review.value.protectedProjectQuantity+review.value.offerBackedQuantity<=review.value.ledgerQuantity)
 const ready=computed(()=>exact.value && commitmentsFit.value && !stale.value && !error.value && !loading.value && props.connected && props.workspaceReady &&
   props.controls.enabled && !sending.value && !closureId.value && !lossId.value)
-const allowed=computed(()=>ready.value && bin.value===review.value?.location.code && reason.value.trim().length>0 && acknowledged.value)
+const allowed=computed(()=>ready.value && bins.matches(review.value?.location,bin.value) && reason.value.trim().length>0 && acknowledged.value)
 onMounted(()=>dialog.value?.showModal())
 watch(()=>[props.asOf,props.connected,props.workspaceReady,props.location.revision,retry.value] as const,async (_,__,cleanup)=>{
   let active=true
@@ -148,7 +150,7 @@ async function submit() {
           <nav aria-label="Count evidence"><a :href="countReceiptLink(location.id,openingId)">Opening count receipt</a><a :href="countReceiptLink(location.id,route.id)">Witnessed recount receipt</a></nav>
           <form @submit.prevent="submit"><fieldset :disabled="!ready">
             <label>Confirm physical bin code<input v-model="bin" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
-            <small v-if="bin && bin!==review.location.code" class="warning">Enter the code on the registered bin.</small>
+            <small v-if="bin && !bins.pending(bin) && !bins.matches(review.location,bin)" class="warning">Enter the code on the registered bin.</small>
             <label>Reason for closure<input v-model="reason" required maxlength="200" /></label>
             <label class="check"><input type="checkbox" v-model="acknowledged" /> I reviewed this exact recount and confirm closure without posting a stock loss.</label>
           </fieldset>

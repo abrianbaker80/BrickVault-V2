@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useBinRegistry } from "./useBinRegistry"
 import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, ContractFailure, explain, type Location, type RecoveryEvidence, type RecoveryReview, type TransferControls } from './api'
 import { lossReceiptLink, quarantineLink, recoveryLink, type CountLink } from './countLinks'
@@ -19,6 +20,7 @@ const requested = shallowRef(first()), confirmed = shallowRef(first())
 const loading = ref(false), stale = ref(false), error = ref(''), attempt = ref(0)
 const choices = ref<Record<string, Choices>>({})
 const bin = ref(''), reason = ref(''), identity = ref(false), sending = ref(false), feedback = ref('')
+const bins=useBinRegistry(()=>[bin.value])
 const dirty = computed(() => Object.keys(choices.value).length || bin.value || reason.value || identity.value)
 const current = computed(() => review.value?.position.layer.currentCatalog)
 const healthy = computed(() => props.connected && props.workspaceReady && !loading.value && !error.value && !stale.value)
@@ -31,7 +33,7 @@ function validRow(row: Choices) {
   return values.every(n => n === '' || /^\d+$/.test(n)) && Number.isSafeInteger(quantity) && quantity > 0 && quantity <= row.source.remainingQuantity
 }
 const allowed = computed(() => editable.value && rows.value.length > 0 && rows.value.every(validRow) && identity.value &&
-  bin.value === review.value?.position.location.code && !!reason.value.trim())
+  bins.matches(review.value?.position.location,bin.value) && !!reason.value.trim())
 const sourceKey = (row: Source) => row.quarantineId ?? 'ordinary'
 function select(row: Source, key: 'saleable' | 'quarantine', event: Event) {
   const id = sourceKey(row)
@@ -158,7 +160,7 @@ async function submit() {
               {{ row.source.quarantineId ? row.source.originalQuarantineReason + ' · ' + row.source.quarantineId : 'Ordinary stock' }} · {{ row.saleable || 0 }} saleable · {{ row.quarantine || 0 }} to quarantine</li></ul></details>
             <fieldset class="confirm" :disabled="!editable">
               <label>Confirm physical bin code<input v-model="bin" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
-              <small v-if="bin && bin !== review.position.location.code" class="warning">Enter the code on the registered bin.</small>
+              <small v-if="bin && !bins.pending(bin) && !bins.matches(review.position.location,bin)" class="warning">Enter the code on the registered bin.</small>
               <label>Inspection findings and reason<input v-model="reason" required maxlength="200" /></label>
               <label class="check"><input type="checkbox" v-model="identity" /> I inspected these pieces and confirmed {{ itemLabel([current],current.id) }} at catalog revision {{ current.revision }}.</label>
             </fieldset>

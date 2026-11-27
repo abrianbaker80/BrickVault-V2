@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useBinRegistry } from "./useBinRegistry"
 import CountPostingLink from './CountPostingLink.vue'
 import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, ContractFailure, explain } from './api'
@@ -25,6 +26,7 @@ const loading = ref(false)
 const error = ref('')
 const partial = ref(false)
 const typedCode = ref('')
+const bins=useBinRegistry(()=>[typedCode.value])
 const counted = ref<number | ''>('')
 const reason = ref('')
 const warning = ref('')
@@ -98,7 +100,7 @@ async function submit() {
   if (!writable.value || !baseline.value) return
   warning.value = ''
   attempted.value = true
-  if (typedCode.value !== baseline.value.code) { warning.value = 'Enter the code from this physical bin label.'; return }
+  if (!bins.matches(props.location,typedCode.value)) { warning.value = 'Enter the code from this physical bin label.'; return }
   if (counted.value === '' || !Number.isInteger(counted.value) || counted.value < 0 || counted.value > 1000000) {
     warning.value = 'Enter a whole-number count from 0 to 1,000,000.'; return
   }
@@ -181,7 +183,7 @@ async function submit() {
               <label class="span">Reason for count<input v-model="reason" required maxlength="200" /></label></fieldset>
             <p class="field-hint">Recording a count preserves the observation and opens a case for missing units. Ledger quantities stay in place.</p>
             <p v-if="warning || (attempted && controls.feedback)" class="warning" role="alert">{{ warning || controls.feedback }}</p>
-            <div class="actions"><button class="primary" :disabled="!writable">Record observation</button></div>
+            <div class="actions"><button class="primary" :disabled="!writable || bins.pending(typedCode)">Record observation</button></div>
           </form>
           <h3 ref="historyHeading" tabindex="-1">Count history</h3>
           <ul v-if="snapshot.observations.length" class="receipt-lines" aria-label="Count observations">

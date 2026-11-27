@@ -1,11 +1,15 @@
 import type { components, operations } from './schema'
 import * as valid from './validators.cjs'
+import { sameLabel } from './binLabels'
 
 type Schema = components['schemas']
 export type Session = Schema['Session']
 export type Workspace = Schema['Workspace']
 export type Catalog = Schema['CatalogRow']
 export type Location = Schema['LocationRow']
+export type RegistryRow = Schema['LocationRegistryRow']
+export type RegistrySnapshot = Schema['LocationRegistrySnapshot']
+export type RegistryEvidence = Schema['LocationRegistryEvidence']
 export type Diagnostic = Schema['Diagnostic']
 export type CatalogInput = Omit<Schema['CatalogCommand'], 'commandId' | 'id' | 'expectedRevision'>
 export type LocationInput = Pick<Schema['LocationCommand'], 'code' | 'name'>
@@ -45,6 +49,8 @@ export type RecoveryCommand = Schema['StockLossRecoveryCommand']
 export type StockLoss = Schema['StockLossSnapshot']
 export type StockLossCommand = Schema['StockLossCommand']
 export type ReceivingCommand = { workspaceId: string } & (
+  | { kind: 'location-label'; body: Schema['LocationLabelCommand'] }
+  | { kind: 'location-archive'; body: Schema['LocationArchiveCommand'] }
   | { kind: 'quarantine'; body: Schema['StockQuarantineCommand'] }
   | { kind: 'quarantine-release'; body: Schema['StockQuarantineReleaseCommand'] }
   | { kind: 'offer-withdrawal'; body: Schema['DraftBackingWithdrawalCommand'] }
@@ -65,11 +71,13 @@ export type Command = ReceivingCommand | { workspaceId: string } & (
   | { kind: 'catalog'; body: Schema['CatalogCommand'] }
   | { kind: 'location'; body: Schema['LocationCommand'] })
 export type Held = { workspaceId: string | null; commandId: string }
-export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | Schema['RecountReceipt'] | Schema['StockQuarantineReceipt'] | Schema['DraftBackingWithdrawalReceipt'] | Schema['StockShortageClosureReceipt'] | Schema['StockLossRecoveryReceipt'] | Schema['StockPartOutReceipt'] | undefined>
+export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | Schema['RecountReceipt'] | Schema['StockQuarantineReceipt'] | Schema['DraftBackingWithdrawalReceipt'] | Schema['StockShortageClosureReceipt'] | Schema['StockLossRecoveryReceipt'] | Schema['StockPartOutReceipt'] | Schema['LocationLabelReceipt'] | Schema['LocationArchiveReceipt'] | undefined>
 
 export function commandLabel(command: Command) {
   switch (command.kind) {
     case 'catalog': case 'location': return command.body.name
+    case 'location-label': return 'Alternate label '+command.body.label
+    case 'location-archive': return 'Archive bin '+command.body.confirmedLabel
     case 'quarantine': return 'Quarantine of ' + command.body.quantity + ' in ' + command.body.confirmedLocationCode
     case 'quarantine-release': return 'Inspection release of ' + command.body.quantity + ' in ' + command.body.confirmedLocationCode
     case 'offer-withdrawal': return 'Draft backing withdrawal in ' + command.body.confirmedLocationCode
@@ -90,6 +98,8 @@ export function commandLabel(command: Command) {
 }
 
 const commands = {
+  'location-label': {path:'locations/labels',valid:valid.LocationLabelCommand},
+  'location-archive': {path:'locations/archives',valid:valid.LocationArchiveCommand},
   quarantine: { path: 'inventory/quarantines', valid: valid.StockQuarantineCommand },
   'quarantine-release': { path: 'inventory/quarantine-releases', valid: valid.StockQuarantineReleaseCommand },
   'offer-withdrawal': { path: 'inventory/draft-backing-withdrawals', valid: valid.DraftBackingWithdrawalCommand },
@@ -197,7 +207,40 @@ function costConserved(original:number|null, restored:number|null, remaining:num
     restored!==null && remaining!==null && original===restored+remaining
 }
 const draftPath = (position: string) => 'inventory/positions/' + encodeURIComponent(position) + '/draft-backing'
+function verifyRegistryRow(row:RegistryRow) {
+  if (row.archived !== (row.archivedAt!==null) || row.archived !== (row.archiveEventId!==null) ||
+      !Number.isSafeInteger(row.physicalQuantity) || !Number.isSafeInteger(row.positionCount) ||
+      row.positionCount>row.physicalQuantity) throw new ContractFailure()
+}
 export const api = {
+  async registryPage(after='') {
+    const params=new URLSearchParams({limit:'100'})
+    if (after) params.set('after',after)
+    const page=await read('locations/registry?'+params,valid.LocationRegistryPage)
+    page.rows.forEach(verifyRegistryRow)
+    if (page.nextAfter && page.rows.at(-1)?.location.id!==page.nextAfter) throw new ContractFailure()
+    return page
+  },
+  async lookupLabel(label:string) {
+    const page=await read('locations/lookup?'+new URLSearchParams({label}),valid.LocationLabelLookup)
+    verifyRegistryRow(page.bin)
+    if (!sameLabel(label,page.matchedLabel) || page.isCanonical!==sameLabel(page.matchedLabel,page.bin.location.code)) throw new ContractFailure()
+    return page
+  },
+  async binRegistry(id:string,labelAfter='',eventAfter='') {
+    const params=new URLSearchParams({labelLimit:'25',eventLimit:'25'})
+    if (labelAfter) params.set('labelAfter',labelAfter)
+    if (eventAfter) params.set('eventAfter',eventAfter)
+    const page=await read('locations/'+encodeURIComponent(id)+'/registry?'+params,valid.LocationRegistrySnapshot)
+    verifyRegistryRow(page.bin)
+    if (page.bin.location.id!==id || page.labels.some(l=>l.isCanonical!==sameLabel(l.label,page.bin.location.code))) throw new ContractFailure()
+    return page
+  },
+  async registryReceipt(id:string,selector:{eventId:string}|{commandId:string}) {
+    const page=await read('locations/'+encodeURIComponent(id)+'/registry/receipts?'+new URLSearchParams(selector),valid.LocationRegistryEvidence)
+    if (page.locationId!==id || ('eventId' in selector ? page.event.id!==selector.eventId : page.event.commandId!==selector.commandId)) throw new ContractFailure()
+    return page
+  },
   session: () => read('session', valid.Session),
   signIn(password: string) {
     const bytes = new TextEncoder().encode('operator:' + password)
@@ -503,6 +546,8 @@ export const api = {
     const path = commands[command.kind].path
     const receipt = command.kind === 'catalog' || command.kind === 'location'
       ? await read(path, valid.Receipt, options)
+      : command.kind === 'location-label' ? await read(path,valid.LocationLabelReceipt,options)
+      : command.kind === 'location-archive' ? await read(path,valid.LocationArchiveReceipt,options)
       : command.kind === 'hold' || command.kind === 'hold-release' ? await read(path, valid.StockHoldReceipt, options)
       : command.kind === 'quarantine' || command.kind === 'quarantine-release' ? await read(path, valid.StockQuarantineReceipt, options)
       : command.kind === 'offer-withdrawal' ? await read(path, valid.DraftBackingWithdrawalReceipt, options)
@@ -515,7 +560,7 @@ export const api = {
       : command.kind === 'transfer' ? await read(path, valid.TransferReceipt, options) : await read(path, valid.ReceivingReceipt, options)
     if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind ||
         ((command.kind === 'quarantine' || command.kind === 'quarantine-release') && receipt.revision !== command.body.expectedRevision + 1) ||
-        ((command.kind === 'part-out' || command.kind === 'stock-loss-recovery' || command.kind === 'shortage-closure' || command.kind === 'offer-withdrawal') && receipt.revision !== command.body.expectedRevision + 1) ||
+        ((command.kind === 'location-label' || command.kind === 'location-archive' || command.kind === 'part-out' || command.kind === 'stock-loss-recovery' || command.kind === 'shortage-closure' || command.kind === 'offer-withdrawal') && receipt.revision !== command.body.expectedRevision + 1) ||
         (command.kind === 'recount' && (receipt.entityId !== command.body.previewId || receipt.revision !== 1))) throw new ContractFailure()
     return receipt
   }
