@@ -516,7 +516,7 @@
             "name": "X-BV-Location-Contract",
             "in": "header",
             "required": false,
-            "description": "Advertise supported location error detail. Level 1 accepts archived-destination and physical-label collision codes. Without this header the server retains the earlier definitive bin and reference conflict codes.",
+            "description": "Advertise supported location error detail. Level 1 accepts archived-destination codes. Send a single literal value of 2 to receive a structured capacity witness on rejection. Other requests receive quantity_unavailable for capacity rejections.",
             "schema": {
               "type": "integer",
               "minimum": 1
@@ -546,6 +546,16 @@
           },
           "default": {
             "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Application error If the destination has too little room, location contract 2 receives location_capacity_exceeded with a capacity witness. Older contracts receive quantity_unavailable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -801,7 +811,7 @@
             "name": "X-BV-Location-Contract",
             "in": "header",
             "required": false,
-            "description": "Advertise supported location error detail. Level 1 accepts archived-destination and physical-label collision codes. Without this header the server retains the earlier definitive bin and reference conflict codes.",
+            "description": "Advertise supported location error detail. Level 1 accepts archived-destination codes. Send a single literal value of 2 to receive a structured capacity witness on rejection. Other requests receive quantity_unavailable for capacity rejections.",
             "schema": {
               "type": "integer",
               "minimum": 1
@@ -841,6 +851,16 @@
           },
           "413": {
             "description": "The authenticated transfer request exceeds 128 MiB. No command was applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Application error If the destination has too little room, location contract 2 receives location_capacity_exceeded with a capacity witness. Older contracts receive quantity_unavailable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3446,7 +3466,7 @@
             "name": "X-BV-Location-Contract",
             "in": "header",
             "required": false,
-            "description": "Advertise supported location error detail. Level 1 accepts archived-destination and physical-label collision codes. Without this header the server retains the earlier definitive bin and reference conflict codes.",
+            "description": "Advertise supported location error detail. Level 1 accepts archived-destination codes. Send a single literal value of 2 to receive a structured capacity witness on rejection. Other requests receive quantity_unavailable for capacity rejections.",
             "schema": {
               "type": "integer",
               "minimum": 1
@@ -3495,7 +3515,7 @@
             }
           },
           "409": {
-            "description": "The revision, bin, identity, shortage, free quantity or documented basis prevents this transformation.",
+            "description": "The revision, bin, identity, shortage, free quantity or documented basis prevents this transformation. If the destination has too little room, location contract 2 receives location_capacity_exceeded with a capacity witness. Older contracts receive quantity_unavailable.",
             "content": {
               "application/json": {
                 "schema": {

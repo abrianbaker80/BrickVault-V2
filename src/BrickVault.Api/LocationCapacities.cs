@@ -49,6 +49,14 @@ internal sealed class LocationCapacities(NpgsqlDataSource db)
         new(row.GetGuid(0),row.GetGuid(1),row.GetGuid(2),row.GetInt32(3),Optional<long>(row,4),
             Optional<long>(row,5),row.GetString(6),row.GetInt64(7),row.GetInt64(8),row.GetDateTime(9));
 
+    internal static ApiError FormatError(Fault fault, Guid correlationId, IHeaderDictionary headers)
+    {
+        var contract = headers[LocationRegistry.ContractHeader];
+        return contract.Count == 1 && contract[0] == "2"
+            ? new(fault.Code, fault.Message, correlationId, fault.Capacity)
+            : new("quantity_unavailable", fault.Message, correlationId);
+    }
+
     internal static Fault Rejection(PostgresException exception)
     {
         var witness = JsonSerializer.Deserialize<LocationCapacityRejection>(exception.MessageText,Wire.Json)

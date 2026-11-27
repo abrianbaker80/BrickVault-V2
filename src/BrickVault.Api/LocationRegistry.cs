@@ -118,8 +118,10 @@ internal sealed partial class LocationRegistry(NpgsqlDataSource db)
         }
     }
 
+    internal const string ContractHeader = "X-BV-Location-Contract";
+
     internal static bool SupportsContract(HttpRequest request, int level) =>
-        request.Headers.TryGetValue("X-BV-Location-Contract", out var values) && values.Count == 1 &&
+        request.Headers.TryGetValue(ContractHeader, out var values) && values.Count == 1 &&
         int.TryParse(values[0], System.Globalization.NumberStyles.None,
             System.Globalization.CultureInfo.InvariantCulture, out var advertised) && advertised >= level;
 
