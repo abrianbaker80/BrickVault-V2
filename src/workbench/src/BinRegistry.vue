@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {computed,nextTick,ref,shallowRef,watch} from 'vue'
+import {computed,nextTick,onScopeDispose,ref,shallowRef,watch} from 'vue'
 import {api,ContractFailure,explain,type RegistrySnapshot,type RegistryEvidence,type TransferControls} from './api'
 import {registryLink,validLabel} from './binLabels'
 import {useBinRegistry} from './useBinRegistry'
@@ -17,20 +17,22 @@ const names:Record<string,string>={registered:'Bin registered','canonical-rename
 const available=computed(()=>props.ready && !loading.value && !error.value && !stale.value && bins.confirmed.value && props.controls.enabled && !sending.value)
 const canSave=computed(()=>available.value && frozen.value && !frozen.value.archived && (kind.value==='label' ? validLabel(raw.value) :
   kind.value==='archive' && bins.matches(frozen.value.location,raw.value) && !!reason.value.trim() && ack.value))
-watch(()=>[props.asOf,props.connected,requested.value,attempt.value] as const,async([,online,target],_,cleanup)=>{
-  let current=true
-  cleanup(()=>{current=false})
-  loading.value=online;error.value=''
-  if(!online)return
+// Register keys this panel by workspace, bin and event. Ignore replies once that scope closes.
+let generation=0
+onScopeDispose(()=>{generation++})
+async function read(){
+  const request=++generation,target=requested.value
+  loading.value=props.connected;error.value=''
+  if(!props.connected)return
   try {
     if(props.eventId){
       const result=await api.registryReceipt(props.id,{eventId:props.eventId})
-      if(!current)return
+      if(request!==generation)return
       if(!result.complete)throw new Error('The bin registry receipt was incomplete.')
       receipt.value=result
     } else {
       const result=await api.binRegistry(props.id,target.labels.at(-1),target.events.at(-1))
-      if(!current)return
+      if(request!==generation)return
       if(!result.complete)throw new Error('The bin registry detail was incomplete.')
       if((result.nextLabelAfter && target.labels.includes(result.nextLabelAfter))||
          (result.nextEventAfter && target.events.includes(result.nextEventAfter)))throw new ContractFailure()
@@ -39,11 +41,15 @@ watch(()=>[props.asOf,props.connected,requested.value,attempt.value] as const,as
       if(old && (old.location.revision!==now.location.revision || (kind.value==='archive' &&
         (old.physicalQuantity!==now.physicalQuantity || old.positionCount!==now.positionCount))))stale.value=true
       snapshot.value=result;confirmed.value=target
-      if(movedLabels || movedEvents){await nextTick();if(current)(movedLabels?labelsHeading:eventsHeading).value?.focus()}
+      if(movedLabels || movedEvents){await nextTick();if(request===generation)(movedLabels?labelsHeading:eventsHeading).value?.focus()}
     }
-  } catch(e){if(current){error.value=e instanceof Error ? e.message : explain(e);emit('failure',e)}}
-  finally{if(current)loading.value=false}
-},{immediate:true})
+  } catch(e){if(request===generation){error.value=e instanceof Error ? e.message : explain(e);emit('failure',e)}}
+  finally{if(request===generation)loading.value=false}
+}
+watch([()=>props.connected,requested,attempt],read,{immediate:true})
+watch(()=>props.asOf,()=>{
+  if(props.connected && !props.eventId && !loading.value)void read()
+})
 function page(key:'labels'|'events',next?:string|null){
   const stack=confirmed.value[key]
   requested.value={...confirmed.value,[key]:next ? [...stack,next] : stack.slice(0,-1)}

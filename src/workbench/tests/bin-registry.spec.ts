@@ -247,6 +247,51 @@ test('a slow lookup survives a register refresh and shows a later archive withou
   await expect(lookup(page).getByRole('link')).toHaveCount(0)
 })
 
+test('slow bin details and exact receipts survive workspace polls and changed occupancy invalidates the archive witness',async({page})=>{
+  const f=await fixture(page),p=panel(page)
+  async function refresh(){
+    const read=page.waitForResponse(r=>new URL(r.url()).pathname.endsWith('/workspace'))
+    await page.getByRole('button',{name:'Refresh',exact:true}).click()
+    await read;await expect(page.getByText('Connected',{exact:true})).toBeVisible()
+  }
+  async function holdRead(path:string,open:()=>Promise<void>){
+    let began!:()=>void,resume!:()=>void,finish!:()=>void,reads=0
+    const started=new Promise<void>(resolve=>{began=resolve}),released=new Promise<void>(resolve=>{resume=resolve})
+    const done=new Promise<void>(resolve=>{finish=resolve})
+    page.on('request',r=>{if(new URL(r.url()).pathname.endsWith(path))reads++})
+    await page.route(u=>u.pathname.endsWith(path),async route=>{
+      const response=await route.fetch()
+      try{began();await released;await route.fulfill({response})}
+      finally{await response.dispose();finish()}
+    },{times:1})
+    await open();await started
+    try{
+      await refresh();await refresh()
+      expect(reads).toBe(1)
+    }finally{resume();await done}
+    return ()=>reads
+  }
+  const url='/locations/'+f.a.id+'/registry'
+  await holdRead(url,()=>page.evaluate(hash=>{location.hash=hash},registryLink(f.a.id)))
+  await expect(p).toContainText('9 physical units · 2 occupied stock positions')
+  await archiveForm(page,f.a.code)
+  await expect(p.getByRole('button',{name:'Confirm archive'})).toBeEnabled()
+  await f.write('receiving/putaway',3,{purchaseId:f.unknown.purchaseId,deliveryId:f.unknown.deliveryId,catalogId:f.catalogId,locationId:f.a.id,confirmedLocationCode:f.a.code,quantity:1})
+  await refresh()
+  await expect(p).toContainText('10 physical units · 3 occupied stock positions')
+  await expect(p.getByRole('alert')).toContainText('occupancy changed')
+  await expect(p.getByRole('button',{name:'Confirm archive'})).toBeDisabled()
+  await p.getByRole('button',{name:'Review updated bin'}).click()
+  await expect(p.getByRole('checkbox')).not.toBeChecked()
+  await p.getByRole('button',{name:'Cancel'}).click()
+  const receiptReads=await holdRead(url+'/receipts',()=>p.getByRole('link',{name:'Bin registered · Revision 1'}).press('Enter'))
+  await expect(p.getByRole('heading',{name:'Bin registered',exact:true})).toBeVisible()
+  await f.write('locations/labels',1,{locationId:f.a.id,label:'Side-'+f.a.code})
+  await refresh();await refresh()
+  expect(receiptReads()).toBe(1)
+  await expect(p.getByText('Revision',{exact:true}).locator('+ dd')).toHaveText('1')
+})
+
 test('a putaway confirmed by an alternate label replays once after its destination is archived',async({page})=>{
   const f=await fixture(page),alias='Rack-'+f.empty.code
   await f.write('locations/labels',1,{locationId:f.empty.id,label:alias})
