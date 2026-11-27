@@ -66,11 +66,12 @@ internal sealed class Transfers(NpgsqlDataSource db)
         }
         catch (PostgresException ex) when (ex.ConstraintName is
             "transfer_source" or "transfer_quantity" or "transfer_bin" or "transfer_backing" or "stock_shortage_open" or
-            "reserved_stock_unavailable" or "quarantine_capacity_unavailable" or "location_destination_archived")
+            "reserved_stock_unavailable" or "quarantine_capacity_unavailable" or "location_destination_archived" or "location_capacity_exceeded")
         {
             throw ex.ConstraintName switch
             {
                 "location_destination_archived" => LocationRegistry.ArchivedDestination(),
+                "location_capacity_exceeded" => LocationCapacities.Rejection(ex),
                 "stock_shortage_open" => Fault.StockShortageOpen(),
                 "quarantine_capacity_unavailable" => StockQuarantines.ProtectedCapacity(),
                 "reserved_stock_unavailable" => new Fault(409, "reserved_stock_unavailable",

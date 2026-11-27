@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {capacityPreview,exceedsCapacity} from './binCapacity'
 import { useBinRegistry } from './useBinRegistry'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Location, TransferControls, TransferPosition } from './api'
@@ -14,6 +15,8 @@ const sourceCode = ref('')
 const destinationCode = ref('')
 const bins=useBinRegistry(()=>[sourceCode.value,destinationCode.value])
 const count = ref<number | ''>('')
+const targetRow=computed(()=>bins.rows.value.get(destinationId.value))
+const tooFull=computed(()=>exceedsCapacity(targetRow.value,Number(count.value || 0)))
 const reason = ref('')
 const moveAll = ref(false)
 const quantities = ref<Record<string, number | ''>>({})
@@ -32,7 +35,7 @@ const backing = computed(() => props.original.backing.map(offer => ({
 })).filter(row => row.quantity > 0))
 const movedBacking = computed(() => moveAll.value ? line.backedQuantity : backing.value.reduce((total, row) => total + row.quantity, 0))
 const editable = computed(() => movable.value > 0 && props.confirmedBin && props.controls.enabled && !stale.value && !sending.value)
-const available = computed(() => editable.value && props.ready && bins.confirmed.value && (!destinationId.value || bins.isActive(destinationId.value)) && !bins.pending(sourceCode.value) && !bins.pending(destinationCode.value))
+const available = computed(() => editable.value && props.ready && !tooFull.value && bins.confirmed.value && (!destinationId.value || bins.isActive(destinationId.value)) && !bins.pending(sourceCode.value) && !bins.pending(destinationCode.value))
 watch(() => destination.value?.code, () => { destinationCode.value = ''; issue.value = '' })
 watch([sourceCode, destinationCode, count, reason, moveAll, movedBacking], () => { issue.value = ''; attempted.value = false })
 onMounted(() => dialog.value?.showModal())
@@ -89,6 +92,7 @@ async function submit() {
           <option disabled value="">Choose a different bin</option>
           <option v-for="bin in bins.destinations.value.filter(l => l.id !== source.id)" :key="bin.id" :value="bin.id">{{ bin.code }} · {{ bin.name }}</option>
         </select></label>
+        <p v-if="destinationId && bins.confirmed.value" :class="tooFull?'warning':'field-hint'" role="status">{{ capacityPreview(targetRow,Math.max(0,Number(count || 0))) }}</p>
         <p v-if="destinationId && bins.rows.value.get(destinationId)?.archived" class="warning">The selected destination is archived. Choose an active bin.</p>
         <label>Confirm source bin code<input v-model="sourceCode" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
         <label>Confirm destination bin code<input v-model="destinationCode" required maxlength="48" autocomplete="off" spellcheck="false" /></label>

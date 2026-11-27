@@ -13,7 +13,7 @@ export const partOutLink = (source: string, receipt?: string) =>
   '#inventory/part-out/' + source + (receipt ? '/' + receipt : '')
 export const recoveryLink = (bin:string,position:string,posting:string,receipt?:string) =>
   '#locations/'+bin+'/positions/'+position+'/posted-loss/'+posting+'/recoveries'+(receipt ? '/'+receipt : '')
-export type CountLink = { binId: string; registry?:true; registryEvent?:string; receiptId?: string; positionId?: string; holdPositionId?: string;
+export type CountLink = { binId: string; capacity?:true; capacityEvent?:string; registry?:true; registryEvent?:string; receiptId?: string; positionId?: string; holdPositionId?: string;
   quarantinePositionId?: string; quarantineReceiptId?: string; draftPositionId?: string; draftOfferId?: string; withdrawalId?: string;
   recovery?: {position:string; posting:string; receipt?:string};
   closure?: {position:string; caseId:string; mode:'review'|'receipt'; id:string};
@@ -23,6 +23,7 @@ export function readCountLink(hash: string): CountLink {
   if (page !== 'locations' || !binId) return
   const uuid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i
   if (!uuid.test(binId)) return
+  if (kind==='capacity' && !action && !extra.length && (!id || uuid.test(id))) return {binId:binId.toLowerCase(),capacity:true,capacityEvent:id?.toLowerCase()}
   if (kind==='registry' && !action && !extra.length && (!id || uuid.test(id))) return {binId:binId.toLowerCase(),registry:true,registryEvent:id?.toLowerCase()}
   if (kind==='positions' && uuid.test(id) && action==='posted-loss' && uuid.test(extra[0] || '') && extra[1]==='recoveries' &&
       (extra.length===2 || (extra.length===3 && uuid.test(extra[2])))) {

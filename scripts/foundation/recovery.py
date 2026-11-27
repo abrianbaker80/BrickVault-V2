@@ -58,6 +58,7 @@ SCHEMA_FACTS[13] = SCHEMA_FACTS[12] + (
 )
 
 SCHEMA_FACTS[14] = SCHEMA_FACTS[13] + ("location_labels", "location_registry_events")
+SCHEMA_FACTS[15] = SCHEMA_FACTS[14] + ("location_capacity_events", "location_capacity_fences")
 
 
 def digest(path):

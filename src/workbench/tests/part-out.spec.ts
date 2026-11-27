@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { test } from './trusted'
-import { audit, duringBackgroundRead, fixture, purchases } from './bin-fixture'
+import { audit, duringBackgroundRead, fixture, purchases, receiptBeforeDirectory } from './bin-fixture'
 import { partOutLink, quarantineLink } from '../src/countLinks'
 import type { PartOutCommand, PartOutEvidence } from '../src/api'
 
@@ -137,8 +137,9 @@ test('part out a recovered input into usable stock and retained quarantine, pres
   await release.getByLabel('Inspection evidence and reason').fill('Inspected retained figure and confirmed both arms')
   await release.getByRole('checkbox',{name:/I confirmed/}).check()
   await release.getByRole('checkbox',{name:/I inspected these pieces/}).check()
-  await release.getByRole('button',{name:'Confirm inspected release'}).press('Enter')
-  await expect(release.getByRole('heading',{name:'Released after inspection'})).toBeVisible()
+  await receiptBeforeDirectory(page, 'inventory/quarantine-releases',
+    () => release.getByRole('button',{name:'Confirm inspected release'}).press('Enter'),
+    () => expect(release.getByRole('heading',{name:'Released after inspection'})).toBeVisible())
   await release.getByRole('link',{name:'Originating part-out receipt'}).press('Enter')
   await expect(page).toHaveURL(u=>u.hash===partOutLink(x.position,id))
   const [released]=await purchases(page,[x.purchaseId])

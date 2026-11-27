@@ -38,8 +38,12 @@ const hash = ref(window.location.hash)
 const countLink = computed(() => readCountLink(hash.value))
 const { session, workspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
   canSend, canCreate, refresh, signIn, signOut, create, record, send, expired } = useWorkbench(page)
+const stockReceipt = computed(() => {
+  const link = countLink.value
+  return !!(link?.receiptId || link?.quarantineReceiptId || link?.lossReceiptId || link?.recovery?.receipt)
+})
 const bins=provideBinRegistry(()=>session.value?.workspaceId,()=>workspace.value,
-  ()=>page.value==='locations' || page.value==='receiving' || hash.value.startsWith('#inventory/part-out/'),
+  ()=>(page.value==='locations' && !stockReceipt.value) || page.value==='receiving' || hash.value.startsWith('#inventory/part-out/'),
   ()=>readState.value!=='disconnected',expired)
 const referencePage = computed(() => page.value === 'catalog' || page.value === 'locations')
 const password = ref('')
@@ -54,11 +58,12 @@ watch(() => session.value?.workspaceId, async () => {
 const addButton = ref<HTMLButtonElement>()
 const status = computed(() => ({ loading: 'Loading', ready: 'Connected', disconnected: 'Disconnected', partial: 'Partial read' })[readState.value])
 async function navigate() {
+  const returningWithinLocations = page.value === 'locations' && route() === 'locations'
   hash.value = window.location.hash
   page.value = route()
   dialogKind.value = null
   await nextTick()
-  heading.value?.focus()
+  if (!returningWithinLocations) heading.value?.focus()
 }
 watch([page, session], () => {
   document.title = (session.value ? pages[page.value].title : 'Sign in') + ' · BrickVault'
@@ -142,6 +147,7 @@ function openForm() {
             <a v-if="notice.quarantineReceipt" :href="notice.quarantineReceipt">View quarantine receipt</a>
             <a v-if="notice.withdrawalLink" :href="notice.withdrawalLink">View withdrawal receipt</a>
             <a v-if="notice.recountLink" :href="notice.recountLink">View recount receipt</a>
+            <a v-if="notice.capacityReceipt" :href="notice.capacityReceipt">View piece limit receipt</a>
             <a v-if="notice.registryReceipt" :href="notice.registryReceipt">View bin registry receipt</a>
             <a v-if="notice.partOutReceipt" :href="notice.partOutReceipt">View part-out receipt</a>
             <a v-if="notice.recoveryReceipt" :href="notice.recoveryReceipt">View recovery receipt</a>
@@ -179,7 +185,7 @@ function openForm() {
               <Receiving v-if="receiving" :key="session.workspaceId" :stock="receiving" :workspace="workspace" :workspace-id="session.workspaceId" :enabled="canCreate" :uncertain="pending.length > 0 && !submitting" :dispatch="record" />
               <p v-else role="status">{{ readState === 'loading' ? 'Loading receiving records…' : 'Receiving records are unavailable.' }}</p>
             </template>
-            <Register v-else :key="session.workspaceId + page" :page="page" :workspace="workspace" :connected="readState !== 'disconnected'" :workspace-ready="readState === 'ready'"
+            <Register v-else :key="session.workspaceId + page" :page="page" :workspace="workspace" :connected="readState !== 'disconnected'" :workspace-ready="readState === 'ready'" :workspace-loading="readState === 'loading'"
               :transfers="{ enabled: canCreate, pending: pending.length > 0, feedback: error || journalError, workspaceId: session.workspaceId, dispatch: record }"
               :count-link="countLink" :confirmed-source-id="notice?.sourceLocationId" @failure="expired" />
           </div>

@@ -15,6 +15,103 @@ async function fill(page: Page, code: string, quantity: number, reason: string) 
   await form.getByLabel('Witnessed quantity').fill(String(quantity))
   await form.getByLabel('Reason for count').fill(reason)
 }
+test('a focused bin and its search survive opening and closing count details', async ({page}) => {
+  const f = await fixture(page)
+  await page.setViewportSize({width:320,height:800})
+  const search = page.getByRole('searchbox',{name:'Search locations'})
+  await search.fill(f.a.code)
+  const lookup = page.getByRole('form',{name:'Physical label lookup'})
+  await lookup.getByLabel('Scan or type physical label').fill(f.a.code.toLowerCase())
+  await lookup.getByRole('button',{name:'Find bin'}).press('Enter')
+  await expect(lookup).toContainText('Matched canonical code '+f.a.code)
+  await expect(lookup).toContainText('Active')
+  const inspect = page.getByRole('button',{name:'Inspect '+f.a.name,exact:true})
+  await inspect.focus()
+  await inspect.press('Enter')
+  const entry = stock(page).getByRole('link',{name:'Count stock for '+f.paid.purchase+' · '+f.paid.delivery})
+  await entry.press('Enter')
+  await expect(countForm(page)).toBeVisible()
+  await expect(page.getByRole('table',{name:'Storage locations',includeHidden:true})).toHaveCount(0)
+  await f.write('locations/archives',1,{locationId:f.a.id,confirmedLabel:f.a.code,expectedPhysicalQuantity:9,
+    expectedPositionCount:2,reason:'Archive while the operator is viewing count details'})
+  await countForm(page).getByRole('button',{name:'Close count details'}).press('Enter')
+  const details = page.getByRole('dialog',{name:f.a.name,exact:true})
+  await expect(details).toBeVisible()
+  await details.getByRole('button',{name:'Close details'}).press('Enter')
+  await expect(search).toHaveValue(f.a.code)
+  await expect(lookup.getByLabel('Scan or type physical label')).toHaveValue(f.a.code.toLowerCase())
+  await expect(lookup).toContainText('Matched canonical code '+f.a.code)
+  await expect(lookup).toContainText('Archived')
+  await expect(inspect).toBeFocused()
+})
+
+test('switching workspace after an accepted count cannot open its observation in the other workspace', async ({page}) => {
+  const f = await fixture(page)
+  const position = countPositionLink(f.a.id,f.position)
+  await page.goto('/'+position)
+  await fill(page,f.a.code,6,'Count in issuing workspace')
+  const newWorkspace = randomUUID()
+  let submitted = false, changed = false
+  const observationReads: string[] = []
+  page.on('request',request=>{
+    const url = new URL(request.url())
+    if (request.method()==='POST' && url.pathname.endsWith('/receiving/counts')) submitted=true
+    if (submitted && url.searchParams.has('observationId')) observationReads.push(url.pathname)
+  })
+  await page.route('**/api/v1/session',async route=>{
+    const reply=await route.fetch()
+    try {
+      if (submitted) {
+        changed=true
+        await route.fulfill({response:reply,json:{...await reply.json(),workspaceId:newWorkspace}})
+      } else await route.fulfill({response:reply})
+    } finally {await reply.dispose()}
+  })
+  const saved=page.waitForResponse(r=>r.request().method()==='POST' && new URL(r.url()).pathname.endsWith('/receiving/counts'))
+  const refreshed=page.waitForResponse(r=>changed && new URL(r.url()).pathname.endsWith('/workspace'))
+  await countForm(page).getByRole('button',{name:'Record observation'}).press('Enter')
+  const reply=await saved
+  expect(reply.status()).toBe(200)
+  await refreshed
+  await expect(page.getByText('Connected',{exact:true})).toBeVisible()
+  await expect(page).toHaveURL(url=>url.hash===position)
+  const receipt=await reply.json()
+  // Only the session scope changes in this fixture. The genuine position history can still list the saved observation.
+  const status=page.getByRole('status',{includeHidden:true})
+  await expect(status.filter({hasText:receipt.correlationId})).toHaveCount(0)
+  await expect(status.getByRole('link',{name:'View count receipt',includeHidden:true})).toHaveCount(0)
+  await expect(countReceipt(page)).toHaveCount(0)
+  expect(observationReads).toEqual([])
+  const original=await page.request.get('/api/v1/receiving/bins/'+f.a.id+'/counts?commandId='+receipt.commandId)
+  expect(original.status()).toBe(200)
+  expect((await original.json()).observations).toHaveLength(1)
+})
+
+test('a refreshed directory preserves the original in-flight exact count receipt for an unchanged bin', async ({page}) => {
+  const f=await fixture(page)
+  const reason='Six pieces counted before a directory refresh'
+  const observation=await f.write('receiving/counts',5,{purchaseId:f.paid.purchaseId,positionId:f.position,
+    locationId:f.a.id,confirmedLocationCode:f.a.code,countedQuantity:6,reason})
+  const exact=(url:URL)=>url.pathname==='/api/v1/receiving/bins/'+f.a.id+'/counts' && url.searchParams.get('observationId')===observation
+  let reads=0, arrived!:()=>void, release!:()=>void
+  const started=new Promise<void>(resolve=>{arrived=resolve}), resume=new Promise<void>(resolve=>{release=resolve})
+  await page.route(exact,async route=>{
+    if (++reads===1) {arrived();await resume}
+    await route.continue()
+  })
+  await page.goto('/'+countReceiptLink(f.a.id,observation))
+  await started
+  try {
+    const total=page.locator('.metrics > div').filter({hasText:'Locations'}).locator('strong')
+    const previous=Number(await total.textContent())
+    await f.write('locations',0,{code:'NEW-'+f.a.code,name:'Unrelated bin added during the exact receipt read'})
+    await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
+    await expect(total).toHaveText(String(previous+1))
+  } finally {release()}
+  await expect(countReceipt(page)).toContainText(reason)
+  expect(reads).toBe(1)
+})
+
 test('a witnessed zero opens a shortage and a later surplus remains separate from ledger and existing backing', async ({ page, context }, info) => {
   const f = await fixture(page)
   await page.setViewportSize({width:320, height:720})

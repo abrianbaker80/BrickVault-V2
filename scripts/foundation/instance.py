@@ -394,6 +394,10 @@ class Instance:
                     GRANT INSERT (id,command_id,location_id,revision,kind,label,reason,physical_quantity,position_count)
                         ON brickvault.location_registry_events TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 15 THEN
+                    GRANT INSERT (id,command_id,location_id,revision,piece_limit,reason)
+                        ON brickvault.location_capacity_events TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,

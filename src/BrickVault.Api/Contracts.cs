@@ -19,10 +19,11 @@ internal static class Wire
     };
 }
 
-internal sealed class Fault(int status, string code, string message) : Exception(message)
+internal sealed class Fault(int status, string code, string message, LocationCapacityRejection? capacity = null) : Exception(message)
 {
     public int Status { get; } = status;
     public string Code { get; } = code;
+    public LocationCapacityRejection? Capacity { get; } = capacity;
     public static Fault Invalid() => new(400, "invalid_reference", "Check the required fields, allowed values and field lengths.");
     public static Fault Conflict() => new(409, "revision_conflict", "This reference has changed. Reload its current revision.");
     public static Fault StockShortageOpen() => new(409, "stock_shortage_open",
@@ -105,7 +106,8 @@ internal sealed record Session(string Actor, string CsrfToken, Guid WorkspaceId)
             throw new Fault(409, "workspace_mismatch", "This command belongs to a different or unconfirmed workspace.");
     }
 }
-internal sealed record ApiError(string Code, string Message, Guid CorrelationId);
+internal sealed record ApiError(string Code, string Message, Guid CorrelationId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LocationCapacityRejection? Capacity = null);
 internal sealed record Receipt(Guid CommandId, Guid EntityId, int Revision, string Kind, Guid CorrelationId);
 internal sealed record CatalogRow(Guid Id, int Revision, string ItemType, string ItemNumber, string? Variant,
     string Name, int? ColorId, string ColorState, string Condition, string Completeness, string Source,

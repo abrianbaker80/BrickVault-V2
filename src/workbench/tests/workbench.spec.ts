@@ -171,22 +171,104 @@ test('320px register and dialogs support keyboard navigation and accessible cont
   await page.setViewportSize({ width: 320, height: 680 })
   await signIn(page)
   await connected(page)
+  await test.step('Check the catalog and focus its search box', async () => {
+    await noOverflow(page)
+    await accessibility(page)
+    await page.keyboard.press('/')
+    await expect(page.getByRole('searchbox')).toBeFocused()
+  })
+  await test.step('Open, audit and dismiss the catalog form with the keyboard', async () => {
+    const add = page.getByRole('button', { name: 'New catalog item' })
+    await add.focus()
+    await page.keyboard.press('Enter')
+    await expect(page.getByLabel('Item number')).toBeFocused()
+    await noOverflow(page)
+    await accessibility(page)
+    await page.screenshot({ path: info.outputPath('catalog-mobile-form.png') })
+    await page.keyboard.press('Escape')
+    await expect(add).toBeFocused()
+  })
+  await test.step('Audit the loaded Activity view', async () => {
+    const auditRead = page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.pathname === '/api/v1/workspace' && url.searchParams.get('audit') === 'all'
+    })
+    await page.getByRole('link', { name: 'Activity' }).click()
+    const response = await auditRead
+    expect(response.status()).toBe(200)
+    const snapshot: Workspace = await response.json()
+    await expect(page.locator('#audit-title + .count')).toHaveText(snapshot.audit.length+' events')
+    await expect(page.getByRole('listitem')).toHaveCount(Math.min(snapshot.audit.length,25))
+    await connected(page)
+    await noOverflow(page)
+    await accessibility(page)
+  })
+})
+
+test('Activity history pages retain their command after a newer write and open the original diagnostic', async ({page}) => {
+  await page.setViewportSize({width:320,height:680})
+  await signIn(page)
+  await connected(page)
+  const {workspaceId,csrfToken}=await (await page.request.get('/api/v1/session')).json()
+  const headers={Origin:new URL(page.url()).origin,'X-Workspace-Id':workspaceId,'X-CSRF-Token':csrfToken}
+  const code='AUDIT-'+prefix()
+  let locationId: string|undefined
+  async function save(revision:number){
+    const commandId=randomUUID()
+    const response=await page.request.post('/api/v1/locations',{headers,data:{id:locationId,commandId,
+      expectedRevision:revision-1,code,name:code+' revision '+revision}})
+    expect(response.status()).toBe(200)
+    locationId=(await response.json()).entityId
+    return commandId
+  }
+  const first=await save(1)
+  for(let rev=2;rev<=28;rev++)await save(rev)
+  await page.getByRole('link',{name:'Activity'}).click()
+  const history=page.getByRole('region',{name:'Audit history',exact:true})
+  const nav=history.getByRole('navigation',{name:'Audit history pages'})
+  await expect(history.getByRole('listitem')).toHaveCount(25)
+  await nav.getByRole('button',{name:'Older commands'}).press('Enter')
+  await expect(history.getByRole('heading')).toBeFocused()
+  const inspect=(revision:number)=>history.getByRole('button',{name:'Inspect command for '+code+' revision '+revision+' revision 1',exact:true})
+  await inspect(28).press('Enter')
+  const diagnostic=page.getByRole('region',{name:'Command diagnostic',exact:true})
+  await expect(diagnostic.getByText('Command ID',{exact:true}).locator('+ dd')).toHaveText(first)
+  const top=history.getByRole('listitem').first().getByRole('button')
+  const originalLabel=await top.getAttribute('aria-label')
+  async function refreshInBackground(){
+    const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/workspace?audit=all'))
+    await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
+    await refreshed
+  }
+  await save(29)
+  await refreshInBackground()
+  await expect(inspect(29)).toBeFocused()
+  await expect(top).toHaveAttribute('aria-label',originalLabel!.replace(code+' revision 28',code+' revision 29'))
+  await expect(diagnostic.getByText('Command ID',{exact:true}).locator('+ dd')).toHaveText(first)
+  async function turn(direction:'Older'|'Newer'){
+    await nav.getByRole('button',{name:direction+' commands'}).press('Enter')
+    await expect(history.getByRole('heading')).toBeFocused()
+  }
+  async function expectRange(latest:number,high:number,low:number){
+    const buttons=page.locator('.audit > li > button')
+    await expect(buttons).toHaveCount(high-low+1)
+    const labels=await buttons.evaluateAll(nodes=>nodes.map(node=>node.getAttribute('aria-label')))
+    expect(labels).toEqual(Array.from({length:high-low+1},(_,index)=>'Inspect command for '+code+' revision '+latest+' revision '+(high-index)))
+  }
+  await turn('Newer');await expectRange(29,28,4)
+  await turn('Older');await expect(top).toHaveAttribute('aria-label','Inspect command for '+code+' revision 29 revision 3')
+  for(let revision=30;revision<=55;revision++)await save(revision)
+  await refreshInBackground()
+  await expect(top).toHaveAttribute('aria-label','Inspect command for '+code+' revision 55 revision 3')
+  await turn('Newer');await expectRange(55,28,4)
+  await turn('Newer');await expectRange(55,53,29)
+  await turn('Newer');await expectRange(55,55,54)
+  await expect(nav.getByRole('button',{name:'Newer commands'})).toBeDisabled()
+  await turn('Older');await expectRange(55,53,29)
+  await turn('Older');await expectRange(55,28,4)
+  await turn('Older');await expect(inspect(55)).toBeVisible()
+  await expect(diagnostic.getByText('Command ID',{exact:true}).locator('+ dd')).toHaveText(first)
   await noOverflow(page)
-  await accessibility(page)
-  await page.keyboard.press('/')
-  await expect(page.getByRole('searchbox')).toBeFocused()
-  const add = page.getByRole('button', { name: 'New catalog item' })
-  await add.focus()
-  await page.keyboard.press('Enter')
-  await expect(page.getByLabel('Item number')).toBeFocused()
-  await noOverflow(page)
-  await accessibility(page)
-  await page.screenshot({ path: info.outputPath('catalog-mobile-form.png') })
-  await page.keyboard.press('Escape')
-  await expect(add).toBeFocused()
-  await page.getByRole('link', { name: 'Activity' }).click()
-  await noOverflow(page)
-  await accessibility(page)
 })
 
 test('a delayed initial read and a lost service connection cannot appear as a confirmed zero', async ({ page }) => {

@@ -39,20 +39,31 @@ const stale = computed(() => !!baseline.value && (!position.value || baseline.va
   baseline.value.code !== props.location.code || snapshot.value?.location.code !== props.location.code))
 const writable = computed(() => !!position.value && !props.receiptId && !stale.value && !loading.value && !error.value &&
   !partial.value && props.connected && props.controls.enabled && !sending.value)
-watch(writable, ready => {
-  if (ready && awaitingFirstCountField) {
-    awaitingFirstCountField = false
-    if (document.activeElement === heading.value) binConfirmation.value?.focus()
-  }
-}, { flush: 'post' })
+function focusFirstCountField() {
+  const modal = dialog.value, active = document.activeElement
+  if (!writable.value || !awaitingFirstCountField || !modal?.open) return
+  awaitingFirstCountField = false
+  if (active === heading.value || active === modal || !modal.contains(active)) binConfirmation.value?.focus()
+}
+watch(writable, focusFirstCountField, { flush: 'post' })
 const receipt = computed(() => props.receiptId ? snapshot.value?.observations[0] : undefined)
 watch([typedCode, counted, reason], () => { warning.value = ''; attempted.value = false })
-onMounted(() => {
-  const parent = dialog.value?.parentElement?.closest('dialog')
+onMounted(async () => {
+  await nextTick()
+  const modal = dialog.value
+  if (!modal?.isConnected) return
+  const parent = modal.parentElement?.closest('dialog')
   if (parent && !parent.open) parent.showModal()
-  dialog.value?.showModal()
+  modal.showModal()
+  if (!modal.contains(document.activeElement)) heading.value?.focus()
+  focusFirstCountField()
 })
-watch(() => [props.asOf, props.location.revision, props.connected, requested.value, attempt.value] as const,
+const readAt = ref(props.asOf)
+watch(() => props.asOf, asOf => {
+  if (!props.receiptId || (!loading.value && (!snapshot.value?.complete || partial.value || error.value ||
+      Date.parse(asOf) >= Date.parse(snapshot.value.asOf)))) readAt.value = asOf
+})
+watch([readAt, () => props.location.revision, () => props.connected, () => requested.value, attempt],
   async ([, revision, online, cursors], _, onCleanup) => {
     let active = true
     onCleanup(() => { active = false })
@@ -79,7 +90,15 @@ watch(() => [props.asOf, props.location.revision, props.connected, requested.val
       error.value = failure instanceof ApiFailure && failure.status === 404 && failure.detail?.code === 'unknown_count_observation'
         ? 'No count receipt with this ID was found in this bin.' : explain(failure)
       emit('failure', failure)
-    } finally { if (active) loading.value = false }
+    } finally {
+      if (active) {
+        loading.value = false
+        // The observation is immutable; its open-shortage and closure context can change.
+        // Finish the scoped read first, then catch up if the directory saw a later transaction.
+        if (props.receiptId && !partial.value && !error.value && snapshot.value &&
+            Date.parse(props.asOf) >= Date.parse(snapshot.value.asOf)) readAt.value = props.asOf
+      }
+    }
   }, { immediate: true })
 async function beginCount(id: string) {
   if (props.positionId !== id) {
@@ -105,6 +124,7 @@ async function submit() {
     warning.value = 'Enter a whole-number count from 0 to 1,000,000.'; return
   }
   if (!reason.value.trim()) { warning.value = 'Enter the reason for this count.'; return }
+  const issuingHash = window.location.hash, issuingDialog = dialog.value
   sending.value = true
   try {
     const p = baseline.value.position
@@ -112,6 +132,7 @@ async function submit() {
       commandId: crypto.randomUUID(), purchaseId: p.purchaseId, positionId: p.positionId, locationId: props.location.id,
       expectedRevision: p.purchaseRevision, confirmedLocationCode: typedCode.value, countedQuantity: counted.value, reason: reason.value.trim()
     } })
+    if (!issuingDialog?.isConnected || window.location.hash !== issuingHash) return
     if (saved) window.location.hash = countReceiptLink(props.location.id, saved.entityId)
     else if (props.controls.pending) emit('recover')
   } finally { sending.value = false }

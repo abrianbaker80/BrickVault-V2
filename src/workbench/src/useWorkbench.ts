@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import { api, ApiFailure, commandLabel, explain, forget, InvalidCommand, readJournal, remember } from './api'
 import { recoverPartOut } from './recoverPartOut'
+import {capacityLink,confirmsCapacityRejection} from './binCapacity'
 import { registryLink, sameLabel } from './binLabels'
 import { recoverInspection } from './recoverInspection'
 import { partOutLink, recoveryLink, closureLink, countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink } from './countLinks'
@@ -15,7 +16,7 @@ export function useWorkbench(page: Ref<string>) {
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
   const error = ref('')
-  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string; recountLink?: string; quarantineReceipt?: string; withdrawalLink?: string; closureReceipt?:string; recoveryReceipt?:string; partOutReceipt?:string; registryReceipt?:string } | null>(null)
+  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string; recountLink?: string; quarantineReceipt?: string; withdrawalLink?: string; closureReceipt?:string; recoveryReceipt?:string; partOutReceipt?:string; registryReceipt?:string; capacityReceipt?:string } | null>(null)
   const pending = shallowRef<Command[]>([])
   const held = shallowRef<Held[]>([])
   const journalError = ref('')
@@ -52,14 +53,14 @@ export function useWorkbench(page: Ref<string>) {
     clearSession('Your session ended. Sign in to continue.')
     return true
   }
-  async function refresh(background = false) {
+  async function beginRefresh(background = false, verified?: { session: Session; references?: Workspace }) {
     const current = ++generation
     if (!background) {
       readState.value = 'loading'
       error.value = ''
     }
     try {
-      const authenticated = await api.session()
+      const authenticated = verified?.session ?? await api.session()
       if (current !== generation) return
       if (session.value?.workspaceId !== authenticated.workspaceId) {
         workspace.value = null
@@ -70,22 +71,30 @@ export function useWorkbench(page: Ref<string>) {
       session.value = authenticated
       signedOut.value = false
       loadPending()
-      const [result, stock] = await Promise.all([
-        api.workspace(page.value === 'activity'), page.value === 'receiving' ? api.receiving() : null
-      ])
-      if (current !== generation) return
-      workspace.value = result
-      receiving.value = stock
-      readState.value = result.complete && (!stock || stock.complete) ? 'ready' : 'partial'
-    } catch (reason) {
-      if (current !== generation) return
-      if (reason instanceof ApiFailure && reason.status === 401) {
-        clearSession(session.value ? 'Your session ended. Sign in to continue.' : '')
-      } else {
-        error.value = explain(reason)
-        readState.value = 'disconnected'
-      }
+      const finished = Promise.all([
+        (page.value === 'catalog' || page.value === 'locations' ? verified?.references : undefined) ?? api.workspace(page.value === 'activity'),
+        page.value === 'receiving' ? api.receiving() : null
+      ]).then(([result, stock]) => {
+        if (current !== generation) return
+        workspace.value = result
+        receiving.value = stock
+        readState.value = result.complete && (!stock || stock.complete) ? 'ready' : 'partial'
+      }).catch(reason => failedRefresh(current, reason))
+      return { workspaceId: authenticated.workspaceId, finished }
+    } catch (reason) { failedRefresh(current, reason) }
+  }
+  function failedRefresh(current: number, reason: unknown) {
+    if (current !== generation) return
+    if (reason instanceof ApiFailure && reason.status === 401) {
+      clearSession(session.value ? 'Your session ended. Sign in to continue.' : '')
+    } else {
+      error.value = explain(reason)
+      readState.value = 'disconnected'
     }
+  }
+  async function refresh(background = false) {
+    const read = await beginRefresh(background)
+    await read?.finished
   }
   async function signIn(password: string) {
     if (authBusy.value) return
@@ -149,10 +158,13 @@ export function useWorkbench(page: Ref<string>) {
   async function resolveSizeRejection(command: Command, reason: ApiFailure, firstAttempt: boolean) {
     // A previous attempt may already have committed before its response was lost.
     if (!firstAttempt) {
+      const checking = generation
       try {
+        let references: Workspace | undefined
         let committed: { correlationId: string } | undefined
         let partOutReceipt: string | undefined
         let registryReceipt:string|undefined
+        let capacityReceipt:string|undefined
         let recoveryReceipt: string | undefined
         let closureReceipt: string | undefined
         let countLink: string | undefined
@@ -160,7 +172,15 @@ export function useWorkbench(page: Ref<string>) {
         let recountLink: string | undefined
         let withdrawalLink: string | undefined
         let quarantineReceipt: string | undefined
-        if (command.kind==='location-label' || command.kind==='location-archive') {
+        if(command.kind==='location-capacity'){
+          const body=command.body
+          try{
+            const result=await api.capacityReceipt(body.locationId,{commandId:body.commandId}),event=result.event
+            if(!result.complete || event.revision!==body.expectedRevision+1 || event.pieceLimit!==body.pieceLimit ||
+                event.reason!==body.reason)throw new Error('Piece limit receipt mismatch')
+            committed=event;capacityReceipt=capacityLink(result.locationId,event.id)
+          }catch(e){if(!(e instanceof ApiFailure && e.status===404 && e.detail?.code==='unknown_location_capacity_event'))throw e}
+        } else if (command.kind==='location-label' || command.kind==='location-archive') {
           try {
             const result=await api.registryReceipt(command.body.locationId,{commandId:command.body.commandId})
             const event=result.event
@@ -271,6 +291,13 @@ export function useWorkbench(page: Ref<string>) {
           } catch (failure) {
             if (!(failure instanceof ApiFailure && failure.status === 404 && failure.detail?.code === 'unknown_count_observation')) throw failure
           }
+        } else if (command.kind === 'location' || command.kind === 'catalog') {
+          references = await api.workspace()
+          if (!references.complete) throw new Error('Incomplete reference history')
+          const entry = references.audit.find(row => row.commandId === command.body.commandId)
+          if (entry && (entry.kind !== command.kind || entry.revision !== command.body.expectedRevision + 1 ||
+              (command.body.id && entry.entityId !== command.body.id))) throw new Error('Reference receipt mismatch')
+          committed = entry
         } else {
           const snapshot = command.kind === 'transfer'
             ? await api.binTransfers(command.body.sourceLocationId) : await api.workspace(true)
@@ -278,17 +305,20 @@ export function useWorkbench(page: Ref<string>) {
           const history = 'movements' in snapshot ? snapshot.movements : snapshot.audit
           committed = history.find(row => row.commandId === command.body.commandId)
         }
-        if ((await api.session()).workspaceId !== command.workspaceId) throw new Error('Workspace changed')
+        const authenticated = await api.session()
+        if (checking !== generation) return
+        if (authenticated.workspaceId !== command.workspaceId) throw new Error('Workspace changed')
         if (committed) {
           forget(command)
           loadPending()
           notice.value = { message: 'Confirmed the original ' + commandLabel(command) + '.',
-            correlationId: committed.correlationId, registryReceipt, countLink, lossLink, recountLink, quarantineReceipt, withdrawalLink, closureReceipt, recoveryReceipt, partOutReceipt, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
-          await refresh()
+            correlationId: committed.correlationId, capacityReceipt, registryReceipt, countLink, lossLink, recountLink, quarantineReceipt, withdrawalLink, closureReceipt, recoveryReceipt, partOutReceipt, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
+          const read = await beginRefresh(false, { session: authenticated, references })
+          await read?.finished
           return
         }
       } catch (failure) {
-        if (expired(failure)) return
+        if (checking !== generation || expired(failure)) return
         error.value = 'The server rejected the retry size. Reconnect to verify the original command before continuing.'
         readState.value = 'disconnected'
         return
@@ -309,7 +339,8 @@ export function useWorkbench(page: Ref<string>) {
       const receipt = await api.save(command, session.value.csrfToken)
       forget(command)
       loadPending()
-      notice.value = { message: 'Saved ' + commandLabel(command) + ' · revision ' + receipt.revision + '.',
+      const savedNotice = { message: 'Saved ' + commandLabel(command) + ' · revision ' + receipt.revision + '.',
+        capacityReceipt: command.kind==='location-capacity' ? capacityLink(command.body.locationId,receipt.entityId) : undefined,
         registryReceipt: command.kind==='location-label' || command.kind==='location-archive' ? registryLink(command.body.locationId,receipt.entityId) : undefined,
         quarantineReceipt: command.kind === 'quarantine' || command.kind === 'quarantine-release' ? quarantineLink(command.body.locationId, command.body.positionId, receipt.entityId) : undefined,
         withdrawalLink: command.kind === 'offer-withdrawal' ? draftBackingLink(command.body.locationId,command.body.positionId,'receipts',receipt.entityId) : undefined,
@@ -320,7 +351,15 @@ export function useWorkbench(page: Ref<string>) {
         correlationId: receipt.correlationId, lossLink: command.kind === 'stock-loss' ? lossReceiptLink(command.body.locationId,command.body.positionId,receipt.entityId) : undefined,
         countLink: command.kind === 'count' ? countReceiptLink(command.body.locationId, receipt.entityId) : undefined,
         sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
-      await refresh()
+      if (command.kind === 'count' || command.kind === 'stock-loss' || command.kind === 'stock-loss-recovery' || command.kind === 'quarantine' || command.kind === 'quarantine-release') {
+        // These flows open an authenticated, exact receipt. Keep writes fenced while the directory refreshes.
+        const read = await beginRefresh()
+        if (read?.workspaceId !== command.workspaceId) return
+        notice.value = savedNotice
+      } else {
+        notice.value = savedNotice
+        await refresh()
+      }
       return receipt
     } catch (reason) {
       if (expired(reason)) return
@@ -329,11 +368,11 @@ export function useWorkbench(page: Ref<string>) {
       } else if (reason instanceof ApiFailure && reason.detail?.code === 'workspace_mismatch') {
         await refresh()
         error.value = 'The workspace changed. The original command is held for its issuing workspace.'
-      } else if (reason instanceof ApiFailure && reason.detail &&
+      } else if (reason instanceof ApiFailure && reason.detail && (confirmsCapacityRejection(command,reason) ||
           ['invalid_quarantine','unknown_quarantine_receipt','quarantine_position_mismatch','quarantine_bin_conflict','quarantine_catalog_conflict',
             'quarantine_shortage_open','quarantine_quantity_unavailable','quarantine_capacity_unavailable','stock_loss_quarantine_unresolved','invalid_draft_backing_withdrawal','draft_backing_bin_conflict','draft_backing_position_mismatch','draft_backing_offer_mismatch',
             'draft_backing_authority_unverified','draft_backing_quantity_unavailable','invalid_recount', 'empty_recount_preview', 'recount_preview_used', 'unknown_recount_preview',
-            'invalid_location_label','invalid_location_archive','invalid_location_registry_command','duplicate_location_label','location_destination_archived',
+            'invalid_location_capacity','invalid_location_label','invalid_location_archive','invalid_location_registry_command','duplicate_location_label','location_destination_archived',
             'location_archive_stock_changed','location_already_archived','location_label_mismatch','invalid_reference', 'duplicate_reference', 'invalid_receiving', 'duplicate_receiving_reference',
             'revision_conflict', 'command_mismatch', 'catalog_ineligible', 'catalog_reconfirmation_required', 'bin_confirmation_mismatch',
             'quantity_unavailable', 'delivery_mismatch', 'backing_mismatch', 'invalid_transfer', 'transfer_source_mismatch',
@@ -346,14 +385,16 @@ export function useWorkbench(page: Ref<string>) {
             'shortage_closure_bin_conflict','shortage_closure_case_conflict','shortage_closure_observation_conflict',
             'shortage_closure_count_not_exact','shortage_closure_commitments_inconsistent','invalid_stock_loss_recovery','stock_loss_recovery_scope',
             'stock_loss_recovery_bin','stock_loss_recovery_catalog','stock_loss_recovery_amount','invalid_stock_part_out','part_out_scope','part_out_bin',
-            'part_out_catalog','part_out_amount','part_out_identity_gain','part_out_cost_mismatch'].includes(reason.detail.code)) {
+            'part_out_catalog','part_out_amount','part_out_identity_gain','part_out_cost_mismatch'].includes(reason.detail.code))) {
         forget(command)
         loadPending()
         if (reason.status === 409) await refresh()
-        error.value = explain(reason)
+        error.value = explain(reason,workspace.value?.locations)
       } else {
         // The gateway, transport or client may fail after commit. Keep the exact payload for replay.
-        error.value = 'Command confirmation is pending. ' + explain(reason)
+        const message=reason instanceof ApiFailure && reason.detail?.code==='location_capacity_exceeded'
+          ? 'The capacity response could not be verified for this command.' : explain(reason)
+        error.value = 'Command confirmation is pending. ' + message
         readState.value = 'disconnected'
       }
     } finally {

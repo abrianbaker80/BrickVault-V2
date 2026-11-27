@@ -51,7 +51,8 @@ function pageBy(key: 'sources' | 'history', cursor?: string | null) {
   requested.value = { ...confirmed.value, [key]: cursor ? [...stack, cursor] : stack.slice(0, -1) }
 }
 onMounted(() => dialog.value?.showModal())
-watch(() => [props.asOf, props.connected, props.workspaceReady, props.location.revision, requested.value, attempt.value] as const,
+watch([() => props.route.receipt ? undefined : props.asOf, () => props.connected, () => !!props.route.receipt || props.workspaceReady,
+  () => props.location.revision, () => requested.value, attempt],
   async ([, connected, available, , target], _, cleanup) => {
     let active = true
     cleanup(() => { active = false })
@@ -119,7 +120,7 @@ async function submit() {
     <div class="body">
       <p v-if="error || !connected" class="warning" role="status">{{ error || 'The workspace is offline.' }} {{ review || receipt ? 'Showing the last confirmed read.' : '' }}
         <button v-if="connected" :disabled="loading" @click="attempt++">Retry recovery read</button></p>
-      <p v-else-if="loading || !workspaceReady" role="status">Reading recovery evidence…</p>
+      <p v-else-if="loading || (!route.receipt && !workspaceReady)" role="status">Reading recovery evidence…</p>
       <p v-if="stale" class="warning" role="alert">The position, bin or reviewed identity changed. Review the current stock and enter your inspection again.
         <button :disabled="loading || !connected" @click="clear">Review updated stock</button></p>
       <template v-if="review && current">

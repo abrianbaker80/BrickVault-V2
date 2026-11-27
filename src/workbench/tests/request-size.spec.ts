@@ -39,14 +39,66 @@ test('an authenticated size rejection releases the draft and a lost earlier save
   await expect(pending).toContainText(name)
   await page.reload()
   await page.route('**/api/v1/locations', rejectPaddedBody, { times: 1 })
+  const referenceReads: string[] = []
+  page.on('request', req => {
+    const url = new URL(req.url())
+    if (req.method() === 'GET' && url.pathname.endsWith('/workspace')) referenceReads.push(url.search)
+  })
   await pending.getByRole('button', { name: 'Retry command' }).click()
   await expect(page.getByText('Confirmed the original ' + name + '.')).toBeVisible()
+  expect(referenceReads).toContain('')
+  expect(referenceReads).not.toContain('?audit=all')
   await expect(pending).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'New location' })).toBeEnabled()
   const { audit, locations } = await (await page.request.get('/api/v1/workspace')).json()
   expect(locations.filter((row: { name: string }) => row.name === name)).toHaveLength(1)
   expect(audit.filter((row: { commandId: string }) => row.commandId === JSON.parse(original).commandId)).toHaveLength(1)
 })
+
+for (const obsolete of ['confirmed', 'unauthenticated'] as const) {
+  test(`a superseded ${obsolete} lineage check cannot disconnect a subsequent view or settle its pending command`, async ({page}) => {
+    const f = await fixture(page)
+    const body = {commandId: crypto.randomUUID(), expectedRevision: 0, code: 'OLD-'+f.a.code, name: 'Earlier shelf '+f.a.code}
+    const prior = await page.request.post('/api/v1/locations',{headers:f.headers,data:body})
+    expect(prior.status()).toBe(200)
+    const command = {kind:'location',workspaceId:f.headers['X-Workspace-Id'],body}
+    await page.evaluate(c=>localStorage.setItem('brickvault.v2.pending.'+c.workspaceId+'.'+c.body.commandId,JSON.stringify(c)),command)
+    await page.reload()
+    const pending = page.getByRole('region',{name:'Pending confirmations'})
+    const retry = pending.getByRole('button',{name:'Retry command'})
+    await expect(retry).toBeEnabled()
+    let arrived!: () => void, release!: () => void, finished!: () => void
+    const checking = new Promise<void>(r=>{arrived=r}), resume = new Promise<void>(r=>{release=r})
+    const returned = new Promise<void>(r=>{finished=r})
+    let oversized=false, captured=false
+    await page.route('**/api/v1/locations',async route=>{oversized=true;await rejectPaddedBody(route)},{times:1})
+    await page.route('**/api/v1/session',async route=>{
+      if (!oversized || captured) {await route.continue();return}
+      captured=true
+      const reply = await route.fetch(obsolete==='unauthenticated' ? {headers:{...route.request().headers(),cookie:''}} : {})
+      try {
+        expect(reply.status()).toBe(obsolete==='unauthenticated'?401:200)
+        arrived();await resume;await route.fulfill({response:reply})
+      } finally {await reply.dispose();finished()}
+    })
+    await retry.click()
+    try {
+      await checking
+      const activity = page.waitForResponse(r=>new URL(r.url()).searchParams.get('audit')==='all')
+      await page.getByRole('link',{name:'Activity',exact:true}).click()
+      await activity
+      await expect(page.getByText('Connected',{exact:true})).toBeVisible()
+    } finally {release();if(captured)await returned}
+    await expect(retry).toBeEnabled()
+    await expect(pending).toContainText(body.commandId)
+    await expect(page.getByText('Connected',{exact:true})).toBeVisible()
+    await expect(page.getByText('Confirmed the original '+body.name+'.')).toHaveCount(0)
+    await retry.click()
+    await expect(pending).toHaveCount(0)
+    const reference = await (await page.request.get('/api/v1/workspace')).json()
+    expect(reference.audit.filter((row:{commandId:string})=>row.commandId===body.commandId)).toHaveLength(1)
+  })
+}
 
 test('a partial move commits 256 selected offer allocations in a single receipt', async ({ page }) => {
   test.setTimeout(120_000)

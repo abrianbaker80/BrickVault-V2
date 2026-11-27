@@ -118,5 +118,39 @@ public sealed class ContractTests
         Assert.Throws<Fault>(() => session.RequireWorkspace(headers));
     }
 
+    [Theory]
+    [InlineData(null, null, false)]
+    [InlineData("1", null, false)]
+    [InlineData("3", null, false)]
+    [InlineData("abc", null, false)]
+    [InlineData("2, 2", null, false)]
+    [InlineData("2", "2", false)]
+    [InlineData("2", null, true)]
+    public void CapacityRejectionsNegotiateTheStructuredWitness(string? first, string? second, bool current)
+    {
+        const string header = "X-BV-Location-Contract";
+        var headers = new HeaderDictionary();
+        if (first is not null) headers.Append(header, first);
+        if (second is not null) headers.Append(header, second);
+        var rejection = new LocationCapacityRejection(Guid.NewGuid(), 5, 4, 1, 2);
+        var correlation = Guid.NewGuid();
+        var fault = new Fault(409, "location_capacity_exceeded", "The bin has too little room.", rejection);
+        var response = LocationCapacities.FormatError(fault, correlation, headers);
+        var wire = JsonSerializer.SerializeToElement(response, Wire.Json);
+
+        Assert.Equal(correlation, wire.GetProperty("correlationId").GetGuid());
+        Assert.Equal(fault.Message, wire.GetProperty("message").GetString());
+        if (current)
+        {
+            Assert.Equal("location_capacity_exceeded", wire.GetProperty("code").GetString());
+            Assert.Equal(rejection, wire.GetProperty("capacity").Deserialize<LocationCapacityRejection>(Wire.Json));
+        }
+        else
+        {
+            Assert.Equal("quantity_unavailable", wire.GetProperty("code").GetString());
+            Assert.Equal(3, wire.EnumerateObject().Count());
+        }
+    }
+
     private static LocationCommand ReadLocation(string json) => JsonSerializer.Deserialize<LocationCommand>(json, Wire.Json)!;
 }

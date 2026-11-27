@@ -7,6 +7,8 @@ export type Session = Schema['Session']
 export type Workspace = Schema['Workspace']
 export type Catalog = Schema['CatalogRow']
 export type Location = Schema['LocationRow']
+export type CapacityPage = Schema['LocationCapacitySnapshot']
+export type CapacityReceipt = Schema['LocationCapacityEvidence']
 export type RegistryRow = Schema['LocationRegistryRow']
 export type RegistrySnapshot = Schema['LocationRegistrySnapshot']
 export type RegistryEvidence = Schema['LocationRegistryEvidence']
@@ -49,6 +51,7 @@ export type RecoveryCommand = Schema['StockLossRecoveryCommand']
 export type StockLoss = Schema['StockLossSnapshot']
 export type StockLossCommand = Schema['StockLossCommand']
 export type ReceivingCommand = { workspaceId: string } & (
+  | { kind: 'location-capacity'; body: Schema['LocationCapacityCommand'] }
   | { kind: 'location-label'; body: Schema['LocationLabelCommand'] }
   | { kind: 'location-archive'; body: Schema['LocationArchiveCommand'] }
   | { kind: 'quarantine'; body: Schema['StockQuarantineCommand'] }
@@ -71,11 +74,12 @@ export type Command = ReceivingCommand | { workspaceId: string } & (
   | { kind: 'catalog'; body: Schema['CatalogCommand'] }
   | { kind: 'location'; body: Schema['LocationCommand'] })
 export type Held = { workspaceId: string | null; commandId: string }
-export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | Schema['RecountReceipt'] | Schema['StockQuarantineReceipt'] | Schema['DraftBackingWithdrawalReceipt'] | Schema['StockShortageClosureReceipt'] | Schema['StockLossRecoveryReceipt'] | Schema['StockPartOutReceipt'] | Schema['LocationLabelReceipt'] | Schema['LocationArchiveReceipt'] | undefined>
+export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | Schema['RecountReceipt'] | Schema['StockQuarantineReceipt'] | Schema['DraftBackingWithdrawalReceipt'] | Schema['StockShortageClosureReceipt'] | Schema['StockLossRecoveryReceipt'] | Schema['StockPartOutReceipt'] | Schema['LocationLabelReceipt'] | Schema['LocationArchiveReceipt'] | Schema['LocationCapacityReceipt'] | undefined>
 
 export function commandLabel(command: Command) {
   switch (command.kind) {
     case 'catalog': case 'location': return command.body.name
+    case 'location-capacity': return 'Piece limit change for bin '+command.body.locationId
     case 'location-label': return 'Alternate label '+command.body.label
     case 'location-archive': return 'Archive bin '+command.body.confirmedLabel
     case 'quarantine': return 'Quarantine of ' + command.body.quantity + ' in ' + command.body.confirmedLocationCode
@@ -98,6 +102,7 @@ export function commandLabel(command: Command) {
 }
 
 const commands = {
+  'location-capacity': {path:'locations/capacities',valid:valid.LocationCapacityCommand},
   'location-label': {path:'locations/labels',valid:valid.LocationLabelCommand},
   'location-archive': {path:'locations/archives',valid:valid.LocationArchiveCommand},
   quarantine: { path: 'inventory/quarantines', valid: valid.StockQuarantineCommand },
@@ -207,14 +212,22 @@ function costConserved(original:number|null, restored:number|null, remaining:num
     restored!==null && remaining!==null && original===restored+remaining
 }
 const draftPath = (position: string) => 'inventory/positions/' + encodeURIComponent(position) + '/draft-backing'
+function verifyLimit(limit:number|null) {return limit===null || (Number.isSafeInteger(limit) && limit>0)}
+function verifyCapacityEvent(event:CapacityReceipt['event']) {
+  if (!verifyLimit(event.pieceLimit) || !verifyLimit(event.previousPieceLimit) || !Number.isSafeInteger(event.physicalQuantity) ||
+      !Number.isSafeInteger(event.positionCount) || event.positionCount>event.physicalQuantity) throw new ContractFailure()
+}
 function verifyRegistryRow(row:RegistryRow) {
+  const c=row.capacity
+  if (!c || !verifyLimit(c.pieceLimit) || c.remainingQuantity!==(c.pieceLimit===null ? null : Math.max(0,c.pieceLimit-row.physicalQuantity)) ||
+      c.overCapacityQuantity!==(c.pieceLimit===null ? 0 : Math.max(0,row.physicalQuantity-c.pieceLimit))) throw new ContractFailure()
   if (row.archived !== (row.archivedAt!==null) || row.archived !== (row.archiveEventId!==null) ||
       !Number.isSafeInteger(row.physicalQuantity) || !Number.isSafeInteger(row.positionCount) ||
       row.positionCount>row.physicalQuantity) throw new ContractFailure()
 }
 export const api = {
   async registryPage(after='') {
-    const params=new URLSearchParams({limit:'100'})
+    const params=new URLSearchParams({limit:'100',capacity:'true'})
     if (after) params.set('after',after)
     const page=await read('locations/registry?'+params,valid.LocationRegistryPage)
     page.rows.forEach(verifyRegistryRow)
@@ -222,13 +235,13 @@ export const api = {
     return page
   },
   async lookupLabel(label:string) {
-    const page=await read('locations/lookup?'+new URLSearchParams({label}),valid.LocationLabelLookup)
+    const page=await read('locations/lookup?'+new URLSearchParams({label,capacity:'true'}),valid.LocationLabelLookup)
     verifyRegistryRow(page.bin)
     if (!sameLabel(label,page.matchedLabel) || page.isCanonical!==sameLabel(page.matchedLabel,page.bin.location.code)) throw new ContractFailure()
     return page
   },
   async binRegistry(id:string,labelAfter='',eventAfter='') {
-    const params=new URLSearchParams({labelLimit:'25',eventLimit:'25'})
+    const params=new URLSearchParams({labelLimit:'25',eventLimit:'25',capacity:'true'})
     if (labelAfter) params.set('labelAfter',labelAfter)
     if (eventAfter) params.set('eventAfter',eventAfter)
     const page=await read('locations/'+encodeURIComponent(id)+'/registry?'+params,valid.LocationRegistrySnapshot)
@@ -239,6 +252,22 @@ export const api = {
   async registryReceipt(id:string,selector:{eventId:string}|{commandId:string}) {
     const page=await read('locations/'+encodeURIComponent(id)+'/registry/receipts?'+new URLSearchParams(selector),valid.LocationRegistryEvidence)
     if (page.locationId!==id || ('eventId' in selector ? page.event.id!==selector.eventId : page.event.commandId!==selector.commandId)) throw new ContractFailure()
+    return page
+  },
+  async capacity(id:string,after='') {
+    const params=new URLSearchParams({limit:'25'})
+    if(after)params.set('after',after)
+    const page=await read('locations/'+encodeURIComponent(id)+'/capacity?'+params,valid.LocationCapacitySnapshot)
+    verifyRegistryRow(page.bin)
+    page.events.forEach(verifyCapacityEvent)
+    if(page.bin.location.id!==id || (page.nextAfter && page.nextAfter!==page.events.at(-1)?.id) ||
+       new Set(page.events.map(e=>e.id)).size!==page.events.length)throw new ContractFailure()
+    return page
+  },
+  async capacityReceipt(id:string,selector:{commandId:string}|{eventId:string}) {
+    const page=await read('locations/'+encodeURIComponent(id)+'/capacity/receipts?'+new URLSearchParams(selector),valid.LocationCapacityEvidence)
+    verifyCapacityEvent(page.event)
+    if(page.locationId!==id || ('commandId' in selector ? page.event.commandId!==selector.commandId : page.event.id!==selector.eventId))throw new ContractFailure()
     return page
   },
   session: () => read('session', valid.Session),
@@ -539,10 +568,8 @@ export const api = {
   },
   diagnostic: (id: string) => read('diagnostics/' + encodeURIComponent(id), valid.Diagnostic),
   async save(command: Command, csrf: string) {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json', 'X-CSRF-Token': csrf, 'X-Workspace-Id': command.workspaceId
-    }
-    if (['location', 'putaway', 'transfer', 'part-out'].includes(command.kind)) headers['X-BV-Location-Contract'] = '1'
+    const headers:Record<string,string>={'Content-Type':'application/json','X-CSRF-Token':csrf,'X-Workspace-Id':command.workspaceId}
+    if(command.kind==='location' || command.kind==='putaway' || command.kind==='transfer' || command.kind==='part-out')headers['X-BV-Location-Contract']='2'
     const options = {
       method: 'POST', headers,
       body: JSON.stringify(command.body)
@@ -550,6 +577,7 @@ export const api = {
     const path = commands[command.kind].path
     const receipt = command.kind === 'catalog' || command.kind === 'location'
       ? await read(path, valid.Receipt, options)
+      : command.kind === 'location-capacity' ? await read(path,valid.LocationCapacityReceipt,options)
       : command.kind === 'location-label' ? await read(path,valid.LocationLabelReceipt,options)
       : command.kind === 'location-archive' ? await read(path,valid.LocationArchiveReceipt,options)
       : command.kind === 'hold' || command.kind === 'hold-release' ? await read(path, valid.StockHoldReceipt, options)
@@ -564,7 +592,7 @@ export const api = {
       : command.kind === 'transfer' ? await read(path, valid.TransferReceipt, options) : await read(path, valid.ReceivingReceipt, options)
     if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind ||
         ((command.kind === 'quarantine' || command.kind === 'quarantine-release') && receipt.revision !== command.body.expectedRevision + 1) ||
-        ((command.kind === 'location-label' || command.kind === 'location-archive' || command.kind === 'part-out' || command.kind === 'stock-loss-recovery' || command.kind === 'shortage-closure' || command.kind === 'offer-withdrawal') && receipt.revision !== command.body.expectedRevision + 1) ||
+        ((command.kind === 'location-capacity' || command.kind === 'location-label' || command.kind === 'location-archive' || command.kind === 'part-out' || command.kind === 'stock-loss-recovery' || command.kind === 'shortage-closure' || command.kind === 'offer-withdrawal') && receipt.revision !== command.body.expectedRevision + 1) ||
         (command.kind === 'recount' && (receipt.entityId !== command.body.previewId || receipt.revision !== 1))) throw new ContractFailure()
     return receipt
   }
@@ -609,8 +637,15 @@ export function requiresFreshCount(error: unknown) {
   return error instanceof ApiFailure && error.status === 409 && error.detail?.code === 'stock_recount_required'
 }
 
-export function explain(error: unknown) {
+export function explain(error: unknown, locations: Location[] = []) {
   if (error instanceof ApiFailure) {
+    const capacity=error.detail?.capacity
+    if(error.detail?.code==='location_capacity_exceeded' && capacity){
+      const bin=locations.find(l=>l.id===capacity.locationId)?.code || capacity.locationId
+      const room=capacity.remainingQuantity,requested=capacity.requestedNetQuantity
+      return 'Bin '+bin+' has room for '+room+(room===1?' more piece.':' more pieces.')+' This placement would add '+requested+
+        (requested===1?' piece to ':' pieces to ')+capacity.physicalQuantity+' present with a limit of '+capacity.pieceLimit+'. Reference '+error.detail.correlationId+'.'
+    }
     if (error.detail) return error.message + ' Reference ' + error.detail.correlationId + '.'
     if (error.status === 401) return 'Sign in to access the workspace.'
     if (error.status === 403) return 'Access was denied. Check your session and try again.'

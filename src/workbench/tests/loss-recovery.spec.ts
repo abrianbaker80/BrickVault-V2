@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test'
 import { test } from './trusted'
-import { audit, fixture, purchases } from './bin-fixture'
+import { audit, fixture, purchases, receiptBeforeDirectory } from './bin-fixture'
 import { closureLink, countPositionLink, countReceiptLink, lossCaseLink, lossReceiptLink, recoveryLink } from '../src/countLinks'
 import { money } from '../src/receiving'
 import type { RecoveryCommand, RecoveryEvidence } from '../src/api'
@@ -208,8 +208,8 @@ test('recovery preserves a later shortage and existing commitments; repeated los
   await expect(inspect(page)).toContainText('This position has an open shortage.')
   await source(page).getByLabel('Saleable quantity').fill('1')
   await confirm(page,x.f.a.code,'One more original piece inspected')
-  await record(page).press('Enter')
-  await expect(receipt(page)).toContainText('One more original piece inspected')
+  await receiptBeforeDirectory(page, 'receiving/stock-loss-recoveries', () => record(page).press('Enter'),
+    () => expect(receipt(page)).toContainText('One more original piece inspected'))
   const [purchase]=await purchases(page,[x.purchaseId])
   expect(purchase.balances).toMatchObject({physicalOnHand:4,reserved:1,backedQuantity:1})
   expect(purchase.deliveries[0]).toMatchObject({lostQuantity:0,allocatedLostItemCostMinor:0,recoveryTotals:{grossLostQuantity:4,recoveredQuantity:4,grossAllocatedItemCostMinor:'3',restoredItemCostMinor:'3'}})

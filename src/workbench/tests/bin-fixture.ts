@@ -77,6 +77,41 @@ export async function duringBackgroundRead(page: Page, path: (url: URL) => boole
   finally { release(); await completed }
 }
 
+// A committed stock command can open its scoped receipt while the reference directory is still being read.
+export async function receiptBeforeDirectory(page: Page, postPath: string, activate: () => Promise<void>, verify: () => Promise<void>) {
+  let submitted = false, captured = false, arrived!: () => void, release!: () => void, complete!: () => void
+  const delivered = new Promise<void>(resolve => { complete = resolve })
+  const directory = (url: URL) => url.pathname === '/api/v1/workspace'
+  const started = new Promise<void>(resolve => { arrived = resolve })
+  const resume = new Promise<void>(resolve => { release = resolve })
+  const issued = (request: import('@playwright/test').Request) => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/' + postPath) submitted = true
+  }
+  page.on('request', issued)
+  await page.route(directory, async route => {
+    if (!submitted || captured) { await route.continue(); return }
+    captured = true
+    const result = await route.fetch()
+    try { arrived(); await resume; await route.fulfill({ response: result }) }
+    finally { await result.dispose(); complete() }
+  })
+  try {
+    const response = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/v1/' + postPath)
+    await activate()
+    expect((await response).status()).toBe(200)
+    await started
+    await verify()
+    await expect(page.getByRole('table', { name: 'Storage locations', includeHidden: true })).toHaveCount(0)
+    await expect(page.locator('.read-bar button')).toBeDisabled()
+  } finally {
+    release()
+    if (captured) await delivered
+    page.off('request', issued)
+    await page.unroute(directory)
+  }
+  await expect(page.getByText('Connected', { exact: true })).toBeVisible()
+}
+
 export const stock = (page: Page) => page.getByRole('region', { name: 'Stock in this bin' })
 export const open = (page: Page, bin: { name: string }) => page.getByRole('button', { name: 'Inspect ' + bin.name }).click()
 export const endpoint = (bin: { id: string }) => '**/api/v1/receiving/bins/' + bin.id + '/movements?*'

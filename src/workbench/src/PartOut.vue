@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {capacityPreview,exceedsCapacity} from './binCapacity'
 import { useBinRegistry } from './useBinRegistry'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { api, ContractFailure, explain, type PartOutCommand, type PartOutReview, type TransferControls, type Workspace } from './api'
@@ -48,7 +49,16 @@ const repeatsInput=computed(()=>{
   const matching=outputs.value.filter(o=>o.catalog===inputCatalogId && integer(o.quantity))
   return matching.reduce((total,o)=>total+Number(o.quantity),0)>Number(input.value)
 })
-const validOutputs=computed(()=>!repeatsInput.value && outputs.value.length>0 && outputs.value.every(o=>(o.disposition==='retained' || catalog(o.catalog)?.integrationEligible) && o.revision===catalog(o.catalog)?.revision &&
+const destinationRoom=computed(()=>{
+  const totals=new Map<string,number>()
+  for(const o of outputs.value){if(o.bin)totals.set(o.bin,(totals.get(o.bin) || 0)+(integer(o.quantity)?Number(o.quantity):0))}
+  const source=page.value?.position.location.id
+  return Array.from(totals,([id,outputs])=>{
+    const consumed=id===source && selected.value ? Number(input.value) : 0
+    return {id,outputs,consumed,net:outputs-consumed,row:bins.rows.value.get(id)}
+  })
+})
+const validOutputs=computed(()=>!destinationRoom.value.some(d=>exceedsCapacity(d.row,d.net)) && !repeatsInput.value && outputs.value.length>0 && outputs.value.every(o=>(o.disposition==='retained' || catalog(o.catalog)?.integrationEligible) && o.revision===catalog(o.catalog)?.revision &&
   bins.isActive(o.bin) && bins.matches(location(o.bin),o.code) && integer(o.quantity) && !!o.disposition && (!known.value || (o.basis && outputCost(o)!==undefined))) &&
   outputs.value.reduce((n,o)=>n+Number(o.quantity),0)<=1_000_000)
 const validResiduals=computed(()=>residualMode.value==='none' || (residualMode.value==='record' && physical.value.length>0 &&
@@ -172,7 +182,10 @@ async function save() {
             <small v-else-if="selected">Input cost is unknown. This output retains unknown basis.</small>
             <button v-if="outputs.length>1" type="button" @click="outputs.splice(index,1)">Remove output {{ index+1 }}</button>
           </fieldset>
-          <p v-if="repeatsInput" class="warning" role="status">Outputs matching the input item exceed the number of input units consumed. Check their identities and quantities across all bins.</p>
+          <div v-if="destinationRoom.length && bins.confirmed.value" aria-label="Combined output capacity" role="region">
+          <p v-for="d in destinationRoom" :key="d.id" :class="exceedsCapacity(d.row,d.net)?'warning':'field-hint'">{{ capacityPreview(d.row,d.net) }} <template v-if="d.consumed">{{ d.outputs }} output {{ d.outputs===1?'piece':'pieces' }} and {{ d.consumed }} input {{ d.consumed===1?'piece':'pieces' }} consumed here · net {{ d.net }}.</template></p>
+        </div>
+        <p v-if="repeatsInput" class="warning" role="status">Outputs matching the input item exceed the number of input units consumed. Check their identities and quantities across all bins.</p>
           <button type="button" @click="outputs.push(makeOutput())">Add another output</button>
         </fieldset>
         <fieldset :disabled="!editable || !selected"><legend>Physical remainder or loss</legend>

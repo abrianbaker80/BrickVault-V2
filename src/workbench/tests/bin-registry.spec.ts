@@ -1,6 +1,6 @@
 import {expect,type Page} from '@playwright/test'
 import {test} from './trusted'
-import {audit,fixture,stock} from './bin-fixture'
+import {audit,fixture,stock,receiptBeforeDirectory} from './bin-fixture'
 import {registryLink} from '../src/binLabels'
 import {countPositionLink,partOutLink} from '../src/countLinks'
 
@@ -83,7 +83,8 @@ test('find a bin by either label, recover registration, archive reviewed occupan
   await page.getByLabel('Confirm physical bin code').fill(alias.toLowerCase())
   await page.getByLabel('Witnessed quantity').fill('6')
   await page.getByLabel('Reason for count').fill('Count after shelving change')
-  await count.click();await expect(page.getByText('Witnessed in '+alias,{exact:false})).toBeVisible()
+  await receiptBeforeDirectory(page, 'receiving/counts', () => count.click(),
+    () => expect(page.getByText('Witnessed in '+alias,{exact:false})).toBeVisible())
   await page.setViewportSize({width:1440,height:900})
   await page.goto('/#locations/'+f.a.id)
   const layer=stock(page).getByRole('listitem').filter({hasText:f.paid.purchase})
