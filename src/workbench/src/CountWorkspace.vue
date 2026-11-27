@@ -63,7 +63,7 @@ watch(() => props.asOf, asOf => {
   if (!props.receiptId || (!loading.value && (!snapshot.value?.complete || partial.value || error.value ||
       Date.parse(asOf) >= Date.parse(snapshot.value.asOf)))) readAt.value = asOf
 })
-watch([readAt, () => props.location.revision, () => props.connected, requested, attempt],
+watch([readAt, () => props.location.revision, () => props.connected, () => requested.value, attempt],
   async ([, revision, online, cursors], _, onCleanup) => {
     let active = true
     onCleanup(() => { active = false })

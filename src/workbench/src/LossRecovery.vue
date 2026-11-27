@@ -52,7 +52,7 @@ function pageBy(key: 'sources' | 'history', cursor?: string | null) {
 }
 onMounted(() => dialog.value?.showModal())
 watch([() => props.route.receipt ? undefined : props.asOf, () => props.connected, () => !!props.route.receipt || props.workspaceReady,
-  () => props.location.revision, requested, attempt],
+  () => props.location.revision, () => requested.value, attempt],
   async ([, connected, available, , target], _, cleanup) => {
     let active = true
     cleanup(() => { active = false })

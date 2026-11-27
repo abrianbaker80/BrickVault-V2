@@ -87,6 +87,31 @@ test('switching workspace after an accepted count cannot open its observation in
   expect((await original.json()).observations).toHaveLength(1)
 })
 
+test('a refreshed directory preserves the original in-flight exact count receipt for an unchanged bin', async ({page}) => {
+  const f=await fixture(page)
+  const reason='Six pieces counted before a directory refresh'
+  const observation=await f.write('receiving/counts',5,{purchaseId:f.paid.purchaseId,positionId:f.position,
+    locationId:f.a.id,confirmedLocationCode:f.a.code,countedQuantity:6,reason})
+  const exact=(url:URL)=>url.pathname==='/api/v1/receiving/bins/'+f.a.id+'/counts' && url.searchParams.get('observationId')===observation
+  let reads=0, arrived!:()=>void, release!:()=>void
+  const started=new Promise<void>(resolve=>{arrived=resolve}), resume=new Promise<void>(resolve=>{release=resolve})
+  await page.route(exact,async route=>{
+    if (++reads===1) {arrived();await resume}
+    await route.continue()
+  })
+  await page.goto('/'+countReceiptLink(f.a.id,observation))
+  await started
+  try {
+    const total=page.locator('.metrics > div').filter({hasText:'Locations'}).locator('strong')
+    const previous=Number(await total.textContent())
+    await f.write('locations',0,{code:'NEW-'+f.a.code,name:'Unrelated bin added during the exact receipt read'})
+    await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
+    await expect(total).toHaveText(String(previous+1))
+  } finally {release()}
+  await expect(countReceipt(page)).toContainText(reason)
+  expect(reads).toBe(1)
+})
+
 test('a witnessed zero opens a shortage and a later surplus remains separate from ledger and existing backing', async ({ page, context }, info) => {
   const f = await fixture(page)
   await page.setViewportSize({width:320, height:720})

@@ -18,7 +18,7 @@ export function usePositionPage<T extends { complete: boolean; nextAfter: string
   const heading = ref<HTMLElement>()
   const retry = ref<HTMLButtonElement>()
 
-  watch([() => props.asOf, () => props.state, requested, attempt],
+  watch([() => props.asOf, () => props.state, () => requested.value, attempt],
     async ([, state, cursors], _, onCleanup) => {
       let active = true
       onCleanup(() => { active = false })

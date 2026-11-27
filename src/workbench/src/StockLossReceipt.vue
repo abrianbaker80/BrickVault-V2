@@ -17,7 +17,7 @@ const heading = ref<HTMLElement>()
 const retry = ref(0)
 const loading = ref(false)
 const error = ref('')
-watch(()=>[props.connected,props.asOf,requested.value,quarantineRequested.value,retry.value] as const,async ([online,,cursors,qCursors],_,cleanup)=>{
+watch([()=>props.connected,()=>props.asOf,()=>requested.value,()=>quarantineRequested.value,retry],async ([online,,cursors,qCursors],_,cleanup)=>{
   let active=true
   cleanup(()=>{active=false})
   loading.value=online
