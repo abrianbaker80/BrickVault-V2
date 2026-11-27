@@ -116,4 +116,3 @@ def verify_restored_capacity(client, saved):
     assert client.call(PART_OUT, "POST", body, expected=(200, 201)) == receipt
     assert exact(client, body, receipt) == transform
     print("Restored bin policies, over-capacity and cleared-limit receipts, stock and netted part-out costs verified.", flush=True)
-
