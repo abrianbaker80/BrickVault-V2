@@ -31,6 +31,11 @@ internal sealed class References(NpgsqlDataSource db)
             };
             revision = (await write.ExecuteScalarAsync(token)) is int version ? version : throw Fault.Conflict();
         }
+        catch (PostgresException ex) when (request is LocationCommand &&
+            ex.ConstraintName is "duplicate_location_label" or "locations_code_key")
+        {
+            throw LocationRegistry.DuplicateLabel();
+        }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
         {
             throw new Fault(409, "duplicate_reference", "A reference already uses that identity or location code.");
@@ -107,7 +112,7 @@ internal sealed class References(NpgsqlDataSource db)
         var audit = await Rows(connection, tx, """
             SELECT c.command_id,c.entity_id,c.revision,c.kind,c.correlation_id,a.actor,a.occurred_at
             FROM brickvault.audit a JOIN brickvault.commands c USING (command_id)
-            WHERE c.kind NOT IN ('transfer','count','hold','hold-release','stock-loss','recount','quarantine','quarantine-release','offer-withdrawal','shortage-closure','stock-loss-recovery','part-out','part-out-output')
+            WHERE c.kind NOT IN ('transfer','count','hold','hold-release','stock-loss','recount','quarantine','quarantine-release','offer-withdrawal','shortage-closure','stock-loss-recovery','part-out','part-out-output','location-label','location-archive')
               AND ($1 OR c.kind IN ('catalog','location')) ORDER BY a.occurred_at DESC,c.command_id
             """, r => new AuditRow(r.GetGuid(0),r.GetGuid(1),r.GetInt32(2),r.GetString(3),r.GetGuid(4),
                 r.GetString(5),r.GetDateTime(6)), token, allAudit);

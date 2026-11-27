@@ -144,10 +144,11 @@ internal sealed class StockPartOuts(NpgsqlDataSource db)
             return receipt;
         }
         catch (PostgresException error) when (error.ConstraintName is "part_out_revision" or "part_out_scope" or "part_out_bin" or
-            "part_out_catalog" or "part_out_amount" or "part_out_identity_gain" or "part_out_cost_mismatch" or "stock_shortage_open")
+            "part_out_catalog" or "part_out_amount" or "part_out_identity_gain" or "part_out_cost_mismatch" or "stock_shortage_open" or "location_destination_archived")
         {
             throw error.ConstraintName switch
             {
+                "location_destination_archived" => LocationRegistry.ArchivedDestination(),
                 "part_out_revision"=>Fault.Conflict(),
                 "part_out_scope"=>new Fault(409,"part_out_scope","Choose a current source position from the specified purchase and bin."),
                 "part_out_bin"=>new Fault(409,"part_out_bin","Confirm the current registered code for the source and each output bin."),
