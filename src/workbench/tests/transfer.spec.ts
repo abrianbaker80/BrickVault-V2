@@ -314,6 +314,10 @@ for (const width of [1440, 320]) {
     const f = await fixture(page)
     await page.setViewportSize({width, height:900})
     await f.revise()
+    await f.write('locations/capacities', 1, {locationId:f.a.id, pieceLimit:6, reason:'Six pieces fit on the source shelf'})
+    await page.getByRole('button', {name:'Refresh', exact:true}).click()
+    const sourceRow = page.getByRole('row').filter({has:page.getByRole('button', {name:'Inspect ' + f.a.name, exact:true})})
+    await expect(sourceRow).toContainText('above limit')
     await open(page, f.a)
     const line = layers(page).filter({hasText:f.unknown.purchase})
     const form = await prepare(page, line, f.a.code, f.empty, 3, 'Store this counted stock')
@@ -352,6 +356,11 @@ for (const width of [1440, 320]) {
     } finally { refresh.release() }
     await totals(page, [6, 3, 3, 0])
     await expect(page.locator('#item-title')).toHaveText(f.a.name)
+    const metric = (name: string) => page.locator('.inspector').getByText(name, {exact:true}).locator('+ dd')
+    await expect(metric('Pieces present')).toHaveText('6')
+    await expect(metric('Piece limit')).toHaveText('6')
+    await expect(metric('Spaces remaining')).toHaveText('0')
+    await expect(metric('Pieces above limit')).toHaveText('0')
   })
 }
 

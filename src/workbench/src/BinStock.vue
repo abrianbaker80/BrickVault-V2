@@ -203,8 +203,8 @@ watch(binScope,
     <p v-if="transferError" class="warning" role="alert">{{ transferError }}</p>
     <template v-if="stock && !inspectingCount">
       <p class="bin-read">Read {{ time(stock.asOf) }}
-        <small class="stock-read-state" role="status"><span>{{ loading ? 'Refreshing bin stock…' :
-          error || !connected ? 'Last received' : stock.complete ? 'Complete read' : 'Partial read' }}</span></small>
+        <small class="stock-read-state"><span v-if="loading" role="status">Refreshing bin stock…</span>
+          <span v-else>{{ error || !connected ? 'Last received' : stock.complete ? 'Complete read' : 'Partial read' }}</span></small>
       </p>
       <p v-if="!stock.complete" class="warning" role="status">Partial bin read. Quantities cover the returned layers.</p>
       <p v-if="!stock.positions.length && stock.complete" class="bin-read">

@@ -4,7 +4,7 @@ import BinStock from './BinStock.vue'
 import BinLookup from './BinLookup.vue'
 import BinRegistry from './BinRegistry.vue'
 import BinCapacity from './BinCapacity.vue'
-import {capacityLink,capacityLabel} from './binCapacity'
+import {capacityLink} from './binCapacity'
 import {registryLink} from './binLabels'
 import {useBinRegistry} from './useBinRegistry'
 import StockQuarantine from './StockQuarantine.vue'
@@ -25,6 +25,8 @@ const host = ref<HTMLElement>()
 const detail = ref<HTMLElement>()
 const compact = ref(true)
 const inspectedId = ref<string | null>(null)
+const selectedRegistry = computed(() => inspectedId.value ? bins.rows.value.get(inspectedId.value) : undefined)
+const selectedCapacity = computed(() => selectedRegistry.value?.capacity)
 const current = computed(() => props.workspace[props.page].find(row => row.id === inspectedId.value))
 const inspected = computed<Catalog | Location | undefined>(previous =>
   current.value || (!props.workspace.complete && previous?.id === inspectedId.value ? previous : undefined))
@@ -167,9 +169,14 @@ onBeforeUnmount(() => {
         <dt>Catalog source</dt><dd>{{ inspected.source }}</dd><dt>Source license</dt><dd>{{ label(inspected.license) }}</dd>
         <dt>Catalog mapping</dt><dd>{{ label(inspected.mapping) }}</dd><dt>Integration</dt><dd>{{ inspected.integrationEligible ? 'Eligible' : 'Blocked' }}</dd>
       </template>
-      <template v-else><dt>Location code</dt><dd>{{ inspected.code }}</dd><dt>Registered labels</dt><dd><a :href="registryLink(inspected.id)">Bin labels and archive</a></dd><dt>Piece capacity</dt>
-        <dd>{{ capacityLabel(bins.rows.value.get(inspected.id)) }}
-          <small class="field freshness"><span>{{ registryFreshness(bins.rows.value.has(inspected.id)) }}</span></small>
+      <template v-else><dt>Location code</dt><dd>{{ inspected.code }}</dd><dt>Registered labels</dt><dd><a :href="registryLink(inspected.id)">Bin labels and archive</a></dd>
+        <dt>Bin status</dt><dd class="field state"><span>{{ !selectedRegistry ? 'Unknown' : selectedRegistry.archived ? 'Archived' : 'Active' }}</span></dd>
+        <dt>Pieces present</dt><dd class="field amount"><span>{{ selectedRegistry?.physicalQuantity ?? 'Unknown' }}</span></dd>
+        <dt>Piece limit</dt><dd class="field amount"><span>{{ !selectedCapacity ? 'Unknown' : selectedCapacity.pieceLimit ?? 'No limit' }}</span></dd>
+        <dt>Spaces remaining</dt><dd class="field amount"><span>{{ !selectedCapacity ? 'Unknown' : selectedCapacity.remainingQuantity ?? 'No limit' }}</span></dd>
+        <dt>Pieces above limit</dt><dd class="field amount"><span>{{ selectedCapacity?.overCapacityQuantity ?? 'Unknown' }}</span></dd>
+        <dt>Piece capacity</dt><dd>
+          <small class="field freshness"><span>{{ registryFreshness(!!selectedRegistry) }}</span></small>
           <a :href="capacityLink(inspected.id)">Manage piece limit</a>
         </dd></template>
       <dt>Record ID</dt><dd>{{ inspected.id }}</dd><dt>Revision</dt><dd>{{ inspected.revision }}</dd>
@@ -213,7 +220,7 @@ onBeforeUnmount(() => {
 .location-table small { display: block; color: var(--muted) }
 /* Capacity and archive reads update independently of bin selection. Reserve their
    responsive intrinsic space so a completed read cannot move a pointer target. */
-.field { display: grid; overflow-wrap: anywhere }
+.location-table .field, .inspector .field { display: grid; overflow-wrap: anywhere }
 .field::before, .field > span { grid-area: 1 / 1 }
 .field::before { visibility: hidden }
 .field.amount { font-variant-numeric: tabular-nums }
