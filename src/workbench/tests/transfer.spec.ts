@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, type Route } from '@playwright/test'
+import { expect, type APIResponse, type Locator, type Page, type Route } from '@playwright/test'
 import { test } from './trusted'
 import { audit, duringBackgroundRead, endpoint, fixture, open, purchases, stock, totals } from './bin-fixture'
 import type { BinTransferSnapshot } from '../src/api'
@@ -233,6 +233,54 @@ test('a late cancelled hold check cannot open or replace a different transfer an
   await expect(stock(page).getByRole('alert')).toContainText('Refresh this bin')
   await expect(form).toHaveCount(0)
   await expect(page.getByRole('region',{name:'Pending confirmations'})).toHaveCount(0)
+})
+
+test('a newer exact shortage blocks transfer immediately and its superseded witness cannot reopen a closed shortage', async ({ page }) => {
+  const f = await fixture(page)
+  await open(page, f.a)
+  const paid = layers(page).filter({ hasText: f.paid.purchase })
+  const start = paid.getByRole('button', { name: /Transfer stock/ })
+  const bin = { purchaseId: f.paid.purchaseId, locationId: f.a.id, positionId: f.position, confirmedLocationCode: f.a.code }
+  const holds = (u: URL) => u.pathname.endsWith('/positions/' + f.position + '/holds')
+  let scope = '', shortageId = ''
+  let retained: APIResponse | undefined
+  await page.route(holds, async route => {
+    if (retained) { await route.fulfill({ response: retained }); return }
+    // The bin was verified before activation. The separate operator records a shortage before the exact holds read.
+    await f.write('receiving/counts', 5, { ...bin, countedQuantity: 5, reason: 'One piece missing at inspection' })
+    scope = route.request().url()
+    retained = await route.fetch()
+    const witness = await retained.json()
+    expect(witness.purchaseRevision).toBe(6)
+    expect(witness.shortageId).toBeTruthy()
+    shortageId = witness.shortageId
+    await route.fulfill({ response: retained })
+  })
+  try {
+    await expect(start).toBeEnabled()
+    await start.press('Enter')
+    await expect(paid).toContainText('Open shortage')
+    await expect(start).toBeDisabled()
+    await expect(transfer(page)).toHaveCount(0)
+
+    const observed = await f.write('receiving/counts', 6, { ...bin, countedQuantity: 6, reason: 'All six pieces witnessed' })
+    await f.write('receiving/shortage-closures', 7, { ...bin, caseId: shortageId, expectedObservationId: observed, reason: 'Recount matches the ledger' })
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect(start).toBeEnabled()
+    await expect(paid).not.toContainText('Open shortage')
+    const oldReply = page.waitForResponse(r => r.url() === scope)
+    await start.press('Enter')
+    await oldReply
+    await expect(stock(page).getByRole('alert')).toContainText('Refresh this bin')
+    await expect(start).toBeEnabled()
+    await expect(paid).not.toContainText('Open shortage')
+    await expect(transfer(page)).toHaveCount(0)
+  } finally {
+    await page.unroute(holds)
+    await retained?.dispose()
+  }
+  await start.press('Enter')
+  await expect(transfer(page)).toContainText(f.paid.purchase)
 })
 
 test('moving an unknown-cost layer preserves its recorded identity and leaves history on an empty source', async ({ page }) => {

@@ -83,6 +83,14 @@ watchEffect(() => {
   if (props.workspaceLoading || loading.value || readingShortages.value) return
   const layer = position.layer
   const current = stock.value?.positions.find(row => row.layer.placementId === layer.placementId)
+  // A newer scoped shortage blocks movement immediately, even when the bin read predates the count.
+  if (ready.value && current && holds?.complete && holds.shortageId &&
+      holds.purchaseId === layer.purchaseId && current.layer.purchaseId === layer.purchaseId &&
+      holds.purchaseRevision >= position.purchaseRevision && holds.purchaseRevision >= current.purchaseRevision) {
+    fenced.value.add(layer.placementId)
+    opening.value = undefined
+    return
+  }
   if (!ready.value || !current || stock.value?.location.revision !== bin.revision || stock.value.location.code !== bin.code || !sameSource(position, current)) {
     transferError.value = changedSource
     opening.value = undefined
@@ -101,7 +109,6 @@ watchEffect(() => {
     transferError.value = changedSource
     return
   }
-  if (holds.shortageId) { fenced.value.add(layer.placementId); return }
   selectedReserved.value = holds.reservedQuantity
   selected.value = current
 }, {flush: 'post'})
