@@ -276,7 +276,14 @@ class Instance:
             ).returncode
             == 0
         ):
-            execute([cmd, "stop", "-D", self.cluster, "-m", "fast", "-w"])
+            if WIN:
+                execute([
+                    "pwsh", "-NoProfile", "-NonInteractive", "-File",
+                    Path(__file__).with_name("Stop-Postgres.ps1"),
+                    "-PgCtl", cmd, "-Cluster", self.cluster, "-LogFile", self.path / "postgres.log",
+                ])
+            else:
+                execute([cmd, "stop", "-D", self.cluster, "-m", "fast", "-w"])
 
     def create_db(self, name):
         name = label(name)
