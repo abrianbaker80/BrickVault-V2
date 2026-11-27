@@ -32,18 +32,23 @@ async function lookup(id: string) {
 const names = computed(() => new Map([...props.workspace.locations, ...props.workspace.catalog].map(row => [row.id, row.name])))
 const recordName = (id: string) => names.value.get(id) || id
 const pageSize = 25
-const anchors = ref<string[]>([])
+const windowStart = ref<{commandId: string; length: number}>()
 const auditTitle = ref<HTMLElement>()
 const start = computed(() => {
-  const anchor = anchors.value.at(-1)
-  return anchor ? props.workspace.audit.findIndex(row => row.commandId === anchor) : 0
+  const anchor = windowStart.value
+  return anchor ? props.workspace.audit.findIndex(row => row.commandId === anchor.commandId) : 0
 })
-const visibleRows = computed(() => start.value < 0 ? [] : props.workspace.audit.slice(start.value, start.value + pageSize))
-const nextAnchor = computed(() => start.value < 0 ? undefined : props.workspace.audit[start.value + pageSize]?.commandId)
+const end = computed(() => start.value + (windowStart.value?.length ?? pageSize))
+const visibleRows = computed(() => start.value < 0 ? [] : props.workspace.audit.slice(start.value, end.value))
+const hasOlder = computed(() => start.value >= 0 && end.value < props.workspace.audit.length)
 async function goToPage(direction: 'older' | 'newer' | 'newest') {
-  if (direction === 'older' && nextAnchor.value) anchors.value.push(nextAnchor.value)
-  if (direction === 'newer') anchors.value.pop()
-  if (direction === 'newest') anchors.value = []
+  if (direction === 'newest') windowStart.value = undefined
+  else {
+    const next = direction === 'older' ? end.value : Math.max(0, start.value - pageSize)
+    const anchor = props.workspace.audit[next]
+    if (!anchor || next === start.value) return
+    windowStart.value = {commandId: anchor.commandId, length: direction === 'older' ? pageSize : start.value - next}
+  }
   await nextTick()
   auditTitle.value?.focus()
 }
@@ -62,10 +67,10 @@ async function goToPage(direction: 'older' | 'newer' | 'newest') {
       <div v-else-if="start < 0" class="empty"><p>This history page is unavailable in the current read.</p>
         <button @click="goToPage('newest')">Back to newest commands</button></div>
       <div v-else class="empty"><strong>{{ connected ? 'No audit events' : 'Audit history unavailable' }}</strong><p v-if="connected">Saved changes appear here.</p></div>
-      <nav v-if="visibleRows.length && (anchors.length || nextAnchor)" class="history-pages" aria-label="Audit history pages">
+      <nav v-if="visibleRows.length && (start > 0 || hasOlder)" class="history-pages" aria-label="Audit history pages">
         <span>{{ start + 1 }}–{{ start + visibleRows.length }} of {{ workspace.audit.length }}</span>
-        <button :disabled="!anchors.length || !connected" @click="goToPage('newer')">Newer commands</button>
-        <button :disabled="!nextAnchor || !connected" @click="goToPage('older')">Older commands</button>
+        <button :disabled="start <= 0 || !connected" @click="goToPage('newer')">Newer commands</button>
+        <button :disabled="!hasOlder || !connected" @click="goToPage('older')">Older commands</button>
       </nav>
     </section>
     <div class="side-panels">

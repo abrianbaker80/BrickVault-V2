@@ -197,8 +197,8 @@ test('320px register and dialogs support keyboard navigation and accessible cont
     const response = await auditRead
     expect(response.status()).toBe(200)
     const snapshot: Workspace = await response.json()
-    const history = page.getByRole('region', {name: 'Audit history', exact: true})
-    await expect(history.getByText(snapshot.audit.length+' events', {exact: true})).toBeVisible()
+    await expect(page.locator('#audit-title + .count')).toHaveText(snapshot.audit.length+' events')
+    await expect(page.getByRole('listitem')).toHaveCount(Math.min(snapshot.audit.length,25))
     await connected(page)
     await noOverflow(page)
     await accessibility(page)
@@ -235,17 +235,39 @@ test('Activity history pages retain their command after a newer write and open t
   await expect(diagnostic.getByText('Command ID',{exact:true}).locator('+ dd')).toHaveText(first)
   const top=history.getByRole('listitem').first().getByRole('button')
   const originalLabel=await top.getAttribute('aria-label')
+  async function refreshInBackground(){
+    const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/workspace?audit=all'))
+    await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
+    await refreshed
+  }
   await save(29)
-  const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/workspace?audit=all'))
-  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
-  await refreshed
+  await refreshInBackground()
   await expect(inspect(29)).toBeFocused()
   await expect(top).toHaveAttribute('aria-label',originalLabel!.replace(code+' revision 28',code+' revision 29'))
   await expect(diagnostic.getByText('Command ID',{exact:true}).locator('+ dd')).toHaveText(first)
-  await nav.getByRole('button',{name:'Newer commands'}).press('Enter')
-  await expect(history.getByRole('heading')).toBeFocused()
-  await expect(history.getByRole('listitem').first()).toContainText('revision 29')
+  async function turn(direction:'Older'|'Newer'){
+    await nav.getByRole('button',{name:direction+' commands'}).press('Enter')
+    await expect(history.getByRole('heading')).toBeFocused()
+  }
+  async function expectRange(latest:number,high:number,low:number){
+    const buttons=page.locator('.audit > li > button')
+    await expect(buttons).toHaveCount(high-low+1)
+    const labels=await buttons.evaluateAll(nodes=>nodes.map(node=>node.getAttribute('aria-label')))
+    expect(labels).toEqual(Array.from({length:high-low+1},(_,index)=>'Inspect command for '+code+' revision '+latest+' revision '+(high-index)))
+  }
+  await turn('Newer');await expectRange(29,28,4)
+  await turn('Older');await expect(top).toHaveAttribute('aria-label','Inspect command for '+code+' revision 29 revision 3')
+  for(let revision=30;revision<=55;revision++)await save(revision)
+  await refreshInBackground()
+  await expect(top).toHaveAttribute('aria-label','Inspect command for '+code+' revision 55 revision 3')
+  await turn('Newer');await expectRange(55,28,4)
+  await turn('Newer');await expectRange(55,53,29)
+  await turn('Newer');await expectRange(55,55,54)
   await expect(nav.getByRole('button',{name:'Newer commands'})).toBeDisabled()
+  await turn('Older');await expectRange(55,53,29)
+  await turn('Older');await expectRange(55,28,4)
+  await turn('Older');await expect(inspect(55)).toBeVisible()
+  await expect(diagnostic.getByText('Command ID',{exact:true}).locator('+ dd')).toHaveText(first)
   await noOverflow(page)
 })
 
