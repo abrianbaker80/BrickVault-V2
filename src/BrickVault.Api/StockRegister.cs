@@ -25,7 +25,12 @@ internal sealed class StockRegister(NpgsqlDataSource db)
               AND ($1='' OR p.id=$2 OR p.delivery_id=$2 OR p.purchase_id=$2 OR p.catalog_id=$2
                    OR strpos(lower(c.item_number),lower($1))>0
                    OR strpos(lower(c.name),lower($1))>0 OR strpos(lower(c.item_type),lower($1))>0
-                   OR strpos(lower(loc.code),lower($1))>0 OR strpos(lower(buy.reference),lower($1))>0
+                   OR strpos(lower(loc.code),lower($1))>0
+                   OR (p.quantity>0 AND loc.id=(
+                       SELECT location_id FROM brickvault.location_labels
+                       -- Fold the term as registered, then compare using the indexed collation of label_key.
+                       WHERE label_key=upper($1 COLLATE "C") COLLATE "default"))
+                   OR strpos(lower(buy.reference),lower($1))>0
                    OR strpos(lower(d.reference),lower($1))>0 OR exact_hold.id IS NOT NULL
                    OR EXISTS (SELECT 1 FROM brickvault.current_build_holds h
                               WHERE h.position_id=p.id AND h.remaining_quantity>0

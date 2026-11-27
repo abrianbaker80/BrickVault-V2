@@ -59,3 +59,45 @@ for (const width of [1440, 320]) {
     await expect(stock(page).getByRole('listitem').filter({ hasText: f.unknown.purchase })).toContainText('Placed at catalog revision 1.')
   })
 }
+
+test('four short directory rows keep the selected bin under a pressed pointer across a refresh at 320px', async ({ page }) => {
+  await page.setViewportSize({ width:320, height:800 })
+  const f = await fixture(page)
+  const group = Number.parseInt(f.a.code.slice(2), 16).toString(36).toUpperCase()
+  const ids: string[] = []
+  for (let i = 0; i < 4; i++) {
+    const id = await f.write('locations', 0, {code:group + '-' + i, name:'Shelf ' + i})
+    await f.write('locations/capacities', 1, {locationId:id, pieceLimit:2, reason:'Two pieces fit in this bin'})
+    ids.push(id)
+  }
+  await page.getByRole('button', {name:'Refresh', exact:true}).click()
+  await page.getByRole('searchbox', {name:'Search locations'}).fill(group + '-')
+  const rows = page.getByRole('table', {name:'Storage locations'}).locator('tbody tr')
+  await expect(rows).toHaveCount(4)
+  const row = rows.nth(3), target = row.getByRole('button')
+  await expect(row).toContainText('Current')
+  const id = await target.getAttribute('data-record-id')
+  expect(ids).toContain(id)
+  const name = await target.innerText()
+  const gate = holdLastPage()
+  await page.route(u => u.pathname.endsWith('/locations/registry'), async route => {
+    const response = await route.fetch()
+    try { await gate.inspect(route, response) } finally { await response.dispose() }
+  })
+  await target.hover()
+  const bounds = (await target.boundingBox())!
+  const point = {x:bounds.x + bounds.width / 2, y:bounds.y + bounds.height / 2}
+  const hit = () => target.evaluate((e, p) => e.contains(document.elementFromPoint(p.x, p.y)), point)
+  expect(await hit()).toBe(true)
+  await page.mouse.down()
+  try {
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+    await gate.pending
+    await expect(row).toContainText('Last confirmed')
+    expect(await hit()).toBe(true)
+    gate.release()
+    await expect(row).toContainText('Current')
+    expect(await hit()).toBe(true)
+  } finally { gate.release(); await page.mouse.up() }
+  await expect(page.getByRole('dialog', {name, exact:true})).toContainText(id!)
+})

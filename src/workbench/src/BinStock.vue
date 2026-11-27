@@ -194,7 +194,7 @@ watch(binScope,
     <p v-if="error || !connected" class="warning" role="status">
       {{ error || 'The workspace is disconnected.' }} {{ stock ? 'Showing the last bin read.' : 'Bin stock is unavailable.' }}
     </p>
-    <p v-else-if="loading" role="status">{{ stock ? 'Refreshing bin stock…' : 'Reading bin stock…' }}</p>
+    <p v-else-if="loading && !stock" role="status">Reading bin stock…</p>
     <p v-if="connected && (shortageRead === 'partial' || shortageRead === 'failed')" class="warning" role="status">
       {{ shortageRead === 'partial' ? 'Partial shortage read.' : 'Open shortages could not be verified.' }} Transfers require a complete shortage read.
       <button type="button" @click="retryShortages++">Retry shortage read</button>
@@ -202,7 +202,10 @@ watch(binScope,
     <p v-if="checking" role="status">Verifying the transfer source… <button type="button" @click="opening = undefined">Cancel transfer preparation</button></p>
     <p v-if="transferError" class="warning" role="alert">{{ transferError }}</p>
     <template v-if="stock && !inspectingCount">
-      <p class="bin-read">Read {{ time(stock.asOf) }}</p>
+      <p class="bin-read">Read {{ time(stock.asOf) }}
+        <small class="stock-read-state"><span v-if="loading" role="status">Refreshing bin stock…</span>
+          <span v-else>{{ error || !connected ? 'Last received' : stock.complete ? 'Complete read' : 'Partial read' }}</span></small>
+      </p>
       <p v-if="!stock.complete" class="warning" role="status">Partial bin read. Quantities cover the returned layers.</p>
       <p v-if="!stock.positions.length && stock.complete" class="bin-read">
         {{ error || !connected || loading ? 'The last complete read contained no stock.' : 'No stock recorded in this bin.' }}
@@ -274,6 +277,9 @@ watch(binScope,
 .bin-stock .panel-head { border-top: 1px solid var(--line); padding-bottom: 0 }
 .bin-stock h3 { margin: 0; font-size: 16px }
 .bin-read, .bin-stock > [role="status"] { margin: 10px 16px; font-size: 13px }
+.stock-read-state { display: grid; overflow-wrap: anywhere }
+.stock-read-state::before, .stock-read-state > span { grid-area: 1 / 1 }
+.stock-read-state::before { content: 'Refreshing bin stock…'; visibility: hidden }
 .bin-read { color: var(--muted) }
 .bin-stock .receipt-line-head { flex-wrap: wrap }
 .move-stock, details { margin-top: 8px }

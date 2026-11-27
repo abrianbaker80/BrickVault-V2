@@ -2,6 +2,10 @@
 
 ## M3 receiving
 
+- The movement history keeps its source and destination buttons in place while Workbench refreshes the bin read and capacity status.
+
+- Inventory now finds stock by a bin’s full alternate or former label, including stock on archived shelves. A recount of all matches uses the same search and filters. [Inventory label search](https://github.com/abrianbaker80/BrickVault-V2/issues/48)
+
 - Added optional piece limits for storage bins. Locations shows the room remaining and records policy changes. Putaway, transfers and part-outs check the destination again when stock is committed. [Bin piece limits](https://github.com/abrianbaker80/BrickVault-V2/issues/45)
 
 - Added alternate labels and archiving in Locations. Operators can look up a bin by its old or alternate label, count the stock on an archived shelf and transfer it out. Receiving, transfers and manual part-out require an active destination. [Bin labels and archiving](https://github.com/abrianbaker80/BrickVault-V2/issues/43)

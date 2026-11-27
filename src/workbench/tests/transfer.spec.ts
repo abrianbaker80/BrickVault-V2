@@ -283,6 +283,87 @@ test('a newer exact shortage blocks transfer immediately and its superseded witn
   await expect(transfer(page)).toContainText(f.paid.purchase)
 })
 
+async function holdNextRead(page: Page, matches: (url: URL) => boolean) {
+  let arrived!: () => void, release!: () => void
+  const started = new Promise<void>(resolve => { arrived = resolve })
+  const resume = new Promise<void>(resolve => { release = resolve })
+  await page.route(matches, async route => {
+    const response = await route.fetch()
+    try { arrived(); await resume; await route.fulfill({ response }) }
+    finally { await response.dispose() }
+  }, { times: 1 })
+  return { started, release }
+}
+
+async function pressAcrossRead(page: Page, button: Locator, finishRead: () => Promise<void>) {
+  await button.scrollIntoViewIfNeeded()
+  const bounds = (await button.boundingBox())!
+  const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+  const hitsButton = () => button.evaluate((element, {x, y}) => element.contains(document.elementFromPoint(x, y)), point)
+  expect(await hitsButton()).toBe(true)
+  await page.mouse.move(point.x, point.y)
+  await page.mouse.down()
+  try {
+    await finishRead()
+    expect(await hitsButton()).toBe(true)
+  } finally { await page.mouse.up() }
+}
+
+for (const width of [1440, 320]) {
+  test('movement history keeps the selected bin under the pointer while reads complete at ' + width + 'px', async ({ page }) => {
+    const f = await fixture(page)
+    await page.setViewportSize({width, height:900})
+    await f.revise()
+    await f.write('locations/capacities', 1, {locationId:f.a.id, pieceLimit:6, reason:'Six pieces fit on the source shelf'})
+    await page.getByRole('button', {name:'Refresh', exact:true}).click()
+    const sourceRow = page.getByRole('row').filter({has:page.getByRole('button', {name:'Inspect ' + f.a.name, exact:true})})
+    await expect(sourceRow).toContainText('above limit')
+    await open(page, f.a)
+    const line = layers(page).filter({hasText:f.unknown.purchase})
+    const form = await prepare(page, line, f.a.code, f.empty, 3, 'Store this counted stock')
+    let submitted = false
+    page.on('request', r => {
+      if (r.method() === 'POST' && new URL(r.url()).pathname.endsWith('/receiving/transfers')) submitted = true
+    })
+    const reread = await holdNextRead(page, u => submitted && u.pathname === '/api/v1/locations/registry')
+    const cap = page.locator('.inspector dt').filter({hasText:'Piece capacity'}).locator('+ dd')
+    const movement = movements(page).filter({hasText:'Store this counted stock'})
+    try {
+      await form.getByRole('button', {name:'Confirm transfer'}).click()
+      await reread.started
+      await expect(form).toHaveCount(0)
+      await expect(stock(page).getByRole('heading', {name:'Stock in this bin'})).toBeFocused()
+      await expect(cap).toContainText('Last confirmed')
+      const destination = movement.getByRole('button', {name:'Inspect destination bin'})
+      await pressAcrossRead(page, destination, async () => {
+        reread.release()
+        await expect(cap).not.toContainText('Last confirmed')
+      })
+    } finally { reread.release() }
+    await totals(page, [3, 0, 3, 0])
+    await expect(page.locator('#item-title')).toHaveText(f.empty.name)
+
+    const refresh = await holdNextRead(page, u => u.pathname === '/api/v1/receiving/bins/' + f.empty.id + '/movements')
+    try {
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      await refresh.started
+      const status = stock(page).getByText('Refreshing bin stock…')
+      await expect(status).toBeVisible()
+      await pressAcrossRead(page, movement.getByRole('button', {name:'Inspect source bin'}), async () => {
+        refresh.release()
+        await expect(status).toHaveCount(0)
+      })
+    } finally { refresh.release() }
+    await totals(page, [6, 3, 3, 0])
+    await expect(page.locator('#item-title')).toHaveText(f.a.name)
+    const metric = (name: string) => page.locator('.inspector').getByText(name, {exact:true}).locator('+ dd')
+    await expect(metric('Pieces present')).toHaveText('6')
+    await expect(metric('Piece limit')).toHaveText('6')
+    await expect(metric('Spaces remaining')).toHaveText('0')
+    await expect(metric('Pieces above limit')).toHaveText('0')
+  })
+}
+
 test('moving an unknown-cost layer preserves its recorded identity and leaves history on an empty source', async ({ page }) => {
   const f = await fixture(page)
   await f.revise()

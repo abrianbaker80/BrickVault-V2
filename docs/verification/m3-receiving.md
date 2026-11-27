@@ -21,7 +21,7 @@ Check the source and destination after saving. Transfers appear in both bins’ 
 
 ## Locate a stock position
 
-Open **Inventory** and search for an item number, catalog name, purchase or delivery reference, bin code, build-hold ID or active project name. Filter by item type or bin. The matching position count and total units cover the whole result, including subsequent pages. Each row represents one physical position from a specific delivery. Open the row to inspect its current catalog identity, recorded revision, quantity, offer backing, bin and movement history.
+Open **Inventory** and search for an item number, catalog name, purchase or delivery reference, bin code, build-hold ID or active project name. Enter a complete registered alternate or former label to find stock still in that bin, including after archive. Text search also matches other stock details. Choose the bin filter to limit results to one shelf, and use the item type filter to narrow them further. **All matching positions** in a recount uses the same filters across every page. The matching position count and total units cover the whole result, including subsequent pages. Each row represents one physical position from a specific delivery. Open the row to inspect its current catalog identity, recorded revision, quantity, offer backing, bin and movement history.
 
 A receipt cost applies to the entire delivery in its recorded currency. Two positions can show the same receipt cost when that delivery was split. An explicit zero and an unknown cost have different meanings. A bookmarked position remains addressable by ID after every unit moves out of its bin. [Inventory register qualification](https://github.com/abrianbaker80/BrickVault-V2/issues/19)
 

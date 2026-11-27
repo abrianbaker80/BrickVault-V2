@@ -2,7 +2,7 @@ import { expect, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { test } from './trusted'
 import { audit, fixture } from './bin-fixture'
-import type { BinTransferSnapshot, PositionMovementPage, StockPage } from '../src/api'
+import type { BinTransferSnapshot, PositionMovementPage, RecountPreviewPage, StockPage } from '../src/api'
 
 type Seed = Awaited<ReturnType<typeof fixture>>
 const register = (page: Page) => page.getByRole('region', { name: 'Stock register' })
@@ -35,6 +35,92 @@ async function moreType(f: Seed, itemNumber: string) {
     await f.write('receiving/putaway', i+2, { purchaseId, deliveryId, catalogId, quantity: 1,
       locationId: f.empty.id, confirmedLocationCode: f.empty.code })
 }
+
+test('registered shelf labels find occupied stock and freeze the same recount scope', async ({ page }) => {
+  const f = await fixture(page)
+  const shelf = f.empty
+  const suffix = f.a.code.slice(2)
+  const label = 'Tray.' + suffix + '-Back'
+  const itemNumberLabel = 'Bin-' + suffix
+  const currentCode = 'RACK-' + suffix + '-END'
+  const { unknown } = await positions(page, f)
+  await moreType(f, 'CASE-' + suffix)
+  // This part matches both its item number and the registered label. The 26 sets match only the label.
+  const matchingPart = await f.write('receiving/putaway', 3, { purchaseId: f.unknown.purchaseId,
+    deliveryId: unknown.deliveryId, catalogId: f.catalogId, locationId: shelf.id, confirmedLocationCode: shelf.code, quantity: 1 })
+  const previews = '/api/v1/inventory/recounts/previews'
+  const original = { previewId: randomUUID(), scope: 'matching', q: label, itemType: null, locationId: null, positionIds: [] }
+  const freezeOriginal = async () => {
+    const response = await page.request.post(previews, { headers: f.headers, data: original })
+    expect(response.status()).toBe(200)
+    return (await response.json() as RecountPreviewPage).total
+  }
+  expect(await freezeOriginal()).toBe(0)
+  await f.write('locations/labels', 1, { locationId: shelf.id, label })
+  await f.write('locations/labels', 2, { locationId: shelf.id, label: itemNumberLabel })
+  await f.write('locations', 3, { id: shelf.id, code: currentCode, name: shelf.name })
+  await f.write('locations/archives', 4, { locationId: shelf.id, confirmedLabel: label, reason: 'Retire this fictional shelf',
+    expectedPhysicalQuantity: 27, expectedPositionCount: 27 })
+  expect(await freezeOriginal()).toBe(0)
+
+  await page.getByRole('link', { name: 'Inventory' }).click()
+  await search(page, label.toLowerCase())
+  await totals(page, 27, 27)
+  await search(page, label.slice(0, -2))
+  await totals(page, 0, 0)
+  await search(page, shelf.code.toLowerCase())
+  await totals(page, 27, 27)
+  await search(page, currentCode.slice(0, -3))
+  await totals(page, 27, 27)
+  await search(page, f.position)
+  await register(page).getByRole('checkbox', { name: 'Select position ' + f.position + ' for recount' }).check()
+  await search(page, itemNumberLabel.toLowerCase())
+  await totals(page, 30, 38)
+  const bin = register(page).getByRole('combobox', { name: 'Bin', exact: true })
+  const type = register(page).getByRole('combobox', { name: 'Item type', exact: true })
+  await bin.selectOption(f.a.id)
+  await totals(page, 2, 9)
+  await type.selectOption('set')
+  await totals(page, 0, 0)
+  await bin.selectOption(shelf.id)
+  await totals(page, 26, 26)
+  await type.selectOption({ label: 'All types' })
+  await totals(page, 27, 27)
+  const rows = register(page).locator('[data-position]')
+  const visibleIds = () => rows.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-position')!))
+  const firstPage = await visibleIds()
+  expect(firstPage).toHaveLength(25)
+  await register(page).getByRole('button', { name: 'Next' }).click()
+  await expect(rows).toHaveCount(2)
+  const shown = [...firstPage, ...await visibleIds()]
+  expect(new Set(shown).size).toBe(27)
+  expect(shown).toContain(matchingPart)
+
+  await register(page).getByRole('button', { name: 'Preview recount' }).press('Enter')
+  const review = page.getByRole('dialog', { name: 'Preview recount' })
+  await expect(review.getByRole('listitem')).toHaveCount(1)
+  await expect(review.getByRole('listitem')).toContainText(f.position)
+  const response = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === previews)
+  await review.getByRole('combobox', { name: 'Action scope' }).selectOption('matching')
+  const frozen: RecountPreviewPage = await (await response).json()
+  expect(frozen.total).toBe(27)
+  const older = page.waitForResponse(r => new URL(r.url()).pathname === previews + '/' + frozen.previewId)
+  await review.getByRole('button', { name: 'Next targets' }).press('Enter')
+  const last: RecountPreviewPage = await (await older).json()
+  expect(last.nextAfter).toBeNull()
+  expect([...frozen.rows, ...last.rows].map(target => target.positionId)).toEqual(shown)
+  await f.write('receiving/transfers', 4, { purchaseId: f.unknown.purchaseId, sourcePlacementId: matchingPart,
+    sourceLocationId: shelf.id, confirmedSourceLocationCode: label, destinationLocationId: f.b.id,
+    confirmedDestinationLocationCode: f.b.code, quantity: 1, reason: 'Move the final piece after freezing the shelf', backing: [] })
+  await review.getByRole('button', { name: 'Queue recount' }).press('Enter')
+  const receipt = page.getByRole('region', { name: 'Recount receipt', exact: true })
+  await expect(receipt).toContainText('27 reviewed · 26 queued')
+  await expect(receipt).toContainText('1 unavailable')
+  const active = await page.request.get('/api/v1/inventory/positions', { params: { q: label } })
+  expect((await active.json() as StockPage).matchingPositions).toBe(26)
+  const depleted = await page.request.get('/api/v1/inventory/positions', { params: { positionId: matchingPart } })
+  expect((await depleted.json() as StockPage).rows[0].layer.quantity).toBe(0)
+})
 
 test('Inventory searches across types and bins, pages by position, and retains selected provenance and history', async ({ page }, info) => {
   const f = await fixture(page)

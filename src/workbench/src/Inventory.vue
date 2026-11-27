@@ -182,7 +182,7 @@ onBeforeUnmount(() => {
       <form class="inventory-filters" aria-label="Inventory search" @submit.prevent="apply">
         <label class="search"><span class="lens" aria-hidden="true"></span>
           <input ref="search" v-model="term" type="search" maxlength="160" aria-label="Search stock positions"
-            placeholder="Item, bin, purchase, delivery or ID" /><kbd aria-hidden="true">/</kbd></label>
+            placeholder="Item, bin label, purchase, delivery or ID" /><kbd aria-hidden="true">/</kbd></label>
         <label>Item type<select v-model="type" @change="apply"><option :value="undefined">All types</option>
           <option v-for="t in itemTypes" :key="t" :value="t">{{ label(t) }}</option></select></label>
         <label>Bin<select v-model="bin" @change="apply"><option value="">All bins</option>
