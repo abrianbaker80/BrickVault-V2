@@ -1,4 +1,5 @@
 
+using System.Diagnostics;
 using System.Security.Cryptography;
 using Npgsql;
 using Xunit;
@@ -183,6 +184,23 @@ public sealed partial class StockLossRecoveryTests
             Reason="Confirm actual stock after concurrent transfer",ExpectedPhysicalQuantity=0,ExpectedPositionCount=0
         };
         await using var connection=await fixture.Db.OpenConnectionAsync(ct);
+
+        async Task ObserveWait(Task operation)
+        {
+            await using var observer=await fixture.Db.OpenConnectionAsync(ct);
+            var timer=Stopwatch.StartNew();
+            while (!operation.IsCompleted && timer.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                await using var query=Database.Query(observer,null,"""
+                    SELECT EXISTS (SELECT 1 FROM pg_stat_activity a
+                        WHERE a.datname=current_database() AND $1=ANY(pg_blocking_pids(a.pid)))
+                    """,connection.ProcessID);
+                if (await query.ExecuteScalarAsync(ct) is true) return;
+                await Task.Delay(TimeSpan.FromMilliseconds(20),ct);
+            }
+            Assert.Fail("Expected an observed PostgreSQL lock wait on the earlier transaction.");
+        }
+
         await using var tx=await connection.BeginTransactionAsync(ct);
         var move=new Receipt(Guid.NewGuid(),Guid.NewGuid(),fixture.Position.Revision+1,"transfer",Guid.NewGuid());
         await using (var advance=Database.Query(connection,tx,"""
@@ -199,8 +217,7 @@ public sealed partial class StockLossRecoveryTests
         await CommandJournal.Append(connection,tx,move,SHA256.HashData("Fictional concurrent movement"u8),"record-receiving",ct);
 
         var archive=registry.Archive(draft,Guid.NewGuid(),ct);
-        await Task.Delay(TimeSpan.FromMilliseconds(150),ct);
-        Assert.False(archive.IsCompleted);
+        await ObserveWait(archive);
         await tx.CommitAsync(ct);
         Assert.Equal("location_archive_stock_changed",await Reject(()=>archive));
         Assert.False((await registry.Lookup(code,ct)).Bin.Archived);
@@ -220,8 +237,7 @@ public sealed partial class StockLossRecoveryTests
             SourcePlacementId=fixture.Position.EntityId,SourceLocationId=fixture.Bin.EntityId,ConfirmedSourceLocationCode=fixture.Code,
             DestinationLocationId=target.EntityId,ConfirmedDestinationLocationCode=code,Quantity=1,Backing=[],Reason="Fictional racing transfer"
         },Guid.NewGuid(),ct);
-        await Task.Delay(TimeSpan.FromMilliseconds(150),ct);
-        Assert.False(incoming.IsCompleted);
+        await ObserveWait(incoming);
         await archiveTx.CommitAsync(ct);
         Assert.Equal("location_destination_archived",await Reject(()=>incoming));
         var detail=await registry.Detail(target.EntityId,null,25,null,25,ct);
