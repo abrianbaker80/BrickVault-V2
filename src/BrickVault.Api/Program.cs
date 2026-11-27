@@ -28,6 +28,7 @@ try
     var settings = Foundation.Gateway();
     var sessions = new Sessions(db, settings);
     var references = new References(db);
+    var locationRegistry = new LocationRegistry(db);
     var receiving = new Receiving(db);
     var counts = new StockCounts(db);
     var closeShortages = new StockShortageClosures(db);
@@ -96,7 +97,7 @@ try
             if (fault.Status >= 500) Console.Error.WriteLine($"foundation_request {fault.Code} correlation={correlation:D}");
             ctx.Response.StatusCode = fault.Status;
             if (ctx.Request.Path != "/internal/ready")
-                await ctx.Response.WriteAsJsonAsync(new ApiError(fault.Code, fault.Message, correlation), Wire.Json, ctx.RequestAborted);
+                await ctx.Response.WriteAsJsonAsync(LocationRegistry.WireError(ctx.Request, fault, correlation), Wire.Json, ctx.RequestAborted);
         }
     });
     app.MapGet("/internal/ready", async (HttpContext c, CancellationToken ct) =>
@@ -117,6 +118,19 @@ try
         references.Workspace(ct, c.Request.Query["audit"] == "all"));
     api.MapPost("/catalog", (HttpContext c, CancellationToken ct) => Save<CatalogCommand>(c, references.Save, ct));
     api.MapPost("/locations", (HttpContext c, CancellationToken ct) => Save<LocationCommand>(c, references.Save, ct));
+    api.MapGet("/locations/registry", (Guid? after, int? limit, CancellationToken ct) =>
+        locationRegistry.List(after, limit ?? 25, ct));
+    api.MapGet("/locations/lookup", (string label, CancellationToken ct) => locationRegistry.Lookup(label, ct));
+    api.MapGet("/locations/{locationId:guid}/registry",
+        (Guid locationId, string? labelAfter, int? labelLimit, Guid? eventAfter, int? eventLimit, CancellationToken ct) =>
+            locationRegistry.Detail(locationId, labelAfter, labelLimit ?? 25, eventAfter, eventLimit ?? 25, ct));
+    api.MapGet("/locations/{locationId:guid}/registry/receipts",
+        (Guid locationId, Guid? eventId, Guid? commandId, CancellationToken ct) =>
+            locationRegistry.Evidence(locationId, eventId, commandId, ct));
+    api.MapPost("/locations/labels", (HttpContext c, CancellationToken ct) =>
+        Save<LocationLabelCommand>(c, locationRegistry.Save, ct));
+    api.MapPost("/locations/archives", (HttpContext c, CancellationToken ct) =>
+        Save<LocationArchiveCommand>(c, locationRegistry.Archive, ct));
     api.MapGet("/receiving", (CancellationToken ct) => receiving.LegacySnapshot(ct));
     api.MapGet("/receiving/current", async (HttpContext c, CancellationToken ct) =>
         c.Request.Query["losses"] == "true"

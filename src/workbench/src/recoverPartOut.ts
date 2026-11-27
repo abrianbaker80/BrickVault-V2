@@ -1,3 +1,4 @@
+import { sameLabel } from './binLabels'
 import { api, ApiFailure, ContractFailure, type PartOutCommand, type PartOutEvidence } from './api'
 
 export async function recoverPartOut(command: PartOutCommand) {
@@ -15,7 +16,7 @@ export async function recoverPartOut(command: PartOutCommand) {
       throw error
     }
     if (!page.complete || page.purchaseId!==command.purchaseId || page.revision!==command.expectedRevision+1 ||
-        page.sourceLocation.id!==command.sourceLocationId || page.confirmedSourceLocationCode!==command.confirmedSourceLocationCode ||
+        page.sourceLocation.id!==command.sourceLocationId || !sameLabel(page.confirmedSourceLocationCode,command.confirmedSourceLocationCode) ||
         page.recordedSourceCatalog.id!==command.sourceCatalogId || page.recordedSourceCatalog.revision!==command.sourceCatalogRevision ||
         page.quantity!==command.quantity || page.reason!==command.reason || page.residualItemCostMinor!==command.residualItemCostMinor ||
         (evidence && (page.id!==evidence.id || page.correlationId!==evidence.correlationId || page.sourceItemCostMinor!==evidence.sourceItemCostMinor)))
@@ -25,7 +26,7 @@ export async function recoverPartOut(command: PartOutCommand) {
       for (const row of page.outputs) {
         const expected=outputs.get(row.lineId)
         if (!expected || expected.catalogId!==row.recordedCatalog.id || expected.catalogRevision!==row.recordedCatalog.revision ||
-            expected.locationId!==row.location.id || expected.confirmedLocationCode!==row.confirmedLocationCode ||
+            expected.locationId!==row.location.id || !sameLabel(expected.confirmedLocationCode,row.confirmedLocationCode) ||
             expected.quantity!==row.quantity || expected.itemCostMinor!==row.itemCostMinor || expected.disposition!==row.disposition) throw new ContractFailure()
         outputs.delete(row.lineId)
       }

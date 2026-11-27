@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import { api, ApiFailure, commandLabel, explain, forget, InvalidCommand, readJournal, remember } from './api'
 import { recoverPartOut } from './recoverPartOut'
+import { registryLink, sameLabel } from './binLabels'
 import { recoverInspection } from './recoverInspection'
 import { partOutLink, recoveryLink, closureLink, countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink } from './countLinks'
 import { recoverStockLoss } from './stockLoss'
@@ -14,7 +15,7 @@ export function useWorkbench(page: Ref<string>) {
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
   const error = ref('')
-  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string; recountLink?: string; quarantineReceipt?: string; withdrawalLink?: string; closureReceipt?:string; recoveryReceipt?:string; partOutReceipt?:string } | null>(null)
+  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string; recountLink?: string; quarantineReceipt?: string; withdrawalLink?: string; closureReceipt?:string; recoveryReceipt?:string; partOutReceipt?:string; registryReceipt?:string } | null>(null)
   const pending = shallowRef<Command[]>([])
   const held = shallowRef<Held[]>([])
   const journalError = ref('')
@@ -151,6 +152,7 @@ export function useWorkbench(page: Ref<string>) {
       try {
         let committed: { correlationId: string } | undefined
         let partOutReceipt: string | undefined
+        let registryReceipt:string|undefined
         let recoveryReceipt: string | undefined
         let closureReceipt: string | undefined
         let countLink: string | undefined
@@ -158,12 +160,24 @@ export function useWorkbench(page: Ref<string>) {
         let recountLink: string | undefined
         let withdrawalLink: string | undefined
         let quarantineReceipt: string | undefined
-        if (command.kind === 'quarantine' || command.kind === 'quarantine-release') {
+        if (command.kind==='location-label' || command.kind==='location-archive') {
+          try {
+            const result=await api.registryReceipt(command.body.locationId,{commandId:command.body.commandId})
+            const event=result.event
+            if (!result.complete || event.revision!==command.body.expectedRevision+1 ||
+                (command.kind==='location-label' ? event.kind!=='label-added' || event.label!==command.body.label :
+                  event.kind!=='archived' || !event.label || !sameLabel(event.label,command.body.confirmedLabel) ||
+                  event.reason!==command.body.reason || event.physicalQuantity!==command.body.expectedPhysicalQuantity ||
+                  event.positionCount!==command.body.expectedPositionCount)) throw new Error('Registry receipt mismatch')
+            committed=event
+            registryReceipt=registryLink(result.locationId,event.id)
+          } catch(e) {if(!(e instanceof ApiFailure && e.status===404 && e.detail?.code==='unknown_location_registry_event')) throw e}
+        } else if (command.kind === 'quarantine' || command.kind === 'quarantine-release') {
           const body = command.body
           try {
             const row = await api.quarantineReceipt(body.locationId, body.positionId, { commandId:body.commandId })
             if (!row.complete || row.kind !== command.kind || row.purchaseId !== body.purchaseId ||
-                row.revision !== body.expectedRevision + 1 || row.confirmedLocationCode !== body.confirmedLocationCode ||
+                row.revision !== body.expectedRevision + 1 || !sameLabel(row.confirmedLocationCode,body.confirmedLocationCode) ||
                 row.catalogId !== body.catalogId || row.catalogRevision !== body.catalogRevision || row.quantity !== body.quantity ||
                 row.reason !== body.reason || (command.kind === 'quarantine-release' &&
                 (row.quarantineId !== command.body.quarantineId || row.inspectionResult !== command.body.inspectionResult))) throw new Error('Quarantine receipt mismatch')
@@ -177,7 +191,7 @@ export function useWorkbench(page: Ref<string>) {
           try {
             const row = await api.withdrawalReceipt(body.locationId,body.positionId,{commandId:body.commandId})
             if (!row.complete || row.revision !== body.expectedRevision + 1 || row.purchaseId !== body.purchaseId ||
-                row.offerId !== body.offerId || row.confirmedLocationCode !== body.confirmedLocationCode ||
+                row.offerId !== body.offerId || !sameLabel(row.confirmedLocationCode,body.confirmedLocationCode) ||
                 row.quantity !== body.quantity || row.reason !== body.reason) throw new Error('Withdrawal receipt mismatch')
             committed = row
             withdrawalLink = draftBackingLink(body.locationId,body.positionId,'receipts',row.id)
@@ -210,7 +224,7 @@ export function useWorkbench(page: Ref<string>) {
           try {
             const row=await api.closure(body.locationId,body.positionId,body.caseId,{commandId:body.commandId})
             if (!row.complete || row.purchaseId!==body.purchaseId || row.revision!==body.expectedRevision+1 ||
-                row.recountObservation.id!==body.expectedObservationId || row.confirmedLocationCode!==body.confirmedLocationCode ||
+                row.recountObservation.id!==body.expectedObservationId || !sameLabel(row.confirmedLocationCode,body.confirmedLocationCode) ||
                 row.reason!==body.reason) throw new Error('Shortage closure receipt mismatch')
             committed=row
             closureReceipt=closureLink(body.locationId,body.positionId,body.caseId,'receipt',row.id)
@@ -230,7 +244,7 @@ export function useWorkbench(page: Ref<string>) {
               const hold = data.holds[0]
               if (!data.complete || data.purchaseId !== command.body.purchaseId || hold.purpose !== command.body.purpose ||
                   hold.reason !== command.body.reason || hold.quantity !== command.body.quantity ||
-                  hold.expectedPurchaseRevision !== command.body.expectedRevision || hold.confirmedLocationCode !== command.body.confirmedLocationCode) throw new Error('Hold receipt mismatch')
+                  hold.expectedPurchaseRevision !== command.body.expectedRevision || !sameLabel(hold.confirmedLocationCode,command.body.confirmedLocationCode)) throw new Error('Hold receipt mismatch')
               committed = hold
             } else {
               const data = await api.holdReleases(command.locationId, command.positionId, command.body.holdId, '', command.body.commandId)
@@ -250,7 +264,7 @@ export function useWorkbench(page: Ref<string>) {
             if (!result.complete) throw new Error('Incomplete count history')
             const observation = result.observations[0]
             if (observation.purchaseId !== command.body.purchaseId || observation.countedQuantity !== command.body.countedQuantity ||
-                observation.expectedPurchaseRevision !== command.body.expectedRevision || observation.locationCode !== command.body.confirmedLocationCode ||
+                observation.expectedPurchaseRevision !== command.body.expectedRevision || !sameLabel(observation.locationCode,command.body.confirmedLocationCode) ||
                 observation.reason !== command.body.reason) throw new Error('Count receipt mismatch')
             committed = observation
             countLink = countReceiptLink(command.body.locationId, observation.id)
@@ -269,7 +283,7 @@ export function useWorkbench(page: Ref<string>) {
           forget(command)
           loadPending()
           notice.value = { message: 'Confirmed the original ' + commandLabel(command) + '.',
-            correlationId: committed.correlationId, countLink, lossLink, recountLink, quarantineReceipt, withdrawalLink, closureReceipt, recoveryReceipt, partOutReceipt, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
+            correlationId: committed.correlationId, registryReceipt, countLink, lossLink, recountLink, quarantineReceipt, withdrawalLink, closureReceipt, recoveryReceipt, partOutReceipt, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
           await refresh()
           return
         }
@@ -296,6 +310,7 @@ export function useWorkbench(page: Ref<string>) {
       forget(command)
       loadPending()
       notice.value = { message: 'Saved ' + commandLabel(command) + ' · revision ' + receipt.revision + '.',
+        registryReceipt: command.kind==='location-label' || command.kind==='location-archive' ? registryLink(command.body.locationId,receipt.entityId) : undefined,
         quarantineReceipt: command.kind === 'quarantine' || command.kind === 'quarantine-release' ? quarantineLink(command.body.locationId, command.body.positionId, receipt.entityId) : undefined,
         withdrawalLink: command.kind === 'offer-withdrawal' ? draftBackingLink(command.body.locationId,command.body.positionId,'receipts',receipt.entityId) : undefined,
         partOutReceipt: command.kind==='part-out' ? partOutLink(command.body.sourcePositionId,receipt.entityId) : undefined,
@@ -318,7 +333,8 @@ export function useWorkbench(page: Ref<string>) {
           ['invalid_quarantine','unknown_quarantine_receipt','quarantine_position_mismatch','quarantine_bin_conflict','quarantine_catalog_conflict',
             'quarantine_shortage_open','quarantine_quantity_unavailable','quarantine_capacity_unavailable','stock_loss_quarantine_unresolved','invalid_draft_backing_withdrawal','draft_backing_bin_conflict','draft_backing_position_mismatch','draft_backing_offer_mismatch',
             'draft_backing_authority_unverified','draft_backing_quantity_unavailable','invalid_recount', 'empty_recount_preview', 'recount_preview_used', 'unknown_recount_preview',
-            'invalid_reference', 'duplicate_reference', 'invalid_receiving', 'duplicate_receiving_reference',
+            'invalid_location_label','invalid_location_archive','invalid_location_registry_command','duplicate_location_label','location_destination_archived',
+            'location_archive_stock_changed','location_already_archived','location_label_mismatch','invalid_reference', 'duplicate_reference', 'invalid_receiving', 'duplicate_receiving_reference',
             'revision_conflict', 'command_mismatch', 'catalog_ineligible', 'catalog_reconfirmation_required', 'bin_confirmation_mismatch',
             'quantity_unavailable', 'delivery_mismatch', 'backing_mismatch', 'invalid_transfer', 'transfer_source_mismatch',
             'transfer_bin_confirmation_mismatch', 'transfer_quantity_unavailable', 'transfer_backing_unavailable', 'transfer_all_backing_requires_full', 'unknown_location',

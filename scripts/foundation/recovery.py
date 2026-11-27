@@ -57,6 +57,8 @@ SCHEMA_FACTS[13] = SCHEMA_FACTS[12] + (
     "stock_part_outs", "stock_part_out_outputs", "stock_part_out_residuals", "stock_loss_part_out_context",
 )
 
+SCHEMA_FACTS[14] = SCHEMA_FACTS[13] + ("location_labels", "location_registry_events")
+
 
 def digest(path):
     with path.open("rb") as f:

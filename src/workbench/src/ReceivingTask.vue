@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useBinRegistry } from './useBinRegistry'
 import { computed, ref, watch } from 'vue'
 import type { Dispatch, Purchase, Workspace } from './api'
 import { itemLabel, parseMoney } from './receiving'
@@ -24,6 +25,7 @@ const line = computed(() => pendingLines.value.find(d => d.id === deliveryId.val
 const identifiedItem = ref('')
 const target = ref('')
 const scanned = ref('')
+const bins=useBinRegistry(()=>[scanned.value])
 const moved = ref<number>()
 const offerItem = ref('')
 const price = ref('')
@@ -86,7 +88,7 @@ async function save() {
     if (result) { change('putaway'); deliveryId.value = result.entityId }
   } else if (step.value === 'putaway') {
     if (!line.value || !moved.value || !location.value || !verifiedIdentity.value) return
-    if (scanned.value !== location.value.code) {
+    if (!bins.isActive(location.value.id) || !bins.matches(location.value,scanned.value)) {
       issue.value = 'Bin code does not match the selected destination. Check the physical label before confirming.'
       return
     }
@@ -153,14 +155,15 @@ async function save() {
                 I checked the physical item against catalog revision {{ currentItem.revision }}.</label>
             </div>
             <label class="span">Destination bin<select v-model="target" required><option disabled value="">Choose bin</option>
-              <option v-for="l in workspace.locations" :key="l.id" :value="l.id">{{ l.code }} · {{ l.name }}</option></select></label>
+              <option v-for="l in bins.destinations.value" :key="l.id" :value="l.id">{{ l.code }} · {{ l.name }}</option></select></label>
             <label>Confirm bin code<input v-model="scanned" required autocomplete="off" spellcheck="false" maxlength="48" /></label>
             <label>Count placed<input v-model="moved" type="number" inputmode="numeric" min="1" :max="line?.intakeQuantity" required /></label>
           </fieldset>
           <p class="field-hint">Read the physical bin label and count the units placed. Unconfirmed units stay in {{ line?.catalogId ? 'intake' : 'quarantine' }}.</p>
-          <p v-if="!workspace.locations.length" class="field-hint">Register a bin in <a href="#locations">Locations</a> first.</p>
+          <p v-if="target && bins.rows.value.get(target)?.archived" class="warning">The selected destination is archived. Choose an active bin.</p>
+          <p v-if="bins.confirmed.value && !bins.destinations.value.length" class="field-hint">Register a bin in <a href="#locations">Locations</a> first.</p>
           <p v-if="!eligible.length || (line?.catalogId && !currentItem?.integrationEligible)" class="field-hint">Putaway needs an eligible item with verified identity, condition and source rights. Check the <a href="#catalog">Catalog</a>.</p>
-          <button class="primary" :disabled="!enabled || stale || !verifiedIdentity || !workspace.locations.length">Confirm putaway</button>
+          <button class="primary" :disabled="!enabled || stale || !verifiedIdentity || (!bins.confirmed.value || !bins.destinations.value.length || (!!target && !bins.isActive(target)) || bins.pending(scanned))">Confirm putaway</button>
         </template>
       </template>
       <template v-else>

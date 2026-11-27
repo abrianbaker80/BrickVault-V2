@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useBinRegistry } from "./useBinRegistry"
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, explain, requiresFreshCount, type Catalog, type Location, type QuarantineSnapshot, type TransferControls } from './api'
 import { closureLink, countPositionLink, countReceiptLink, holdPositionLink, lossReceiptLink } from './countLinks'
@@ -24,6 +25,7 @@ const shownQuarantineCursors = shallowRef<string[]>([''])
 const mode = ref<''|'none'|'records'>('')
 const entries = ref<Record<string,{row:QuarantineSnapshot['quarantines'][number]; amount:string}>>({})
 const code = ref('')
+const bins=useBinRegistry(()=>[code.value])
 const reason = ref('')
 const loading = ref(false)
 const stale = ref(false)
@@ -61,7 +63,7 @@ const projection = computed(() => {
 })
 const permitted = computed(() => ready.value && !!page.value?.candidateLossQuantity && projection.value?.holdShortfall === 0)
 const canPost = computed(() => permitted.value && page.value && selected.value.every(validQuantity) &&
-  chosen.value === projection.value?.reduction && code.value === page.value.location.code && reason.value.trim() !== '')
+  chosen.value === projection.value?.reduction && bins.matches(page.value.location,code.value) && reason.value.trim() !== '')
 let mounted = true
 onBeforeUnmount(() => { mounted = false })
 onMounted(() => dialog.value?.showModal())
@@ -237,7 +239,7 @@ async function post() {
               <button type="button" :disabled="!permitted" :aria-label="'Remove reduction for offer ' + entry.offer.id" @click="delete selections[entry.offer.id]">Remove</button></li></ul>
           </section>
           <label>Confirm physical bin code<input v-model="code" required maxlength="48" autocomplete="off" :disabled="!permitted" /></label>
-          <small v-if="code && code !== page.location.code" class="warning">Enter the code on the selected bin.</small>
+          <small v-if="code && !bins.pending(code) && !bins.matches(page.location,code)" class="warning">Enter the code on the selected bin.</small>
           <label>Reason for posting<input v-model="reason" required maxlength="200" :disabled="!permitted" /></label>
           <p v-if="attempted && controls.feedback" class="warning" role="alert">{{ controls.feedback }}</p>
           <p v-if="needsAttribution && projection" aria-label="Posting summary">Posting {{ page.candidateLossQuantity }} missing {{ page.candidateLossQuantity===1 ? 'piece' : 'pieces' }}.

@@ -276,7 +276,14 @@ class Instance:
             ).returncode
             == 0
         ):
-            execute([cmd, "stop", "-D", self.cluster, "-m", "fast", "-w"])
+            if WIN:
+                execute([
+                    "pwsh", "-NoProfile", "-NonInteractive", "-File",
+                    Path(__file__).with_name("Stop-Postgres.ps1"),
+                    "-PgCtl", cmd, "-Cluster", self.cluster, "-LogFile", self.path / "postgres.log",
+                ])
+            else:
+                execute([cmd, "stop", "-D", self.cluster, "-m", "fast", "-w"])
 
     def create_db(self, name):
         name = label(name)
@@ -382,6 +389,10 @@ class Instance:
                         quantity,item_cost_minor,disposition) ON brickvault.stock_part_out_outputs TO bv_api;
                     GRANT INSERT (part_out_id,line_id,disposition,description,quantity)
                         ON brickvault.stock_part_out_residuals TO bv_api;
+                END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 14 THEN
+                    GRANT INSERT (id,command_id,location_id,revision,kind,label,reason,physical_quantity,position_count)
+                        ON brickvault.location_registry_events TO bv_api;
                 END IF;
             END $grants$;
             COMMIT;

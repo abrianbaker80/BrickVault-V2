@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useBinRegistry } from './useBinRegistry'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { api, ContractFailure, explain, type PartOutCommand, type PartOutReview, type TransferControls, type Workspace } from './api'
 import { partOutLink } from './countLinks'
@@ -18,6 +19,7 @@ const input=ref(''),code=ref(''),reason=ref(''),acknowledged=ref(false),residual
 const residualMode=ref<''|'none'|'record'>('')
 const makeOutput=():Output=>({id:crypto.randomUUID(),catalog:'',revision:0,bin:'',binRevision:0,code:'',quantity:'',disposition:'',basis:'',amount:''})
 const outputs=ref<Output[]>([makeOutput()]),physical=ref<Residual[]>([])
+const bins=useBinRegistry(()=>[code.value,...outputs.value.map(o=>o.code)])
 const historyHeading=ref<HTMLElement>()
 watch([input,code,outputs,physical,residualMode,residualCost],()=>{ acknowledged.value=false },{deep:true,flush:'sync'})
 const integer=(s:string)=>/^\d{1,7}$/.test(s) && Number(s)>0 && Number(s)<=1_000_000
@@ -47,11 +49,11 @@ const repeatsInput=computed(()=>{
   return matching.reduce((total,o)=>total+Number(o.quantity),0)>Number(input.value)
 })
 const validOutputs=computed(()=>!repeatsInput.value && outputs.value.length>0 && outputs.value.every(o=>(o.disposition==='retained' || catalog(o.catalog)?.integrationEligible) && o.revision===catalog(o.catalog)?.revision &&
-  location(o.bin)?.code===o.code && integer(o.quantity) && !!o.disposition && (!known.value || (o.basis && outputCost(o)!==undefined))) &&
+  bins.isActive(o.bin) && bins.matches(location(o.bin),o.code) && integer(o.quantity) && !!o.disposition && (!known.value || (o.basis && outputCost(o)!==undefined))) &&
   outputs.value.reduce((n,o)=>n+Number(o.quantity),0)<=1_000_000)
 const validResiduals=computed(()=>residualMode.value==='none' || (residualMode.value==='record' && physical.value.length>0 &&
   physical.value.every(r=>r.disposition && r.description.trim() && integer(r.quantity)) && physical.value.reduce((n,r)=>n+Number(r.quantity),0)<=1_000_000))
-const allowed=computed(()=>editable.value && !loading.value && selected.value && !page.value?.hasOpenShortage && code.value===page.value?.position.location.code &&
+const allowed=computed(()=>editable.value && !loading.value && selected.value && !page.value?.hasOpenShortage && bins.matches(page.value?.position.location,code.value) &&
   validOutputs.value && validResiduals.value && balanced.value && !!reason.value.trim() && acknowledged.value)
 function selectCatalog(o:Output,event:Event) {
   o.catalog=(event.target as HTMLSelectElement).value; o.revision=catalog(o.catalog)?.revision ?? 0;acknowledged.value=false
@@ -144,7 +146,7 @@ async function save() {
         <fieldset :disabled="!connected || stale || changedOutput || sending || !workspace.complete || !controls.enabled || page.hasOpenShortage || !page.availableQuantity">
           <div class="pair"><label>Input units consumed<input v-model="input" inputmode="numeric" maxlength="7" required /></label>
             <label>Confirm input bin code<input v-model="code" maxlength="48" autocomplete="off" spellcheck="false" required /></label></div>
-          <small v-if="code && code!==page.position.location.code" class="warning">Enter the code from the physical input bin.</small>
+          <small v-if="code && !bins.pending(code) && !bins.matches(page.position.location,code)" class="warning">Enter the code from the physical input bin.</small>
           <p v-if="input && !loading && !selected" class="warning">Enter a whole quantity within the available input stock.</p>
         </fieldset>
         <fieldset :disabled="!editable || !selected">
@@ -160,9 +162,10 @@ async function save() {
               <label>Output disposition<select v-model="o.disposition" required><option disabled value="">Choose disposition</option><option value="stock">Accepted stock</option><option value="retained">Retain in quarantine</option></select></label></div>
             <p v-if="o.catalog && o.disposition==='stock' && !catalog(o.catalog)?.integrationEligible" class="warning" role="status">This item cannot enter accepted stock. Choose Retain in quarantine or confirm an eligible item.</p>
             <div class="pair"><label>Output bin<select :value="o.bin" @change="selectBin(o,$event)" required><option disabled value="">Choose registered bin</option>
-              <option v-for="l in workspace.locations" :key="l.id" :value="l.id">{{ l.code }} · {{ l.name }}</option></select></label>
+              <option v-for="l in bins.destinations.value" :key="l.id" :value="l.id">{{ l.code }} · {{ l.name }}</option></select></label>
               <label>Confirm output bin code<input v-model="o.code" maxlength="48" autocomplete="off" spellcheck="false" required /></label></div>
-            <small v-if="o.code && location(o.bin)?.code!==o.code" class="warning">The typed code must match this output bin.</small>
+            <small v-if="o.bin && bins.rows.value.get(o.bin)?.archived" class="warning">This output bin is archived. Select an active bin.</small>
+            <small v-if="o.code && !bins.pending(o.code) && !bins.matches(location(o.bin),o.code)" class="warning">The typed code must match this output bin.</small>
             <div v-if="known" class="pair"><label>Output cost basis<select v-model="o.basis" required><option disabled value="">Choose cost basis</option>
               <option value="known">Assign a known cost</option><option value="unassigned">Leave basis unassigned</option></select></label>
               <label v-if="o.basis==='known'">Assigned cost ({{ page.currency }})<input v-model="o.amount" inputmode="decimal" required /></label></div>

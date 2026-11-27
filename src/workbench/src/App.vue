@@ -10,6 +10,7 @@ import Register from './Register.vue'
 import Activity from './Activity.vue'
 import RecordForm from './RecordForm.vue'
 import { useWorkbench } from './useWorkbench'
+import { provideBinRegistry } from './useBinRegistry'
 import type { CatalogInput, LocationInput } from './api'
 import { commandLabel } from './api'
 import { readCountLink } from './countLinks'
@@ -37,6 +38,9 @@ const hash = ref(window.location.hash)
 const countLink = computed(() => readCountLink(hash.value))
 const { session, workspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
   canSend, canCreate, refresh, signIn, signOut, create, record, send, expired } = useWorkbench(page)
+const bins=provideBinRegistry(()=>session.value?.workspaceId,()=>workspace.value,
+  ()=>page.value==='locations' || page.value==='receiving' || hash.value.startsWith('#inventory/part-out/'),
+  ()=>readState.value!=='disconnected',expired)
 const referencePage = computed(() => page.value === 'catalog' || page.value === 'locations')
 const password = ref('')
 const dialogKind = ref<'catalog' | 'location' | null>(null)
@@ -138,11 +142,13 @@ function openForm() {
             <a v-if="notice.quarantineReceipt" :href="notice.quarantineReceipt">View quarantine receipt</a>
             <a v-if="notice.withdrawalLink" :href="notice.withdrawalLink">View withdrawal receipt</a>
             <a v-if="notice.recountLink" :href="notice.recountLink">View recount receipt</a>
+            <a v-if="notice.registryReceipt" :href="notice.registryReceipt">View bin registry receipt</a>
             <a v-if="notice.partOutReceipt" :href="notice.partOutReceipt">View part-out receipt</a>
             <a v-if="notice.recoveryReceipt" :href="notice.recoveryReceipt">View recovery receipt</a>
             <a v-if="notice.closureReceipt" :href="notice.closureReceipt">View shortage closure receipt</a>
             <a v-if="notice.lossLink" :href="notice.lossLink">View posted stock loss</a>
             <a v-if="notice.countLink" :href="notice.countLink">View count receipt</a></div>
+          <p v-if="bins.error.value" class="warning" role="status">{{ bins.error.value }} <button @click="refresh()">Refresh bin registry</button></p>
           <p v-if="readState === 'partial'" class="warning" role="status">The service returned a partial register. Refresh to verify the complete workspace before making a change.</p>
           <section v-if="pending.length && !submitting" class="message recovery" aria-label="Pending confirmations">
             <h2>Pending confirmation</h2>

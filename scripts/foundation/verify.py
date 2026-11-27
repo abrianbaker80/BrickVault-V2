@@ -271,6 +271,16 @@ def migration_test(s):
         "An interrupted part-out upgrade changed the previous database.",
     )
     s.sql("DROP TABLE brickvault.stock_part_out_outputs;", db, "bv_migrator")
+    s.migrate(db, to=13)
+    s.sql("CREATE TABLE brickvault.location_registry_events(test boolean);", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "13"
+        and s.sql("SELECT to_regclass('brickvault.location_labels') IS NULL", db) == "t"
+        and s.sql(inspect, db) == expected,
+        "An interrupted location registry upgrade changed the previous database.",
+    )
+    s.sql("DROP TABLE brickvault.location_registry_events;", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -284,11 +294,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "13",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "14",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v13, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v14, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -336,9 +346,12 @@ def qualify_staged_upgrade(lab, port, source_version):
         require(not output.exists(), "Running source created a staged directory.")
     finally:
         original.pg_stop()
+    if WIN and source_version == 2:
+        from verify_windows_pg_stop import qualify_windows_pg_stop
+        qualify_windows_pg_stop(original)
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "13"), (original, str(source_version))):
+    for inst, schema in ((candidate, "14"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -709,7 +722,7 @@ def verify(port):
     qualify_listener_probe()
     with keep_verifier_awake(), tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in range(2, 13):
+        for source_version in range(2, 14):
             qualify_staged_upgrade(lab, port, source_version)
         from verify_withdrawals import verify_legacy_allocation
         legacy = init(lab / "legacy-withdrawal", lab / "legacy-keys", port)
@@ -1011,6 +1024,7 @@ def verify(port):
             )
             from verify_withdrawals import qualify_withdrawals, verify_recovered_withdrawals
             from verify_part_outs import qualify_part_outs, verify_restored_part_outs
+            from verify_location_registry import qualify_registry, verify_restored_registry
 
             receiving = qualify_receiving(s, first, rec["entityId"])
             receiving, transfer = qualify_transfer(first, receiving)
@@ -1028,6 +1042,7 @@ def verify(port):
             found = qualify_recoveries(first, rec["entityId"])
             repopulated = qualify_repopulated_recount(first, rec["entityId"])
             transformations = qualify_part_outs(first)
+            registered_bins = qualify_registry(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"
@@ -1198,6 +1213,7 @@ def verify(port):
                 verify_recovered_inspections(recovered, found)
                 verify_repopulated_recount(recovered, repopulated)
                 verify_restored_part_outs(recovered, transformations)
+                verify_restored_registry(recovered, registered_bins)
                 require(
                     all(
                         after[k] == before[k] for k in ["locations", "catalog", "audit"]

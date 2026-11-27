@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useBinRegistry } from "./useBinRegistry"
 import { computed, nextTick, onMounted, ref, shallowRef } from 'vue'
 import { api, ApiFailure, ContractFailure } from './api'
 import type { DraftBackingPage, DraftOfferHistory, Location, TransferControls, WithdrawalEvidence } from './api'
@@ -39,6 +40,7 @@ const receipt = computed(() => confirmedPage.value && 'priorBackedQuantity' in c
 const canPrepare = computed(() => props.workspaceReady && props.connected && props.controls.enabled && !partial.value && !error.value && !sending.value)
 const quantity = ref<number | ''>('')
 const binCode = ref('')
+const bins=useBinRegistry(()=>[binCode.value])
 const reason = ref('')
 const feedback = ref('')
 const sending = ref(false)
@@ -57,7 +59,7 @@ const stale = computed(() => {
 const validQuantity = computed(() => Number.isInteger(quantity.value) && Number(quantity.value)>0 &&
   Number(quantity.value)<=(frozen.value?.data.offer.backedQuantity ?? 0))
 const writable = computed(() => canPrepare.value && !loading.value && !stale.value && frozen.value && history.value?.offer.canWithdraw && validQuantity.value &&
-  binCode.value===frozen.value.data.position.location.code && reason.value.trim().length>0)
+  bins.matches(frozen.value.data.position.location,binCode.value) && reason.value.trim().length>0)
 const titles = { 'offer-backing':'Offer backing added', 'transfer-in':'Backing transferred in', 'transfer-out':'Backing transferred out',
   'stock-loss':'Reduced with posted loss', 'offer-withdrawal':'Draft backing withdrawn' }
 const link = (view?:'offers'|'receipts',id?:string) => draftBackingLink(props.bin.id,props.position,view,id)
@@ -147,7 +149,7 @@ async function save() {
             <fieldset :disabled="!canPrepare || stale">
               <label>Quantity to withdraw<input type="number" v-model="quantity" min="1" :max="frozen.data.offer.backedQuantity" inputmode="numeric" required /></label>
               <label>Confirm physical bin code<input v-model="binCode" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
-              <small v-if="binCode && binCode!==frozen.data.position.location.code" class="warning">Enter the code on the selected bin.</small>
+              <small v-if="binCode && !bins.pending(binCode) && !bins.matches(frozen.data.position.location,binCode)" class="warning">Enter the code on the selected bin.</small>
               <label>Reason for withdrawal<input v-model="reason" required maxlength="200" /></label>
             </fieldset>
             <dl v-if="validQuantity" class="details" aria-label="Proposed withdrawal">
