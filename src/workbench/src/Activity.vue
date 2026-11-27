@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, shallowRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef } from 'vue'
 import type { Diagnostic, Workspace } from './api'
 import { api, explain } from './api'
 import { label, time } from './presentation'
@@ -29,23 +29,44 @@ async function lookup(id: string) {
     if (generation === current) loading.value = false
   }
 }
-function recordName(id: string) {
-  return props.workspace.catalog.find(row => row.id === id)?.name ||
-    props.workspace.locations.find(row => row.id === id)?.name || id
+const names = computed(() => new Map([...props.workspace.locations, ...props.workspace.catalog].map(row => [row.id, row.name])))
+const recordName = (id: string) => names.value.get(id) || id
+const pageSize = 25
+const anchors = ref<string[]>([])
+const auditTitle = ref<HTMLElement>()
+const start = computed(() => {
+  const anchor = anchors.value.at(-1)
+  return anchor ? props.workspace.audit.findIndex(row => row.commandId === anchor) : 0
+})
+const visibleRows = computed(() => start.value < 0 ? [] : props.workspace.audit.slice(start.value, start.value + pageSize))
+const nextAnchor = computed(() => start.value < 0 ? undefined : props.workspace.audit[start.value + pageSize]?.commandId)
+async function goToPage(direction: 'older' | 'newer' | 'newest') {
+  if (direction === 'older' && nextAnchor.value) anchors.value.push(nextAnchor.value)
+  if (direction === 'newer') anchors.value.pop()
+  if (direction === 'newest') anchors.value = []
+  await nextTick()
+  auditTitle.value?.focus()
 }
 </script>
 <template>
   <div class="activity-grid">
     <section class="panel" aria-labelledby="audit-title">
-      <header class="panel-head"><h2 id="audit-title">Audit history</h2><span class="count">{{ workspace.audit.length }} events</span></header>
-      <ul v-if="workspace.audit.length" class="audit">
-        <li v-for="row in workspace.audit" :key="row.commandId">
+      <header class="panel-head"><h2 id="audit-title" ref="auditTitle" tabindex="-1">Audit history</h2><span class="count">{{ workspace.audit.length }} events</span></header>
+      <ul v-if="visibleRows.length" class="audit">
+        <li v-for="row in visibleRows" :key="row.commandId">
           <div><strong>{{ recordName(row.entityId) }}</strong><small>{{ label(row.kind) }} · revision {{ row.revision }} · {{ row.actor }}</small>
             <small>{{ time(row.occurredAt) }}</small></div>
           <button :disabled="!connected" :aria-label="'Inspect command for ' + recordName(row.entityId) + ' revision ' + row.revision" @click="lookup(row.correlationId)">Inspect</button>
         </li>
       </ul>
-      <div v-else class="empty"><strong>No audit events</strong><p>Saved changes appear here.</p></div>
+      <div v-else-if="start < 0" class="empty"><p>This history page is unavailable in the current read.</p>
+        <button @click="goToPage('newest')">Back to newest commands</button></div>
+      <div v-else class="empty"><strong>{{ connected ? 'No audit events' : 'Audit history unavailable' }}</strong><p v-if="connected">Saved changes appear here.</p></div>
+      <nav v-if="visibleRows.length && (anchors.length || nextAnchor)" class="history-pages" aria-label="Audit history pages">
+        <span>{{ start + 1 }}–{{ start + visibleRows.length }} of {{ workspace.audit.length }}</span>
+        <button :disabled="!anchors.length || !connected" @click="goToPage('newer')">Newer commands</button>
+        <button :disabled="!nextAnchor || !connected" @click="goToPage('older')">Older commands</button>
+      </nav>
     </section>
     <div class="side-panels">
       <section class="panel" aria-labelledby="worker-title">
@@ -74,3 +95,6 @@ function recordName(id: string) {
     </div>
   </div>
 </template>
+<style scoped>
+.history-pages { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 17px; }
+</style>

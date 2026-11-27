@@ -171,22 +171,82 @@ test('320px register and dialogs support keyboard navigation and accessible cont
   await page.setViewportSize({ width: 320, height: 680 })
   await signIn(page)
   await connected(page)
+  await test.step('Check the catalog and focus its search box', async () => {
+    await noOverflow(page)
+    await accessibility(page)
+    await page.keyboard.press('/')
+    await expect(page.getByRole('searchbox')).toBeFocused()
+  })
+  await test.step('Open, audit and dismiss the catalog form with the keyboard', async () => {
+    const add = page.getByRole('button', { name: 'New catalog item' })
+    await add.focus()
+    await page.keyboard.press('Enter')
+    await expect(page.getByLabel('Item number')).toBeFocused()
+    await noOverflow(page)
+    await accessibility(page)
+    await page.screenshot({ path: info.outputPath('catalog-mobile-form.png') })
+    await page.keyboard.press('Escape')
+    await expect(add).toBeFocused()
+  })
+  await test.step('Audit the loaded Activity view', async () => {
+    const auditRead = page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.pathname === '/api/v1/workspace' && url.searchParams.get('audit') === 'all'
+    })
+    await page.getByRole('link', { name: 'Activity' }).click()
+    const response = await auditRead
+    expect(response.status()).toBe(200)
+    const snapshot: Workspace = await response.json()
+    const history = page.getByRole('region', {name: 'Audit history', exact: true})
+    await expect(history.getByText(snapshot.audit.length+' events', {exact: true})).toBeVisible()
+    await connected(page)
+    await noOverflow(page)
+    await accessibility(page)
+  })
+})
+
+test('Activity history pages retain their command after a newer write and open the original diagnostic', async ({page}) => {
+  await page.setViewportSize({width:320,height:680})
+  await signIn(page)
+  await connected(page)
+  const {workspaceId,csrfToken}=await (await page.request.get('/api/v1/session')).json()
+  const headers={Origin:new URL(page.url()).origin,'X-Workspace-Id':workspaceId,'X-CSRF-Token':csrfToken}
+  const code='AUDIT-'+prefix()
+  let locationId: string|undefined
+  async function save(revision:number){
+    const commandId=randomUUID()
+    const response=await page.request.post('/api/v1/locations',{headers,data:{id:locationId,commandId,
+      expectedRevision:revision-1,code,name:code+' revision '+revision}})
+    expect(response.status()).toBe(200)
+    locationId=(await response.json()).entityId
+    return commandId
+  }
+  const first=await save(1)
+  for(let rev=2;rev<=28;rev++)await save(rev)
+  await page.getByRole('link',{name:'Activity'}).click()
+  const history=page.getByRole('region',{name:'Audit history',exact:true})
+  const nav=history.getByRole('navigation',{name:'Audit history pages'})
+  await expect(history.getByRole('listitem')).toHaveCount(25)
+  await nav.getByRole('button',{name:'Older commands'}).press('Enter')
+  await expect(history.getByRole('heading')).toBeFocused()
+  const inspect=(revision:number)=>history.getByRole('button',{name:'Inspect command for '+code+' revision '+revision+' revision 1',exact:true})
+  await inspect(28).press('Enter')
+  const diagnostic=page.getByRole('region',{name:'Command diagnostic',exact:true})
+  await expect(diagnostic.getByText('Command ID',{exact:true}).locator('+ dd')).toHaveText(first)
+  const top=history.getByRole('listitem').first().getByRole('button')
+  const originalLabel=await top.getAttribute('aria-label')
+  await save(29)
+  const refreshed=page.waitForResponse(r=>r.url().includes('/api/v1/workspace?audit=all'))
+  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
+  await refreshed
+  await expect(inspect(29)).toBeFocused()
+  await expect(top).toHaveAttribute('aria-label',originalLabel!.replace(code+' revision 28',code+' revision 29'))
+  await expect(diagnostic.getByText('Command ID',{exact:true}).locator('+ dd')).toHaveText(first)
+  await nav.getByRole('button',{name:'Newer commands'}).press('Enter')
+  await expect(history.getByRole('heading')).toBeFocused()
+  await expect(history.getByRole('listitem').first()).toContainText('revision 29')
+  await expect(nav.getByRole('button',{name:'Newer commands'})).toBeDisabled()
   await noOverflow(page)
-  await accessibility(page)
-  await page.keyboard.press('/')
-  await expect(page.getByRole('searchbox')).toBeFocused()
-  const add = page.getByRole('button', { name: 'New catalog item' })
-  await add.focus()
-  await page.keyboard.press('Enter')
-  await expect(page.getByLabel('Item number')).toBeFocused()
-  await noOverflow(page)
-  await accessibility(page)
-  await page.screenshot({ path: info.outputPath('catalog-mobile-form.png') })
-  await page.keyboard.press('Escape')
-  await expect(add).toBeFocused()
-  await page.getByRole('link', { name: 'Activity' }).click()
-  await noOverflow(page)
-  await accessibility(page)
 })
 
 test('a delayed initial read and a lost service connection cannot appear as a confirmed zero', async ({ page }) => {
