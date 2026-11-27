@@ -121,12 +121,27 @@ def stage_upgrade(source, output, release=RELEASE):
                         )
                         or any(
                             after[t]["rows"] for t in after.keys() - before.keys()
-                            if t != "placement_positions"
+                            if t not in ("placement_positions", "location_labels")
                         )
                     ):
                         raise ValueError(
                             "The staged upgrade failed its business-record checks."
                         )
+                    if "location_labels" in after and "location_labels" not in before:
+                        canonical = candidate.sql("""
+                            WITH expected AS (
+                                SELECT code AS label_key,code AS label,id AS location_id,revision AS claimed_revision
+                                FROM brickvault.locations
+                            ), actual AS (
+                                SELECT label_key,label,location_id,claimed_revision FROM brickvault.location_labels
+                            )
+                            SELECT NOT EXISTS (
+                                (TABLE expected EXCEPT ALL TABLE actual) UNION ALL
+                                (TABLE actual EXCEPT ALL TABLE expected)
+                            )
+                        """)
+                        if canonical != "t":
+                            raise ValueError("Opening bin labels differ from the original location identities or revisions.")
                     if opening is not None:
                         if row_signatures(candidate, candidate.database, projections) != opening:
                             raise ValueError("An existing stock balance, commitment or recount task changed during upgrade.")

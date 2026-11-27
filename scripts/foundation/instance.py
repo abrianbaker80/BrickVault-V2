@@ -383,6 +383,10 @@ class Instance:
                     GRANT INSERT (part_out_id,line_id,disposition,description,quantity)
                         ON brickvault.stock_part_out_residuals TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 14 THEN
+                    GRANT INSERT (id,command_id,location_id,revision,kind,label,reason,physical_quantity,position_count)
+                        ON brickvault.location_registry_events TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,
