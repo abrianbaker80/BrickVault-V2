@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Added optional piece limits for storage bins. Locations shows the room remaining and records policy changes. Putaway, transfers and part-outs check the destination again when stock is committed. [Bin piece limits](https://github.com/abrianbaker80/BrickVault-V2/issues/45)
+
 - Added alternate labels and archiving in Locations. Operators can look up a bin by its old or alternate label, count the stock on an archived shelf and transfer it out. Receiving, transfers and manual part-out require an active destination. [Bin labels and archiving](https://github.com/abrianbaker80/BrickVault-V2/issues/43)
 
 - Added manual part-out in Inventory. Confirm the source and output bins, assign documented costs, and record retained, discarded or missing material. Each output links back to its purchase and source position. [Manual part-out](https://github.com/abrianbaker80/BrickVault-V2/issues/41)
