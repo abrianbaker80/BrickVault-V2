@@ -12,7 +12,7 @@ if (!process.env.BV_LAB_CA || !process.env.NODE_EXTRA_CA_CERTS)
 process.env.BV_BROWSER_RUN_ID ??= randomUUID()
 if (!/^[a-f0-9-]{36}$/.test(process.env.BV_BROWSER_RUN_ID)) throw new Error('Invalid browser run ID.')
 
-const setStockTests = /(?:pooled-offers|pooled-offer-confirmation|set-contents-inspection|set-contents-transfer)\.spec\.ts$/
+const setStockTests = /(?:part-out|pooled-offers|pooled-offer-confirmation|set-contents-inspection|set-contents-transfer)\.spec\.ts$/
 
 export default defineConfig({
   testDir: './tests',
