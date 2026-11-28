@@ -66,13 +66,15 @@ class Browser:
             ),
         )
 
-    def call(self, path, method="GET", data=None, headers=None, expected=200):
+    def call(self, path, method="GET", data=None, headers=None, expected=200, *, price_scale=True):
         h = {"Accept": "application/json"}
         if method != "GET":
             h["Origin"] = self.s.origin
         if self.token:
             h["X-CSRF-Token"] = self.token
             h["X-Workspace-Id"] = self.lineage
+            if price_scale:
+                h["X-BrickVault-Price-Scale"] = "1"
         if data is not None:
             h["Content-Type"] = "application/json"
         req = urllib.request.Request(
@@ -291,6 +293,16 @@ def migration_test(s):
         "An interrupted capacity upgrade changed the previous database.",
     )
     s.sql("DROP TABLE brickvault.location_capacity_events;", db, "bv_migrator")
+    s.migrate(db, to=15)
+    s.sql("ALTER TABLE brickvault.offers ADD CONSTRAINT offers_currency_check CHECK (true)", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "15"
+        and s.sql("SELECT count(*) FROM information_schema.columns WHERE table_schema='brickvault' AND table_name='offers' AND column_name='currency'", db) == "0"
+        and s.sql(inspect, db) == expected,
+        "An interrupted offer currency upgrade changed the previous database.",
+    )
+    s.sql("ALTER TABLE brickvault.offers DROP CONSTRAINT offers_currency_check", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -304,11 +316,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "15",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "16",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v15, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v16, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -332,7 +344,8 @@ def qualify_staged_upgrade(lab, port, source_version):
         if source_version >= 3:
             from verify_transfer import seed_opening_position
 
-            records = seed_opening_position(original, fixture)
+            basis = "HUF" if source_version == 15 else "USD"
+            records = seed_opening_position(original, fixture, basis)
             if source_version >= 4:
                 from verify_transfer import seed_previous_transfer
 
@@ -359,7 +372,7 @@ def qualify_staged_upgrade(lab, port, source_version):
         qualify_windows_pg_stop(original)
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "15"), (original, str(source_version))):
+    for inst, schema in ((candidate, "16"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -371,6 +384,16 @@ def qualify_staged_upgrade(lab, port, source_version):
                 inst.sql(query, role="bv_api") == "OLD-01",
                 "Upgrade lost a baseline location.",
             )
+            if inst is candidate and source_version >= 3:
+                require(
+                    inst.sql(f"""
+                        SELECT currency='{basis}' AND NOT price_scale_verified
+                            AND NOT has_column_privilege('bv_api','brickvault.offers','currency','UPDATE')
+                            AND NOT has_column_privilege('bv_worker','brickvault.offers','currency','SELECT')
+                        FROM brickvault.offers WHERE id='{records[2]}'
+                    """, role="bv_api") == "t",
+                    "The upgraded offer lost its original currency or its access restrictions.",
+                )
             if source_version >= 8:
                 require(
                     inst.sql("SELECT count(*) FROM brickvault.recount_tasks WHERE observation_id IS NOT NULL") == "1",
@@ -730,7 +753,7 @@ def verify(port):
     qualify_listener_probe()
     with keep_verifier_awake(), tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in range(2, 15):
+        for source_version in range(2, 16):
             qualify_staged_upgrade(lab, port, source_version)
         from verify_withdrawals import verify_legacy_allocation
         legacy = init(lab / "legacy-withdrawal", lab / "legacy-keys", port)
@@ -1053,6 +1076,8 @@ def verify(port):
             transformations = qualify_part_outs(first)
             registered_bins = qualify_registry(first, rec["entityId"])
             bin_policies = qualify_capacity(first)
+            from verify_offer_price_scale import qualify_offer_price_scale
+            qualify_offer_price_scale(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"

@@ -4,7 +4,7 @@ import { computed, nextTick, onMounted, ref, shallowRef } from 'vue'
 import { api, ApiFailure, ContractFailure } from './api'
 import type { DraftBackingPage, DraftOfferHistory, Location, TransferControls, WithdrawalEvidence } from './api'
 import { draftBackingLink, quarantineLink } from './countLinks'
-import { itemLabel, money } from './receiving'
+import { itemLabel, recordedOfferPrice } from './receiving'
 import { time } from './presentation'
 import { usePositionPage, type PositionReadState } from './usePositionPage'
 
@@ -107,7 +107,7 @@ async function save() {
       <button ref="retry" v-if="connected && (error || partial)" :disabled="loading" @click="staleCursor ? (requested=['']) : attempt++">{{ staleCursor ? 'Read from first page' : 'Retry backing read' }}</button>
       <template v-if="receipt">
         <h3>{{ receipt.quantity }} {{ receipt.quantity===1 ? 'unit withdrawn' : 'units withdrawn' }} from draft backing</h3>
-        <p>{{ money(receipt.unitPriceMinor,receipt.currency) }} per unit · Confirmed bin {{ receipt.confirmedLocationCode }}</p>
+        <p>{{ recordedOfferPrice(receipt) }} · Confirmed bin {{ receipt.confirmedLocationCode }}</p>
         <dl class="details"><dt>Offer at this position</dt><dd>{{ receipt.priorBackedQuantity }} → {{ receipt.remainingBackedQuantity }}</dd>
           <dt>Offer across all positions</dt><dd>{{ receipt.priorTotalOfferBackedQuantity }} → {{ receipt.remainingTotalOfferBackedQuantity }}</dd></dl>
         <p>{{ receipt.reason }}</p><small>Recorded {{ time(receipt.recordedAt) }} · Purchase revision {{ receipt.revision }}</small>
@@ -132,13 +132,13 @@ async function save() {
         <template v-if="'offers' in snapshot">
           <h3>Offers at this position</h3>
           <ul v-if="snapshot.offers.length" class="receipt-lines" aria-label="Offers at this position"><li v-for="o in snapshot.offers" :key="o.offerId">
-            <strong>{{ money(o.unitPriceMinor,o.currency) }} per unit</strong><p>{{ o.backedQuantity }} backed here · {{ o.totalOfferBackedQuantity }} across all positions</p>
+            <strong>{{ recordedOfferPrice(o) }}</strong><p>{{ o.backedQuantity }} backed here · {{ o.totalOfferBackedQuantity }} across all positions</p>
             <small>Offer {{ o.offerId }}</small><p v-if="o.authority==='unverified-origin'" class="warning">Internal origin unverified</p>
             <a :href="link('offers',o.offerId)" :aria-label="'Review offer '+o.offerId">Review offer and history</a></li></ul>
           <p v-else-if="!loading && !error && !partial && connected">No offers recorded on this page.</p>
         </template>
         <template v-if="history">
-          <section aria-label="Selected offer"><h3>{{ money(history.offer.unitPriceMinor,history.offer.currency) }} per unit</h3>
+          <section aria-label="Selected offer"><h3>{{ recordedOfferPrice(history.offer) }}</h3>
             <p>{{ history.offer.authority==='internal-unpublished' ? 'Internal unpublished offer' : 'Internal origin unverified' }}</p>
             <small>Offer {{ history.offer.offerId }}</small>
             <p>{{ history.offer.backedQuantity }} backed at this position · {{ history.offer.totalOfferBackedQuantity }} across all positions</p></section>

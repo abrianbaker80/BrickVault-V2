@@ -115,11 +115,23 @@ def stage_upgrade(source, output, release=RELEASE):
                     candidate.migrate()
                     candidate.grants()
                     after = signatures(candidate, candidate.database)
+                    comparable = after.copy()
+                    if "offers" in before and before["schema_version"]["rows"] < 16 <= after["schema_version"]["rows"]:
+                        # The old price had been entered in the purchase currency. Verify that fact
+                        # and compare every pre-existing offer column against its original signature.
+                        if candidate.sql("""
+                            SELECT NOT EXISTS (
+                                SELECT 1 FROM brickvault.offers o JOIN brickvault.purchases p ON p.id=o.purchase_id
+                                WHERE o.currency IS DISTINCT FROM p.currency OR o.price_scale_verified
+                            );
+                        """) != "t":
+                            raise ValueError("An opening offer differs from its historical currency or claims an unverified price scale.")
+                        comparable.update(row_signatures(candidate, candidate.database, ("offers",), pre_currency_offers=True))
                     if (
                         after["schema_version"]["rows"]
                         <= before["schema_version"]["rows"]
                         or any(
-                            before[t] != after[t]
+                            before[t] != comparable[t]
                             for t in before
                             if t != "schema_version"
                         )

@@ -14,7 +14,7 @@ export async function fixture(page: Page) {
   await page.goto('/#locations')
   await signIn(page)
   const { workspaceId, csrfToken } = await (await page.request.get('/api/v1/session')).json()
-  const headers = { Origin: new URL(page.url()).origin, 'X-CSRF-Token': csrfToken, 'X-Workspace-Id': workspaceId }
+  const headers = { Origin: new URL(page.url()).origin, 'X-CSRF-Token': csrfToken, 'X-Workspace-Id': workspaceId, 'X-BrickVault-Price-Scale': '1' }
   async function write(path: string, expectedRevision: number, fields: object) {
     const response = await page.request.post('/api/v1/' + path, { headers, data: {
       commandId: randomUUID(), expectedRevision, ...fields
@@ -124,7 +124,8 @@ export async function audit(page: Page) {
   expect(scan.violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target) }))).toEqual([])
 }
 export async function purchases(page: Page, ids: string[]) {
-  const response = await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true')
+  const response = await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true',
+    { headers: { 'X-BrickVault-Price-Scale': '1' } })
   expect(response.ok()).toBe(true)
   const snapshot: ReceivingWorkspace = await response.json()
   return snapshot.purchases.filter(p => ids.includes(p.id))

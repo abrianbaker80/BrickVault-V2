@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Receiving lets operators set the selling currency and manual unit price of an unpublished offer. Receipt costs keep their purchase currency. Transfer, stock-loss and withdrawal receipts show the recorded offer price. [Draft offer currency](https://github.com/abrianbaker80/BrickVault-V2/issues/52)
+
 - The movement history keeps its source and destination buttons in place while Workbench refreshes the bin read and capacity status.
 
 - Inventory now finds stock by a bin’s full alternate or former label, including stock on archived shelves. A recount of all matches uses the same search and filters. [Inventory label search](https://github.com/abrianbaker80/BrickVault-V2/issues/48)

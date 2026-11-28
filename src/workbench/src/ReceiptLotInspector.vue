@@ -4,7 +4,7 @@ import { api, ApiFailure, explain } from './api'
 import type { ReceiptLot, TimelineEvent } from './api'
 import { partOutLink, closureLink, countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink, recoveryLink } from './countLinks'
 import { time } from './presentation'
-import { money } from './receiving'
+import { receiptCost } from './receiving'
 
 const props = defineProps<{ id: string; asOf: string; connected: boolean }>()
 const emit = defineEmits<{ failure: [reason: unknown]; inspect: [id: string] }>()
@@ -79,21 +79,21 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
       <dl class="details">
         <dt>{{ page.partOut?.parentTransformationId ? 'Originally produced' : 'Originally received' }}</dt><dd>{{ page.receivedQuantity }}</dd>
         <template v-if="page.partOut?.consumedQuantity"><dt>Consumed by part-outs</dt><dd>{{ page.partOut.consumedQuantity }}</dd>
-          <dt>Cost consumed by part-outs</dt><dd>{{ money(page.partOut.consumedItemCostMinor,page.currency) }}</dd></template>
+          <dt>Cost consumed by part-outs</dt><dd>{{ receiptCost(page.partOut.consumedItemCostMinor,page.currency) }}</dd></template>
         <dt>{{ page.partOut?.parentTransformationId ? 'Produced but unplaced' : 'Received but unplaced' }}</dt><dd>{{ page.unplacedQuantity }}</dd>
         <dt>In positions</dt><dd>{{ page.positionedQuantity }}</dd>
         <template v-if="page.recoveryTotals?.recoveredQuantity"><dt>Gross posted loss</dt><dd>{{ page.recoveryTotals.grossLostQuantity }}</dd><dt>Recovered after inspection</dt><dd>{{ page.recoveryTotals.recoveredQuantity }}</dd>
-          <dt>Net still missing</dt><dd>{{ page.lostQuantity }}</dd><dt>Gross loss cost</dt><dd>{{ money(page.recoveryTotals.grossAllocatedItemCostMinor,page.currency) }}</dd><dt>Restored item cost</dt><dd>{{ money(page.recoveryTotals.restoredItemCostMinor,page.currency) }}</dd></template>
+          <dt>Net still missing</dt><dd>{{ page.lostQuantity }}</dd><dt>Gross loss cost</dt><dd>{{ receiptCost(page.recoveryTotals.grossAllocatedItemCostMinor,page.currency) }}</dd><dt>Restored item cost</dt><dd>{{ receiptCost(page.recoveryTotals.restoredItemCostMinor,page.currency) }}</dd></template>
         <template v-else><dt>Posted loss</dt><dd>{{ page.lostQuantity }}</dd></template>
         <dt>Current on hand</dt><dd>{{ page.currentOnHandQuantity }}</dd>
         <template v-if="page.quarantinedQuantity"><dt>Quarantined in bins</dt><dd>{{ page.quarantinedQuantity }}</dd></template>
         <dt>Held for builds</dt><dd>{{ page.heldQuantity }}</dd>
         <dt>Backed by offers</dt><dd>{{ page.offerBackedQuantity }}</dd>
         <dt>Available to back</dt><dd>{{ page.freeToBackQuantity }}</dd>
-        <dt>{{ page.partOut?.parentTransformationId ? 'Assigned output cost' : 'Whole-delivery item cost' }}</dt><dd>{{ money(page.itemCostMinor, page.currency) }}<template v-if="page.itemCostMinor === null"> ({{ page.currency }})</template></dd>
+        <dt>{{ page.partOut?.parentTransformationId ? 'Assigned output cost' : 'Whole-delivery item cost' }}</dt><dd>{{ receiptCost(page.itemCostMinor, page.currency) }}<template v-if="page.itemCostMinor === null"> ({{ page.currency }})</template></dd>
         <template v-if="(page.lostQuantity || page.partOut?.consumedQuantity || page.recoveryTotals?.recoveredQuantity) && page.itemCostMinor !== null">
-          <dt>Item cost allocated to loss</dt><dd>{{ money(page.allocatedLostItemCostMinor, page.currency) }}</dd>
-          <dt>Remaining item basis</dt><dd>{{ money(page.remainingItemCostMinor, page.currency) }}</dd>
+          <dt>Item cost allocated to loss</dt><dd>{{ receiptCost(page.allocatedLostItemCostMinor, page.currency) }}</dd>
+          <dt>Remaining item basis</dt><dd>{{ receiptCost(page.remainingItemCostMinor, page.currency) }}</dd>
         </template>
       </dl>
       <p v-if="page.partOut?.parentTransformationId && page.partOut.sourcePositionId" class="lot-heading">

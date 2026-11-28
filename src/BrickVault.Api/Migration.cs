@@ -7,7 +7,7 @@ namespace BrickVault.Api;
 
 internal static class Migration
 {
-    private static readonly string[] Scripts = ["001_reference.sql", "002_jobs.sql", "003_receiving.sql", "004_transfers.sql", "005_stock_counts.sql", "006_build_holds.sql", "007_stock_losses.sql", "008_recounts.sql", "009_draft_backing_withdrawals.sql", "010_stock_quarantine.sql", "011_stock_shortage_closures.sql", "012_stock_loss_recovery.sql", "013_stock_part_out.sql", "014_location_registry.sql", "015_location_capacity.sql"];
+    private static readonly string[] Scripts = ["001_reference.sql", "002_jobs.sql", "003_receiving.sql", "004_transfers.sql", "005_stock_counts.sql", "006_build_holds.sql", "007_stock_losses.sql", "008_recounts.sql", "009_draft_backing_withdrawals.sql", "010_stock_quarantine.sql", "011_stock_shortage_closures.sql", "012_stock_loss_recovery.sql", "013_stock_part_out.sql", "014_location_registry.sql", "015_location_capacity.sql", "016_offer_currency.sql"];
     private static readonly string[] Checksums = Scripts.Select((_, index) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Script(index + 1))))).ToArray();
     public static int Current => Scripts.Length;

@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { StockPosition } from './api'
 import { partOutLink, countPositionLink, draftBackingLink, quarantineLink } from './countLinks'
-import { money } from './receiving'
+import { receiptCost } from './receiving'
 import { label, time } from './presentation'
 
 const props = defineProps<{ record: StockPosition; asOf: string }>()
@@ -29,7 +29,7 @@ const layer = computed(() => props.record.layer)
     <h3>Receipt provenance</h3><dl class="details">
       <dt>Purchase</dt><dd>{{ layer.purchaseReference }}</dd><dt>Delivery</dt><dd>{{ layer.deliveryReference }}</dd>
       <dt>Whole delivery</dt><dd>{{ layer.receiptQuantity }} units</dd><dt>Whole-delivery item cost</dt>
-      <dd>{{ money(layer.receiptItemCostMinor, layer.currency) }}<template v-if="layer.receiptItemCostMinor === null"> ({{ layer.currency }})</template></dd>
+      <dd>{{ receiptCost(layer.receiptItemCostMinor, layer.currency) }}<template v-if="layer.receiptItemCostMinor === null"> ({{ layer.currency }})</template></dd>
       <dt>Original bin</dt><dd>{{ layer.locationCodeAtPutaway }}</dd>
       <dt>Recorded catalog revision</dt><dd>{{ layer.catalogRevision }}</dd>
     </dl>

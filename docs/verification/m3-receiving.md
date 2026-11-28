@@ -5,9 +5,17 @@ Open **Receiving** in the signed-in Workbench. Use an isolated V2 instance and f
 1. Record a purchase reference, source, currency and expected unit count. Record a purchase charge separately when it still needs allocation.
 2. Count each delivery into intake. Record its own reference, quantity and evidenced item cost. Leave the cost unknown when it has no evidence. An unidentified delivery stays in intake until identification and physical putaway.
 3. Select the delivery, item and destination. Enter the actual bin code and quantity. Each confirmation retains its source delivery, including when only part of the delivery is ready.
-4. Set a manual unit price and select how many free units each placement will back. The preview records an unpublished offer. Backing the offer leaves physical custody unchanged.
+4. In **Prepare offer**, select the item and check **Selling currency**. It starts with the purchase currency. To price the draft in another currency, enter its three-letter code, then enter the manual unit price in that currency. Changing the currency clears the price. Choose how many free units each placement will back and save the unpublished offer. Backing the offer leaves physical custody unchanged.
+
+For a delivery invoiced in USD, an operator can price its draft at JPY 225 per unit. **Price and publication** shows the JPY price and zero published units. **Cost coverage** and the delivery continue to show documented amounts in USD. Missing receipt costs stay unknown. [Draft offer currency](https://github.com/abrianbaker80/BrickVault-V2/issues/52)
+
+Workbench uses a fixed minor-unit scale for both prices and costs. For example, IQD 1.234 is stored as 1,234 minor units, HUF 1.00 as 100, and JPY 1 as one. Three-letter codes without a published numeric scale use two decimal places. An upgrade preserves the recorded integers and currencies. For a nonzero acquisition cost in a currency older browsers could interpret differently, the receipt shows the stored integer beside its value at current precision. If an older browser showed a different amount, use the original receipt to establish the intended price. [ISO 4217 currency list maintained by SIX](https://www.six-group.com/en/products-services/financial-information/market-reference-data/data-standards.html)
 
 The reference case receives eight identified units at a total item cost of USD 8.00 and four units with unknown item cost. Eight go into B-12, three into C-03, and one remains in intake. Of eleven free units, eight have documented item cost. USD 0.60 remains a separate unapplied charge. An internal offer can use five units from B-12 and two from C-03 at USD 1.50 each, leaving four free units withheld. The case exercises an incorrect bin, replay after restart, overcommitted backing and recovery from an encrypted backup. [Issue #13](https://github.com/abrianbaker80/BrickVault-V2/issues/13)
+
+If the server rejects a newly entered selling currency, check the server version before trying again. If **Pending confirmation** appears after an interrupted save, reconnect to the updated server and choose **Retry command**. Workbench reuses the original price and command ID. If it asks you to enter a price again, verify the intended currency and decimal amount against your original pricing record before saving.
+
+An older draft can show its currency and an integer labeled **recorded minor units**. The original browser's decimal precision is unknown. Check your original pricing record before using that amount. If an older Workbench asks for an update, reload it before opening the affected offers.
 
 ## Inspect a storage bin
 

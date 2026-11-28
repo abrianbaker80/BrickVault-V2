@@ -142,7 +142,7 @@ async function request(path: string, options: RequestInit = {}) {
   const response = await fetch('/api/v1/' + path, {
     ...options, cache: 'no-store', mode: 'same-origin', credentials: 'same-origin', redirect: 'error',
     signal: AbortSignal.timeout(15000),
-    headers: { Accept: 'application/json', ...options.headers }
+    headers: { Accept: 'application/json', ...options.headers, 'X-BrickVault-Price-Scale': '1' }
   })
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null)

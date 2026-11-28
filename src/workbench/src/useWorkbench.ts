@@ -11,7 +11,9 @@ import type { CatalogInput, Command, Held, LocationInput, ReceivingWorkspace, Se
 type ReadState = 'loading' | 'ready' | 'disconnected' | 'partial'
 export function useWorkbench(page: Ref<string>) {
   const session = shallowRef<Session | null>(null)
-  const workspace = shallowRef<Workspace | null>(null)
+  const workspaceRead = shallowRef<{ data: Workspace; allAudit: boolean } | null>(null)
+  const workspace = computed(() => workspaceRead.value?.data ?? null)
+  const activityWorkspace = computed(() => workspaceRead.value?.allAudit ? workspaceRead.value.data : null)
   const receiving = shallowRef<ReceivingWorkspace | null>(null)
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
@@ -39,7 +41,7 @@ export function useWorkbench(page: Ref<string>) {
   function clearSession(message = '') {
     ++generation
     session.value = null
-    workspace.value = null
+    workspaceRead.value = null
     receiving.value = null
     pending.value = []
     held.value = []
@@ -63,20 +65,22 @@ export function useWorkbench(page: Ref<string>) {
       const authenticated = verified?.session ?? await api.session()
       if (current !== generation) return
       if (session.value?.workspaceId !== authenticated.workspaceId) {
-        workspace.value = null
+        workspaceRead.value = null
         receiving.value = null
         notice.value = null
+        error.value = ''
         readState.value = 'loading'
       }
       session.value = authenticated
       signedOut.value = false
       loadPending()
+      const allAudit = page.value === 'activity'
       const finished = Promise.all([
-        (page.value === 'catalog' || page.value === 'locations' ? verified?.references : undefined) ?? api.workspace(page.value === 'activity'),
+        (page.value === 'catalog' || page.value === 'locations' ? verified?.references : undefined) ?? api.workspace(allAudit),
         page.value === 'receiving' ? api.receiving() : null
       ]).then(([result, stock]) => {
         if (current !== generation) return
-        workspace.value = result
+        workspaceRead.value = { data: result, allAudit }
         receiving.value = stock
         readState.value = result.complete && (!stock || stock.complete) ? 'ready' : 'partial'
       }).catch(reason => failedRefresh(current, reason))
@@ -365,6 +369,31 @@ export function useWorkbench(page: Ref<string>) {
       if (expired(reason)) return
       if (reason instanceof ApiFailure && reason.status === 413 && reason.detail?.code === 'request_too_large') {
         await resolveSizeRejection(command, reason, firstAttempt)
+      } else if (command.kind === 'offer' && reason instanceof ApiFailure && reason.detail && (
+          (command.body.currency && reason.status === 400 && reason.detail.code === 'invalid_json') ||
+          (!command.body.currency && reason.status === 409 && reason.detail.code === 'offer_price_reentry_required'))) {
+        const needsReentry = reason.detail.code === 'offer_price_reentry_required'
+        // The server checks for an exact saved receipt before requiring a new price.
+        if (firstAttempt || needsReentry) {
+          forget(command)
+          loadPending()
+        }
+        // Navigation can start a new session read while the original write is in flight.
+        while (readState.value === 'loading') {
+          await new Promise<void>(resolve => watch(readState, () => resolve(), { once: true }))
+        }
+        if (session.value?.workspaceId !== command.workspaceId || readState.value === 'disconnected') return
+        const reference = ' Reference ' + reason.detail.correlationId + '.'
+        if (needsReentry) {
+          error.value = 'Verify the original intended unit price, then enter the selling currency and price again in Prepare offer.' + reference
+        } else if (firstAttempt) {
+          error.value = 'The server rejected the draft with selling currency ' + command.body.currency +
+            '. Check the server version before trying again.' + reference
+        } else {
+          error.value = 'Confirmation is still pending. Reconnect to a server that supports the original draft currency ' +
+            command.body.currency + ' and retry the command.' + reference
+          readState.value = 'disconnected'
+        }
       } else if (reason instanceof ApiFailure && reason.detail?.code === 'workspace_mismatch') {
         await refresh()
         error.value = 'The workspace changed. The original command is held for its issuing workspace.'
@@ -427,6 +456,6 @@ export function useWorkbench(page: Ref<string>) {
     return send(command, true)
   }
 
-  return { session, workspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
+  return { session, workspace, activityWorkspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
     canSend, canCreate, refresh, signIn, signOut, create, record, send, expired }
 }

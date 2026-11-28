@@ -5,7 +5,7 @@ import type { BinTransferSnapshot, Catalog, Location, TransferControls, Transfer
 import TransferForm from './TransferForm.vue'
 import CountWorkspace from './CountWorkspace.vue'
 import { countPositionLink, holdPositionLink, draftBackingLink, quarantineLink, type CountLink } from './countLinks'
-import { itemLabel, money } from './receiving'
+import { itemLabel, receiptCost, recordedOfferPrice } from './receiving'
 import { time } from './presentation'
 
 const props = defineProps<{ location: Location; asOf: string; connected: boolean; workspaceLoading: boolean; locations: Location[]; catalog: Catalog[]; transfers: TransferControls; countLink?: CountLink }>()
@@ -61,6 +61,7 @@ function sameSource(original: TransferPosition, current: TransferPosition) {
   return original.backing.every(row => {
     const offer = backing.get(row.offerId)
     return offer?.quantity === row.quantity && offer.currency === row.currency && offer.unitPriceMinor === row.unitPriceMinor
+      && offer.priceScaleVerified === row.priceScaleVerified
   })
 }
 
@@ -229,7 +230,7 @@ watch(binScope,
             <small v-if="layer.locationCodeAtPutaway !== stock.location.code">Bin code at putaway {{ layer.locationCodeAtPutaway }}</small>
             <small>{{ layer.backedQuantity }} backed · {{ layer.unbackedQuantity }} unbacked · {{ layer.freeToBackQuantity }} available to back</small>
             <small v-if="layer.quarantinedQuantity">{{ layer.quarantinedQuantity }} quarantined in this bin</small>
-            <small>Whole delivery of {{ layer.receiptQuantity }} · Item cost {{ money(layer.receiptItemCostMinor, layer.currency) }}<template v-if="layer.receiptItemCostMinor === null"> ({{ layer.currency }})</template></small>
+            <small>Whole delivery of {{ layer.receiptQuantity }} · Item cost {{ receiptCost(layer.receiptItemCostMinor, layer.currency) }}<template v-if="layer.receiptItemCostMinor === null"> ({{ layer.currency }})</template></small>
             <details><summary>Placement details</summary><small>Placement {{ layer.placementId }}</small>
               <small>Receipt correlation ID {{ layer.receiptCorrelationId }}</small></details>
             <button type="button" class="move-stock" :disabled="!ready || !transfers.enabled || locations.length < 2 || checking || fenced.has(layer.placementId)"
@@ -253,7 +254,7 @@ watch(binScope,
             <details><summary>Movement receipt</summary>
               <small>Catalog {{ move.catalogId }} · recorded revision {{ move.catalogRevision }}</small>
               <small v-if="!move.backing.length">No offer backing moved</small>
-              <small v-for="offer in move.backing" :key="offer.offerId">{{ offer.quantity }} backed · Offer {{ offer.offerId }}</small>
+              <small v-for="offer in move.backing" :key="offer.offerId">{{ offer.quantity }} backed · Offer {{ offer.offerId }} · {{ recordedOfferPrice(offer) }}</small>
               <small>Correlation ID {{ move.correlationId }}</small>
             </details>
             <button v-if="locations.some(l => l.id === (location.id === move.sourceLocationId ? move.destinationLocationId : move.sourceLocationId))"

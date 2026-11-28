@@ -2,7 +2,7 @@
 import { nextTick, ref, shallowRef, watch } from 'vue'
 import { api, ContractFailure, explain, type PartOutEvidence } from './api'
 import { partOutLink, quarantineLink } from './countLinks'
-import { itemLabel, money } from './receiving'
+import { itemLabel, receiptCost } from './receiving'
 import { time } from './presentation'
 
 const props=defineProps<{source:string;receiptId:string;asOf:string;connected:boolean}>()
@@ -41,14 +41,14 @@ watch(()=>[props.asOf,props.connected,requested.value,attempt.value] as const,as
       <button v-if="connected" :disabled="loading" @click="attempt++">Retry receipt read</button></p>
       <p v-else-if="loading" role="status">Reading the part-out receipt…</p>
       <template v-if="page">
-        <p><strong>{{ itemLabel([page.recordedSourceCatalog],page.recordedSourceCatalog.id) }}</strong><small>{{ page.receipt.deliveryReference }} · {{ page.receipt.deliveryQuantity }} units originally recorded at {{ money(page.receipt.itemCostMinor,page.receipt.currency) }} · Confirmed input bin {{ page.confirmedSourceLocationCode }} · {{ time(page.recordedAt) }}</small></p>
-        <dl class="details"><dt>Input units consumed</dt><dd>{{ page.quantity }}</dd><dt>Consumed input cost</dt><dd>{{ money(page.sourceItemCostMinor,page.receipt.currency) }}</dd>
-          <dt>Assigned to outputs</dt><dd>{{ money(page.sourceItemCostMinor===null || page.residualItemCostMinor===null ? null : page.sourceItemCostMinor-page.residualItemCostMinor,page.receipt.currency) }}</dd>
-          <dt>Unallocated cost</dt><dd>{{ money(page.residualItemCostMinor,page.receipt.currency) }}</dd></dl>
+        <p><strong>{{ itemLabel([page.recordedSourceCatalog],page.recordedSourceCatalog.id) }}</strong><small>{{ page.receipt.deliveryReference }} · {{ page.receipt.deliveryQuantity }} units originally recorded at {{ receiptCost(page.receipt.itemCostMinor,page.receipt.currency) }} · Confirmed input bin {{ page.confirmedSourceLocationCode }} · {{ time(page.recordedAt) }}</small></p>
+        <dl class="details"><dt>Input units consumed</dt><dd>{{ page.quantity }}</dd><dt>Consumed input cost</dt><dd>{{ receiptCost(page.sourceItemCostMinor,page.receipt.currency) }}</dd>
+          <dt>Assigned to outputs</dt><dd>{{ receiptCost(page.sourceItemCostMinor===null || page.residualItemCostMinor===null ? null : page.sourceItemCostMinor-page.residualItemCostMinor,page.receipt.currency) }}</dd>
+          <dt>Unallocated cost</dt><dd>{{ receiptCost(page.residualItemCostMinor,page.receipt.currency) }}</dd></dl>
         <p>{{ page.reason }}</p>
         <section aria-label="Recorded outputs"><h3 ref="outputHeading" tabindex="-1">Recorded outputs</h3>
           <ul class="receipt-lines"><li v-for="o in page.outputs" :key="o.lineId"><strong>{{ o.quantity }} × {{ itemLabel([o.recordedCatalog],o.recordedCatalog.id) }}</strong>
-            <small>{{ o.disposition==='retained' ? 'Retained in quarantine' : 'Accepted stock' }} · Confirmed bin {{ o.confirmedLocationCode }} · {{ o.itemCostMinor===null && page.sourceItemCostMinor!==null ? 'Cost basis unassigned' : 'Assigned cost '+money(o.itemCostMinor,page.receipt.currency) }}</small>
+            <small>{{ o.disposition==='retained' ? 'Retained in quarantine' : 'Accepted stock' }} · Confirmed bin {{ o.confirmedLocationCode }} · {{ o.itemCostMinor===null && page.sourceItemCostMinor!==null ? 'Cost basis unassigned' : 'Assigned cost '+receiptCost(o.itemCostMinor,page.receipt.currency) }}</small>
             <small v-if="!o.recordedCatalog.integrationEligible">Recorded mapping {{ o.recordedCatalog.mapping }} · License {{ o.recordedCatalog.license }} · Color {{ o.recordedCatalog.colorState }}</small>
             <nav aria-label="Output evidence"><a :href="'#inventory/'+o.positionId">Output position</a><a :href="'#inventory/lot/'+o.deliveryId">Output lot</a>
               <a v-if="o.quarantineId" :href="quarantineLink(o.location.id,o.positionId,o.quarantineId)">Retained quarantine receipt</a></nav>

@@ -1,0 +1,15 @@
+[
+  "AED", "AMD", "AOA", "ARS", "AUD", "AWG", "AZN", "BAM", "BBD", "BDT", "BHD", "BIF",
+  "BMD", "BND", "BOB", "BOV", "BRL", "BSD", "BTN", "BWP", "BYN", "BZD", "CAD", "CDF",
+  "CHE", "CHF", "CHW", "CLF", "CLP", "CNY", "COU", "CRC", "CUP", "CVE", "CZK", "DJF",
+  "DKK", "DOP", "DZD", "EGP", "ERN", "ETB", "EUR", "FJD", "FKP", "GBP", "GEL", "GHS",
+  "GIP", "GMD", "GNF", "GTQ", "GYD", "HKD", "HNL", "HTG", "ILS", "INR", "ISK", "JMD",
+  "JOD", "JPY", "KES", "KGS", "KHR", "KMF", "KRW", "KWD", "KYD", "KZT", "LKR", "LRD",
+  "LSL", "LYD", "MAD", "MDL", "MKD", "MNT", "MOP", "MRU", "MUR", "MVR", "MWK", "MXN",
+  "MXV", "MYR", "MZN", "NAD", "NGN", "NIO", "NOK", "NPR", "NZD", "OMR", "PAB", "PEN",
+  "PGK", "PHP", "PLN", "PYG", "QAR", "RON", "RUB", "RWF", "SAR", "SBD", "SCR", "SDG",
+  "SEK", "SGD", "SHP", "SLE", "SRD", "SSP", "STN", "SVC", "SZL", "THB", "TJS", "TMT",
+  "TND", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH", "UGX", "USD", "USN", "UYI", "UYU",
+  "UYW", "UZS", "VED", "VES", "VND", "VUV", "WST", "XAD", "XAF", "XCD", "XCG", "XOF",
+  "XPF", "ZAR", "ZMW", "ZWG"
+]

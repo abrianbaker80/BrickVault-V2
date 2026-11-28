@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs'
 import { request } from 'node:https'
 import { expect, type Page } from '@playwright/test'
 import { test } from './trusted'
-import { audit, fixture, receiptBeforeDirectory } from './bin-fixture'
+import { audit, fixture, purchases, receiptBeforeDirectory } from './bin-fixture'
 import { countReceiptLink, lossCaseLink, lossReceiptLink } from '../src/countLinks'
-import type { CountSnapshot, ReceivingWorkspace, StockLoss, StockLossCommand } from '../src/api'
+import type { CountSnapshot, StockLoss, StockLossCommand } from '../src/api'
 
 const form = (page:Page) => page.getByRole('dialog',{name:'Post stock loss',exact:true})
 const receipt = (page:Page) => page.getByRole('dialog',{name:'Posted stock loss',exact:true})
@@ -28,7 +28,7 @@ test('one cross-page loss decision reduces only the chosen offers at the selecte
   for(let n=0;n<27;n++) {
     const backing = [{placementId:positionId,quantity:1}]
     if(!n) backing.push({placementId:sibling,quantity:1})
-    const id = await f.write('receiving/offers',4+n,{purchaseId,catalogId:f.catalogId,unitPriceMinor:100+n,backing})
+    const id = await f.write('receiving/offers',4+n,{purchaseId,catalogId:f.catalogId,currency:'JPY',unitPriceMinor:100+n,backing})
     if(!n) shared=id
   }
   const base = {purchaseId,positionId,locationId:f.a.id,confirmedLocationCode:f.a.code}
@@ -44,6 +44,7 @@ test('one cross-page loss decision reduces only the chosen offers at the selecte
   await expect(work.getByRole('link',{name:'Latest witnessed count'})).toHaveAttribute('href',countReceiptLink(f.a.id,latest))
   const offerRows = work.getByRole('list',{name:'Offer backing on this position'})
   await expect(offerRows.getByRole('listitem')).toHaveCount(25)
+  await expect(offerRows.getByRole('listitem').first()).toContainText(/JPY\s*1\d\d per unit/)
   const ids: string[] = (await (await firstPage).json()).offers.map((o:{id:string}) => o.id)
   const first = ids.includes(shared) ? shared : ids[0]
   const input = (id:string) => work.getByLabel('Reduce units for offer ' + id,{exact:true})
@@ -103,11 +104,11 @@ test('one cross-page loss decision reduces only the chosen offers at the selecte
   await expect(receipt(page).getByRole('link',{name:'Witnessed count used for this posting'})).toHaveAttribute('href',countReceiptLink(f.a.id,latest))
   await page.reload()
   await expect(receipt(page)).toContainText('Owner selected the exact backing to reduce')
+  await expect(receipt(page).getByRole('listitem').first()).toContainText(/JPY\s*1\d\d per unit/)
   await page.setViewportSize({width:1440,height:900})
   await page.screenshot({path:info.outputPath('posted-stock-loss-desktop.png')})
   await audit(page)
-  const response=await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true')
-  const purchase=((await response.json()) as ReceivingWorkspace).purchases.find(p=>p.id===purchaseId)!
+  const [purchase] = await purchases(page, [purchaseId])
   expect(purchase.balances.physicalOnHand).toBe(4)
   expect(purchase.balances.reserved).toBe(1)
   expect(purchase.deliveries[0]).toMatchObject({quantity:31,intakeQuantity:0,lostQuantity:27,allocatedLostItemCostMinor:2700,remainingItemCostMinor:400})
@@ -233,8 +234,7 @@ test('a protected hold blocks posting and a newly arrived witness rejects a prev
   await work.getByRole('button',{name:'Review updated quantities'}).click()
   await expect(work.getByRole('link',{name:'Latest witnessed count'})).toHaveAttribute('href',countReceiptLink(f.a.id,newer))
   await expect(work.getByLabel('Reduce units for offer '+f.firstOffer,{exact:true})).toHaveValue('')
-  const response=await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true')
-  const current=((await response.json()) as ReceivingWorkspace).purchases.find(p=>p.id===base.purchaseId)!
+  const [current] = await purchases(page, [base.purchaseId])
   expect(current.balances).toMatchObject({physicalOnHand:8,reserved:1,backedQuantity:3})
   expect(current.deliveries[0].lostQuantity).toBe(0)
 })

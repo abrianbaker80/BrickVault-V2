@@ -221,13 +221,50 @@ test('Activity history pages retain their command after a newer write and open t
     locationId=(await response.json()).entityId
     return commandId
   }
+  const purchaseCommand=randomUUID()
+  const purchase=await page.request.post('/api/v1/receiving/purchases',{headers,data:{
+    commandId:purchaseCommand,expectedRevision:0,reference:code,source:'Fictional audit fixture',
+    currency:'USD',orderedQuantity:1,pendingChargeMinor:null
+  }})
+  expect(purchase.status()).toBe(200)
   const first=await save(1)
   for(let rev=2;rev<=28;rev++)await save(rev)
-  await page.getByRole('link',{name:'Activity'}).click()
+  const referenceRead=page.waitForResponse(r=>r.url().endsWith('/api/v1/workspace'))
+  await page.getByRole('button',{name:'Refresh',exact:true}).click()
+  const references=((await (await referenceRead).json()) as Workspace).audit
+  expect(references.length).toBeGreaterThan(25)
+  expect(references.some(row=>row.commandId===purchaseCommand)).toBe(false)
+  await connected(page)
   const history=page.getByRole('region',{name:'Audit history',exact:true})
   const nav=history.getByRole('navigation',{name:'Audit history pages'})
+  async function duringHistoryRead(open:()=>Promise<void>, inspect:()=>Promise<void>){
+    let arrived!:()=>void, release!:()=>void
+    const held=new Promise<void>(resolve=>{arrived=resolve})
+    const resume=new Promise<void>(resolve=>{release=resolve})
+    const path='**/api/v1/workspace?audit=all'
+    await page.route(path,async route=>{
+      const response=await route.fetch()
+      arrived()
+      try {await resume;await route.fulfill({response})} finally {await response.dispose()}
+    },{times:1})
+    const completed=page.waitForResponse(r=>r.url().endsWith('/api/v1/workspace?audit=all'))
+    try {await open();await held;await inspect()} finally {release();await completed}
+    await connected(page)
+  }
+  await duringHistoryRead(()=>page.getByRole('link',{name:'Activity'}).click(),async()=>{
+    await expect(page.locator('.read-state')).toHaveText('Loading')
+    expect(await nav.count()).toBe(0)
+    await expect(page.getByText('Loading audit history…',{exact:true})).toBeVisible()
+  })
   await expect(history.getByRole('listitem')).toHaveCount(25)
-  await nav.getByRole('button',{name:'Older commands'}).press('Enter')
+  expect(await history.locator('.count').innerText()).not.toBe(references.length+' events')
+  // Paging a verified read is local, even while its replacement is in flight.
+  await duringHistoryRead(()=>page.getByRole('button',{name:'Refresh',exact:true}).click(),async()=>{
+    const older=nav.getByRole('button',{name:'Older commands'})
+    await expect(older).toBeEnabled()
+    await older.press('Enter')
+    await expect(history.getByRole('heading')).toBeFocused()
+  })
   await expect(history.getByRole('heading')).toBeFocused()
   const inspect=(revision:number)=>history.getByRole('button',{name:'Inspect command for '+code+' revision '+revision+' revision 1',exact:true})
   await inspect(28).press('Enter')

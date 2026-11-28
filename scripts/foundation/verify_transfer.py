@@ -17,7 +17,7 @@ def seed_location(instance, location_id, code, name):
     """, role="bv_migrator")
 
 
-def seed_opening_position(instance, location_id):
+def seed_opening_position(instance, location_id, currency="USD"):
     """Create a backed position with valid v3 facts before the stopped-copy upgrade."""
     item, purchase, delivery, placement, offer = [str(uuid.uuid4()) for _ in range(5)]
     facts = [
@@ -43,7 +43,7 @@ def seed_opening_position(instance, location_id):
             completeness,source,license,mapping) VALUES ('{item}',1,'part','FIX-17','Training part','known',0,
             'new','complete','Training fixture','operator-owned','confirmed');
         INSERT INTO brickvault.purchases(id,command_id,revision,reference,source,currency,ordered_quantity)
-            VALUES ('{purchase}','{facts[0][1]}',4,'MIG-1','Training purchase','USD',4);
+            VALUES ('{purchase}','{facts[0][1]}',4,'MIG-1','Training purchase','{currency}',4);
         INSERT INTO brickvault.deliveries(id,command_id,purchase_id,reference,quantity,catalog_id,item_cost_minor)
             VALUES ('{delivery}','{facts[1][1]}','{purchase}','Box',4,'{item}',NULL);
         INSERT INTO brickvault.placements(id,command_id,purchase_id,delivery_id,catalog_id,location_id,location_code,quantity)

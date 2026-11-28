@@ -3,7 +3,7 @@ import { useBinRegistry } from "./useBinRegistry"
 import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, ContractFailure, explain, type Location, type RecoveryEvidence, type RecoveryReview, type TransferControls } from './api'
 import { lossReceiptLink, quarantineLink, recoveryLink, type CountLink } from './countLinks'
-import { itemLabel, money } from './receiving'
+import { itemLabel, receiptCost } from './receiving'
 import { time } from './presentation'
 
 type Route = NonNullable<NonNullable<CountLink>['recovery']>
@@ -130,9 +130,9 @@ async function submit() {
         <dl class="details" aria-label="Loss balance"><dt>Originally posted loss</dt><dd>{{ review.originalLostQuantity }}</dd>
           <dt>Already recovered</dt><dd>{{ review.recoveredQuantity }}</dd><dt>Still missing</dt><dd>{{ review.remainingQuantity }}</dd>
           <dt>Currently in this position</dt><dd>{{ review.position.layer.quantity }}</dd>
-          <dt>Original loss cost</dt><dd>{{ money(review.originalAllocatedItemCostMinor,review.receipt.currency) }}</dd>
-          <dt>Previously restored cost</dt><dd>{{ money(review.restoredItemCostMinor,review.receipt.currency) }}</dd>
-          <dt>Remaining loss cost</dt><dd>{{ money(review.remainingLostItemCostMinor,review.receipt.currency) }}</dd></dl>
+          <dt>Original loss cost</dt><dd>{{ receiptCost(review.originalAllocatedItemCostMinor,review.receipt.currency) }}</dd>
+          <dt>Previously restored cost</dt><dd>{{ receiptCost(review.restoredItemCostMinor,review.receipt.currency) }}</dd>
+          <dt>Remaining loss cost</dt><dd>{{ receiptCost(review.remainingLostItemCostMinor,review.receipt.currency) }}</dd></dl>
         <p v-if="review.hasOpenShortage" class="warning">This position has an open shortage. It will remain open after recovery.</p>
         <p v-if="review.position.layer.catalogRevision !== current.revision" class="warning">This position was recorded at catalog revision {{ review.position.layer.catalogRevision }}.
           Confirm the current identity at revision {{ current.revision }}. Eligibility to back an offer is checked separately.</p>
@@ -145,7 +145,7 @@ async function submit() {
               <strong>{{ source.quarantineId ? source.originalQuarantineReason : 'Ordinary stock' }}</strong>
               <a v-if="source.quarantineId" :href="quarantineLink(location.id,route.position,source.quarantineId)">Original quarantine {{ source.quarantineId }}</a>
               <small>{{ source.originalQuantity }} originally lost · {{ source.recoveredQuantity }} recovered · {{ source.remainingQuantity }} still missing</small>
-              <small>Original cost {{ money(source.originalItemCostMinor,review.receipt.currency) }} · Restored {{ money(source.restoredItemCostMinor,review.receipt.currency) }} · Remaining {{ money(source.remainingItemCostMinor,review.receipt.currency) }}</small>
+              <small>Original cost {{ receiptCost(source.originalItemCostMinor,review.receipt.currency) }} · Restored {{ receiptCost(source.restoredItemCostMinor,review.receipt.currency) }} · Remaining {{ receiptCost(source.remainingItemCostMinor,review.receipt.currency) }}</small>
               <fieldset v-if="source.remainingQuantity" :disabled="!editable"><legend>Inspection of {{ source.quarantineId || 'ordinary stock' }}</legend>
                 <label>Saleable quantity<input type="text" inputmode="numeric" maxlength="7" :value="choices[sourceKey(source)]?.saleable ?? ''" @input="select(source,'saleable',$event)" /></label>
                 <label>Quarantine quantity<input type="text" inputmode="numeric" maxlength="7" :value="choices[sourceKey(source)]?.quarantine ?? ''" @input="select(source,'quarantine',$event)" /></label>
@@ -172,7 +172,7 @@ async function submit() {
         </form>
         <section aria-label="Earlier recoveries"><h3 ref="historyHeading" tabindex="-1">Earlier recoveries</h3><p v-if="!review.recoveries.length">No recorded recoveries on this page.</p>
           <div v-for="prior in review.recoveries" :key="prior.id" class="source"><a :href="recoveryLink(location.id,route.position,route.posting,prior.id)">Recovery receipt {{ prior.id }}</a>
-            <small>{{ time(prior.recordedAt) }} · {{ prior.saleableQuantity }} saleable · {{ prior.quarantineQuantity }} quarantined · {{ money(prior.restoredItemCostMinor,review.receipt.currency) }} restored</small></div>
+            <small>{{ time(prior.recordedAt) }} · {{ prior.saleableQuantity }} saleable · {{ prior.quarantineQuantity }} quarantined · {{ receiptCost(prior.restoredItemCostMinor,review.receipt.currency) }} restored</small></div>
           <div v-if="confirmed.history.length > 1 || review.nextHistoryAfter" class="pager"><button :disabled="!healthy || confirmed.history.length < 2" @click="pageBy('history')">Newer recoveries</button>
             <button :disabled="!healthy || !review.nextHistoryAfter" @click="pageBy('history',review.nextHistoryAfter)">Older recoveries</button></div>
         </section>
@@ -181,10 +181,10 @@ async function submit() {
         <small>{{ receipt.receipt.deliveryReference }} · Inspected at revision {{ receipt.recordedCatalog.revision }} · {{ time(receipt.recordedAt) }}</small></p>
         <p>{{ receipt.reason }}</p>
         <dl class="details" aria-label="Recorded inspection"><dt>Returned to saleable stock</dt><dd>{{ receipt.saleableQuantity }}</dd><dt>Returned to quarantine</dt><dd>{{ receipt.quarantineQuantity }}</dd>
-          <dt>Restored item cost</dt><dd>{{ money(receipt.restoredItemCostMinor,receipt.receipt.currency) }}</dd></dl>
+          <dt>Restored item cost</dt><dd>{{ receiptCost(receipt.restoredItemCostMinor,receipt.receipt.currency) }}</dd></dl>
         <h3 ref="sourceHeading" tabindex="-1">Recovery by original source</h3><div v-for="row in receipt.allocations" :key="row.quarantineId ?? 'ordinary'" class="source">
           <a v-if="row.quarantineId" :href="quarantineLink(location.id,route.position,row.quarantineId)">Original quarantine {{ row.quarantineId }}</a><strong v-else>Ordinary stock</strong>
-          <small>{{ row.saleableQuantity }} saleable · {{ row.quarantineQuantity }} quarantined · {{ money(row.restoredItemCostMinor,receipt.receipt.currency) }} restored</small></div>
+          <small>{{ row.saleableQuantity }} saleable · {{ row.quarantineQuantity }} quarantined · {{ receiptCost(row.restoredItemCostMinor,receipt.receipt.currency) }} restored</small></div>
         <div class="pager" v-if="confirmed.sources.length > 1 || receipt.nextAfter"><button :disabled="!healthy || confirmed.sources.length < 2" @click="pageBy('sources')">Previous receipt sources</button>
           <button :disabled="!healthy || !receipt.nextAfter" @click="pageBy('sources',receipt.nextAfter)">Next receipt sources</button></div>
         <nav aria-label="Recovery evidence"><a v-if="receipt.recoveredQuarantineId" :href="quarantineLink(location.id,route.position,receipt.recoveredQuarantineId)">Recovered pieces in quarantine</a>

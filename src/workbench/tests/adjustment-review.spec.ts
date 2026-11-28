@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test'
-import { audit, fixture } from './bin-fixture'
+import { audit, fixture, purchases } from './bin-fixture'
 import { countReceiptLink } from '../src/countLinks'
 import { test } from './trusted'
 
@@ -8,7 +8,7 @@ test('a count review identifies protected pieces and both unpublished offers bef
   const source = await page.request.get('/api/v1/receiving/bins/' + f.b.id + '/movements')
   const other = (await source.json()).positions[0].layer.placementId
   const sharedOffer = await f.write('receiving/offers', 5, { purchaseId: f.paid.purchaseId, catalogId: f.catalogId,
-    unitPriceMinor: 225, backing: [{ placementId: f.position, quantity: 2 }, { placementId: other, quantity: 1 }] })
+    currency: 'JPY', unitPriceMinor: 225, backing: [{ placementId: f.position, quantity: 2 }, { placementId: other, quantity: 1 }] })
   await f.write('receiving/transfers', 6, { purchaseId: f.paid.purchaseId, sourcePlacementId: other, sourceLocationId: f.b.id,
     confirmedSourceLocationCode: f.b.code, destinationLocationId: f.a.id, confirmedDestinationLocationCode: f.a.code,
     quantity: 1, reason: 'Same offer also backs a second position in this bin', backing: [{ offerId: sharedOffer, quantity: 1 }] })
@@ -27,14 +27,14 @@ test('a count review identifies protected pieces and both unpublished offers bef
   await expect(review).toContainText(f.firstOffer)
   await expect(review.getByRole('listitem').filter({ hasText: f.firstOffer })).toContainText('3 backed by this position')
   await expect(review.getByRole('listitem').filter({ hasText: sharedOffer })).toContainText('2 backed by this position')
+  await expect(review.getByRole('listitem').filter({ hasText: sharedOffer })).toContainText('JPY 225 per unit')
   await expect(review).toContainText('At least 3 units of offer backing need review.')
   await expect(review.getByRole('link', { name: 'Latest witnessed count' })).toHaveAttribute('href', countReceiptLink(f.a.id, obs))
   expect(await receipt.evaluate(e => e.scrollWidth <= e.clientWidth)).toBe(true)
   await audit(page)
   await review.getByRole('heading', { name: 'Unpublished offers (2)' }).scrollIntoViewIfNeeded()
   await page.screenshot({ path: info.outputPath('adjustment-review-mobile.png') })
-  const fresh = await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true')
-  const facts = (await fresh.json()).purchases.find((p: {id: string}) => p.id === f.paid.purchaseId)
+  const [facts] = await purchases(page, [f.paid.purchaseId])
   expect(facts.balances.physicalOnHand).toBe(8)
   expect(facts.balances.reserved).toBe(1)
   expect(facts.offers.map((offer: {backedQuantity: number}) => offer.backedQuantity).sort()).toEqual([3,3])

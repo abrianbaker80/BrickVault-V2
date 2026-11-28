@@ -2,13 +2,13 @@
 import { computed } from 'vue'
 import type { Catalog, Purchase } from './api'
 import { draftBackingLink, partOutLink } from './countLinks'
-import { itemLabel, money } from './receiving'
+import { itemLabel, receiptCost, recordedOfferPrice } from './receiving'
 const props = defineProps<{ purchase: Purchase; catalog: Catalog[] }>()
 const balances = computed(() => props.purchase.balances)
 const layers=computed(()=>[...props.purchase.deliveries,...(props.purchase.derivedLayers ?? [])])
 const positions = computed(() => new Map(layers.value.flatMap(d => d.placements.map(p =>
   [p.id, { bin:p.locationId, label:p.locationCode + ' · ' + d.reference }] as const))))
-const amount = (value: number | string | null) => money(value, props.purchase.currency)
+const amount = (value: number | string | null) => receiptCost(value, props.purchase.currency)
 </script>
 <template>
   <aside class="side-panels receiving-balances" aria-label="Purchase readback">
@@ -56,7 +56,7 @@ const amount = (value: number | string | null) => money(value, props.purchase.cu
       </dl>
       <ul v-if="purchase.offers.length" class="receipt-lines" aria-label="Unpublished offers">
         <li v-for="offer in purchase.offers" :key="offer.id">
-          <div class="receipt-line-head"><strong>{{ money(offer.unitPriceMinor, offer.currency) }} per unit</strong><span>{{ offer.backedQuantity }} backed</span></div>
+          <div class="receipt-line-head"><strong>{{ recordedOfferPrice(offer) }}</strong><span>{{ offer.backedQuantity }} backed</span></div>
           <small>Offer {{ offer.id }}</small><small>{{ itemLabel(catalog, offer.catalogId, offer.catalogRevision) }}</small>
           <p v-if="offer.backedQuantity && !offer.backingCurrent" class="warning">The backing needs renewed catalog confirmation. Check the item revision before using this offer.</p>
           <ul class="bin-rows">

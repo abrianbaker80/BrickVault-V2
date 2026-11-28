@@ -62,18 +62,22 @@ public sealed class DraftBackingWithdrawalTests
                 DeliveryId = delivery.EntityId, CatalogId = item.EntityId, LocationId = bin.Id,
                 ConfirmedLocationCode = bin.Code, Quantity = quantity
             }, Guid.NewGuid(), token);
-        Task<Receipt> Offer(int revision, int price, params BackingRow[] backing) => receiving.Save(new OfferCommand
+        OfferCommand Offer(int revision, int price, params BackingRow[] backing) => new()
         {
             CommandId = Guid.NewGuid(), ExpectedRevision = revision, PurchaseId = purchase.EntityId,
             CatalogId = item.EntityId, UnitPriceMinor = price, Backing = backing
-        }, Guid.NewGuid(), token);
+        };
+        Task<Receipt> Price(OfferCommand request) => receiving.Save(request, Guid.NewGuid(), token);
         async Task<string> Reject(Func<Task> action) => (await Assert.ThrowsAsync<Fault>(action)).Code;
 
         var delivery = await Deliver(purchase.Revision, "Documented zero", 12, 0);
         var origin = await Place(delivery.Revision, delivery, a, 8);
         var sibling = await Place(origin.Revision, delivery, b, 4);
-        var firstOffer = await Offer(sibling.Revision, 249, new BackingRow(origin.EntityId, 3), new(sibling.EntityId, 2));
-        var otherOffer = await Offer(firstOffer.Revision, 300, new BackingRow(sibling.EntityId, 1));
+        var firstPrice = Offer(sibling.Revision, 249, new BackingRow(origin.EntityId, 3), new(sibling.EntityId, 2)) with { Currency = "KWD" };
+        var firstOffer = await Price(firstPrice);
+        Assert.Equal(firstOffer, await Price(firstPrice));
+        Assert.Equal("command_mismatch", await Reject(() => Price(firstPrice with { Currency = "JPY" })));
+        var otherOffer = await Price(Offer(firstOffer.Revision, 300, new BackingRow(sibling.EntityId, 1)));
         var hold = await new BuildHolds(db).Save(new StockHoldCommand
         {
             CommandId = Guid.NewGuid(), ExpectedRevision = otherOffer.Revision, PurchaseId = purchase.EntityId,
@@ -102,10 +106,10 @@ public sealed class DraftBackingWithdrawalTests
         Assert.Equal((8, 2, 6, 2, 4, 4), (snapshot.PhysicalOnHand, snapshot.HeldQuantity, snapshot.SellableQuantity,
             snapshot.OfferBackedQuantity, snapshot.WithheldQuantity, snapshot.FreeToBackQuantity));
         Assert.Equal(0, snapshot.Position.Layer.ReceiptItemCostMinor);
-        Assert.Equal(new DraftBackingOfferRow(firstOffer.EntityId, 249, "USD", 2, 4, "internal-unpublished", true),
+        Assert.Equal(new DraftBackingOfferRow(firstOffer.EntityId, 249, "KWD", 2, 4, "internal-unpublished", true),
             Assert.Single(snapshot.Offers));
         var evidence = await drafts.Evidence(origin.EntityId, withdrawal.EntityId, null, token);
-        Assert.Equal((withdrawal.CorrelationId, withdrawal.Revision, 3, 2, 5, 4, 249, "USD"),
+        Assert.Equal((withdrawal.CorrelationId, withdrawal.Revision, 3, 2, 5, 4, 249, "KWD"),
             (evidence.CorrelationId, evidence.Revision, evidence.PriorBackedQuantity, evidence.RemainingBackedQuantity,
              evidence.PriorTotalOfferBackedQuantity, evidence.RemainingTotalOfferBackedQuantity, evidence.UnitPriceMinor, evidence.Currency));
         Assert.Equal("unknown_draft_backing_withdrawal",
@@ -126,10 +130,15 @@ public sealed class DraftBackingWithdrawalTests
             Reason = "Fictional internal move", Backing = backing
         }, Guid.NewGuid(), token);
         var moved = await Move(withdrawal.Revision, sibling.EntityId, b, c, new TransferBacking(firstOffer.EntityId, 1));
+        var bin = await new BinStock(db).Movements(c.Id, token);
+        Assert.Equal("USD", Assert.Single(bin.Positions).Layer.Currency);
+        Assert.Equal("KWD", Assert.Single(bin.Positions[0].Backing).Currency);
+        Assert.Equal("KWD", Assert.Single(Assert.Single(bin.Movements).Backing).Currency);
         var withdrawnFromChild = await Save(Prepare(moved.Revision, moved.EntityId, firstOffer.EntityId, c));
         var onward = await Move(withdrawnFromChild.Revision, moved.EntityId, c, d);
         var child = await drafts.History(moved.EntityId, firstOffer.EntityId, null, 1, token);
         Assert.Equal((0, 0, false), (child.PhysicalOnHand, child.Offer.BackedQuantity, child.Offer.CanWithdraw));
+        Assert.Equal("KWD", child.Offer.Currency);
         Assert.Equal("offer-withdrawal", Assert.Single(child.Contributions).Kind);
         Assert.NotNull(child.NextAfter);
         var transferHistory = await drafts.History(moved.EntityId, firstOffer.EntityId, child.NextAfter, 1, token);
@@ -146,6 +155,9 @@ public sealed class DraftBackingWithdrawalTests
         }, Guid.NewGuid(), token);
         Assert.Equal("stock_shortage_open", await Reject(() => Save(Prepare(count.Revision, origin.EntityId, firstOffer.EntityId, a))));
         Assert.False(Assert.Single((await drafts.Snapshot(origin.EntityId, null, 25, token)).Offers).CanWithdraw);
+        var adjustment = await new StockAdjustmentReviews(db).Read(a.Id, origin.EntityId, count.EntityId, null, 25, token);
+        Assert.Equal("USD", adjustment.Receipt.Currency);
+        Assert.Equal("KWD", Assert.Single(adjustment.Offers).Currency);
         var posting = await losses.Save(new StockLossCommand
         {
             CommandId = Guid.NewGuid(), ExpectedRevision = count.Revision, PurchaseId = purchase.EntityId,
@@ -155,9 +167,10 @@ public sealed class DraftBackingWithdrawalTests
         }, Guid.NewGuid(), token);
         Task<StockLossSnapshot> ReadLoss() => losses.Read(a.Id, origin.EntityId, null, null, posting.EntityId, null, null, 25, token);
         var originalLoss = await ReadLoss();
+        Assert.Equal("USD", originalLoss.Receipt.Currency);
         Assert.Equal((2, 1, 0, 0), (originalLoss.OfferBackedQuantityBefore, originalLoss.OfferBackedQuantityAfter,
             originalLoss.AllocatedItemCostMinor, originalLoss.RemainingDeliveryItemCostMinor));
-        Assert.Equal(new StockLossReduction(firstOffer.EntityId, 1, 2, 1, 249, "USD"), Assert.Single(originalLoss.Reductions));
+        Assert.Equal(new StockLossReduction(firstOffer.EntityId, 1, 2, 1, 249, "KWD"), Assert.Single(originalLoss.Reductions));
 
         async Task<(Receipt? Receipt, string? Error)> Rival()
         {
@@ -189,15 +202,17 @@ public sealed class DraftBackingWithdrawalTests
         var empty = await Save(Prepare(lastAtOrigin.Revision, sibling.EntityId, firstOffer.EntityId, b));
         var fullyWithdrawn = Assert.Single((await receiving.LossSnapshot(token, recoveries: true)).Purchases, p => p.Id == purchase.EntityId);
         var retained = Assert.Single(fullyWithdrawn.Offers, x => x.Id == firstOffer.EntityId);
-        Assert.Equal((0, 249, "USD", 0), (retained.BackedQuantity, retained.UnitPriceMinor, retained.Currency, retained.PublishedQuantity));
+        Assert.Equal((0, 249, "KWD", 0), (retained.BackedQuantity, retained.UnitPriceMinor, retained.Currency, retained.PublishedQuantity));
         Assert.Empty(retained.Backing);
+        Assert.Equal("USD", fullyWithdrawn.Currency);
+        Assert.Equal("USD", Assert.Single(fullyWithdrawn.Offers, x => x.Id == otherOffer.EntityId).Currency);
         Assert.Equal(1, Assert.Single(fullyWithdrawn.Offers, x => x.Id == otherOffer.EntityId).BackedQuantity);
 
         var unidentifiedCost = await Deliver(empty.Revision, "Unknown cost", 101, null);
         var many = await Place(unidentifiedCost.Revision, unidentifiedCost, bulk, 101);
         var frontier = many.Revision;
         for (var price = 1; price <= 100; price++)
-            frontier = (await Offer(frontier, price, new BackingRow(many.EntityId, 1))).Revision;
+            frontier = (await Price(Offer(frontier, price, new BackingRow(many.EntityId, 1)))).Revision;
 
         // Retain a v3-shaped original command with no audit evidence. It can be read but cannot be withdrawn.
         var unverified = Guid.NewGuid();
@@ -213,8 +228,8 @@ public sealed class DraftBackingWithdrawalTests
             await Execute("UPDATE brickvault.purchases SET revision=revision+1 WHERE id=$1 AND revision=$2",
                 purchase.EntityId, frontier);
             await Execute("""
-                INSERT INTO brickvault.offers(id,command_id,purchase_id,catalog_id,catalog_revision,unit_price_minor)
-                VALUES ($1,$2,$3,$4,$5,101)
+                INSERT INTO brickvault.offers(id,command_id,purchase_id,catalog_id,catalog_revision,unit_price_minor,currency,price_scale_verified)
+                VALUES ($1,$2,$3,$4,$5,101,'USD',false)
                 """, unverified, originalCommand, purchase.EntityId, item.EntityId, item.Revision);
             await Execute("""
                 INSERT INTO brickvault.offer_backing(purchase_id,offer_id,placement_id,catalog_id,catalog_revision,quantity)

@@ -69,8 +69,8 @@ async function goToPage(direction: 'older' | 'newer' | 'newest') {
       <div v-else class="empty"><strong>{{ connected ? 'No audit events' : 'Audit history unavailable' }}</strong><p v-if="connected">Saved changes appear here.</p></div>
       <nav v-if="visibleRows.length && (start > 0 || hasOlder)" class="history-pages" aria-label="Audit history pages">
         <span>{{ start + 1 }}–{{ start + visibleRows.length }} of {{ workspace.audit.length }}</span>
-        <button :disabled="start <= 0 || !connected" @click="goToPage('newer')">Newer commands</button>
-        <button :disabled="!hasOlder || !connected" @click="goToPage('older')">Older commands</button>
+        <button :disabled="start <= 0" @click="goToPage('newer')">Newer commands</button>
+        <button :disabled="!hasOlder" @click="goToPage('older')">Older commands</button>
       </nav>
     </section>
     <div class="side-panels">

@@ -3,7 +3,7 @@ import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, explain, requiresFreshCount } from './api'
 import { countReceiptLink, lossCaseLink } from './countLinks'
 import { time } from './presentation'
-import { money } from './receiving'
+import { receiptCost, recordedOfferPrice } from './receiving'
 
 const props = defineProps<{ bin: string; position: string; caseId: string; witnessId: string; asOf: string; connected: boolean; countReady: boolean }>()
 const emit = defineEmits<{ failure: [reason: unknown]; refreshCount: []; beginCount: [] }>()
@@ -97,7 +97,7 @@ function retryRead() {
           <dt>Capacity for offers after loss</dt><dd>{{ page.offerCapacityAfterLoss ?? 'Pending identification of missing pieces' }}</dd>
           <dt>Currently backing offers</dt><dd>{{ page.offerBackedQuantity }}</dd>
           <dt>Whole delivery cost ({{ page.receipt.deliveryQuantity }} units)</dt>
-          <dd>{{ money(page.receipt.itemCostMinor, page.receipt.currency) }}<template v-if="page.receipt.itemCostMinor === null"> ({{ page.receipt.currency }})</template></dd>
+          <dd>{{ receiptCost(page.receipt.itemCostMinor, page.receipt.currency) }}<template v-if="page.receipt.itemCostMinor === null"> ({{ page.receipt.currency }})</template></dd>
         </dl>
         <p v-if="page.quarantineBlocksLoss && page.candidateLossQuantity > 0" class="warning">{{ page.quarantinedQuantity }} quarantined in this position. Identify whether any missing pieces came from named quarantine records before reviewing commitments.</p>
         <p v-if="page.protectedProjectShortfall" class="warning">Build reservations exceed the proposed stock by {{ page.protectedProjectShortfall }}. Review the named holds.</p>
@@ -108,7 +108,7 @@ function retryRead() {
         <h3 ref="offersHeading" tabindex="-1">Unpublished offers ({{ page.offerCount }})</h3>
         <ul v-if="page.offers.length" class="receipt-lines">
           <li v-for="offer in page.offers" :key="offer.id"><strong>{{ offer.backedQuantity }} backed by this position</strong>
-            <p>{{ money(offer.unitPriceMinor, offer.currency) }} per unit</p><small>Offer {{ offer.id }}</small></li>
+            <p>{{ recordedOfferPrice(offer) }}</p><small>Offer {{ offer.id }}</small></li>
         </ul>
         <p v-else-if="!page.offerCount">No unpublished offers use this position.</p>
         <nav v-if="displayed.length > 1 || page.nextAfter" aria-label="Adjustment offer pages">

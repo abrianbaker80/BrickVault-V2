@@ -3,7 +3,7 @@ import {capacityPreview,exceedsCapacity} from './binCapacity'
 import { useBinRegistry } from './useBinRegistry'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Location, TransferControls, TransferPosition } from './api'
-import { itemLabel, money } from './receiving'
+import { itemLabel, recordedOfferPrice } from './receiving'
 
 const props = defineProps<{ source: Location; locations: Location[]; original: TransferPosition;
   current?: TransferPosition; reserved: number; ready: boolean; confirmedBin: boolean; controls: TransferControls }>()
@@ -109,7 +109,7 @@ async function submit() {
         <legend>Offer backing to move</legend>
         <p class="field-hint">Enter units for each offer that follows this stock. A blank count leaves that offer’s backing in the source bin.</p>
         <label v-for="offer in original.backing" :key="offer.offerId">
-          <span>{{ money(offer.unitPriceMinor, offer.currency) }} per unit · {{ offer.quantity }} backed<small>Offer {{ offer.offerId }}</small></span>
+          <span>{{ recordedOfferPrice(offer) }} · {{ offer.quantity }} backed<small>Offer {{ offer.offerId }}</small></span>
           <input v-model="quantities[offer.offerId]" :aria-label="'Move backed units for offer ' + offer.offerId"
             type="number" inputmode="numeric" min="0" :max="offer.quantity" />
         </label>

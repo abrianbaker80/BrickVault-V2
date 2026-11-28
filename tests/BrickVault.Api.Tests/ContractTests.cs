@@ -23,6 +23,50 @@ public sealed class ContractTests
     }
 
     [Fact]
+    public void OmittedOfferCurrencyRetainsOriginalWireDigestAndExplicitCurrencyBindsThePrice()
+    {
+        var id = Guid.Parse(StableId);
+        // v15 serialized the derived properties first, followed by the purchase and command identities.
+        var prior = new { CatalogId = id, UnitPriceMinor = 175, Backing = new[] { new BackingRow(id, 1) },
+            PurchaseId = id, CommandId = id, ExpectedRevision = 3 };
+        var json = JsonSerializer.Serialize(prior, Wire.Json);
+        var legacy = JsonSerializer.Deserialize<OfferCommand>(json, Wire.Json)!;
+        Assert.Equal(SHA256.HashData(Encoding.UTF8.GetBytes("offer\n" + json)), legacy.Digest());
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<OfferCommand>(json[..^1] + ",\"currency\":null}", Wire.Json));
+        foreach (var invalid in new[] { "", "eur", "EU", "EURO", "USD ", "ÄBC" })
+            Assert.Equal("invalid_receiving", Assert.Throws<Fault>((legacy with { Currency = invalid }).Validate).Code);
+        Assert.NotEqual(legacy.Digest(), (legacy with { Currency = "USD" }).Digest());
+        Assert.NotEqual((legacy with { Currency = "USD" }).Digest(), (legacy with { Currency = "JPY" }).Digest());
+    }
+
+    [Fact]
+    public void OnlyOneRecognizedCapabilityAllowsAmbiguousOfferScales()
+    {
+        var headers = new HeaderDictionary();
+        Assert.False(OfferPriceScale.Supported(headers));
+        headers[OfferPriceScale.Header] = "2";
+        Assert.False(OfferPriceScale.Supported(headers));
+        headers[OfferPriceScale.Header] = "1";
+        Assert.True(OfferPriceScale.Supported(headers));
+        headers.Append(OfferPriceScale.Header, "1");
+        Assert.False(OfferPriceScale.Supported(headers));
+        foreach (var currency in new[] { "USD", "EUR", "JPY", "KWD" })
+        {
+            OfferPriceScale.CheckNewOffer(currency, explicitlyPriced: false, supported: false);
+            Assert.Null(OfferPriceScale.Verified(currency, recorded: true));
+        }
+        foreach (var currency in new[] { "HUF", "IQD", "MGA", "BYR", "XAU", "ZZZ" })
+        {
+            Assert.Equal(426, Assert.Throws<Fault>(() => OfferPriceScale.CheckNewOffer(currency, true, false)).Status);
+            Assert.Equal("offer_price_reentry_required",
+                Assert.Throws<Fault>(() => OfferPriceScale.CheckNewOffer(currency, false, true)).Code);
+            OfferPriceScale.CheckNewOffer(currency, explicitlyPriced: true, supported: true);
+            Assert.True(OfferPriceScale.Verified(currency, recorded: true));
+            Assert.Null(OfferPriceScale.Verified(currency, recorded: false));
+        }
+    }
+
+    [Fact]
     public void StockLossUnknownAttributionRetainsLegacyDigestAndZeroIsAffirmative()
     {
         var stable = Guid.Parse(StableId);

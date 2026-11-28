@@ -588,6 +588,9 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "$ref": "#/components/parameters/OfferPriceScale"
           }
         ],
         "requestBody": {
@@ -620,8 +623,19 @@
                 }
               }
             }
+          },
+          "426": {
+            "description": "Update Workbench to interpret this selling price.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
-        }
+        },
+        "description": "An exact saved command replays before compatibility checks. A fresh offer in a currency with ambiguous legacy units requires explicit currency and the price-scale header. A marked client replaying an unsaved ambiguous implicit price must re-enter it (409 offer_price_reentry_required)."
       }
     },
     "/api/v1/receiving": {
@@ -649,7 +663,7 @@
             }
           },
           "426": {
-            "description": "This client cannot represent the current balances or backing shape. Update Workbench.",
+            "description": "This client cannot represent the current balances or backing shape. Update Workbench. A selling price may also require a minor-unit-aware client.",
             "content": {
               "application/json": {
                 "schema": {
@@ -658,7 +672,12 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OfferPriceScale"
+          }
+        ]
       }
     },
     "/api/v1/receiving/bins/{locationId}": {
@@ -753,7 +772,7 @@
             }
           },
           "426": {
-            "description": "The retained client contract cannot represent quarantine in this scope.",
+            "description": "The retained client contract cannot represent quarantine in this scope. A selling price may also require a minor-unit-aware client.",
             "content": {
               "application/json": {
                 "schema": {
@@ -781,6 +800,9 @@
               "type": "boolean"
             },
             "description": "Include quarantine quantities or recorded quarantine events for this scope."
+          },
+          {
+            "$ref": "#/components/parameters/OfferPriceScale"
           }
         ]
       }
@@ -905,7 +927,7 @@
             }
           },
           "426": {
-            "description": "This client cannot represent the current balances or backing shape. Update Workbench.",
+            "description": "This client cannot represent the current balances or backing shape. Update Workbench. A selling price may also require a minor-unit-aware client.",
             "content": {
               "application/json": {
                 "schema": {
@@ -961,6 +983,9 @@
               "type": "boolean"
             },
             "description": "Include part-out-derived material and transformation history where relevant to the selected scope."
+          },
+          {
+            "$ref": "#/components/parameters/OfferPriceScale"
           }
         ]
       }
@@ -1649,6 +1674,9 @@
               "type": "boolean"
             },
             "description": "Include quarantine quantities or recorded quarantine events for this scope."
+          },
+          {
+            "$ref": "#/components/parameters/OfferPriceScale"
           }
         ],
         "description": "Review an open witnessed shortage and the minimum offer backing reduction a confirmed loss would need. Whole-position totals are independent of page size. This authenticated read changes no stock or allocation.",
@@ -1684,7 +1712,7 @@
             }
           },
           "426": {
-            "description": "The retained client contract cannot represent quarantine in this scope.",
+            "description": "The retained client contract cannot represent quarantine in this scope. A selling price may also require a minor-unit-aware client.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1889,6 +1917,9 @@
               "type": "boolean"
             },
             "description": "Include part-out-derived material and transformation history where relevant to the selected scope."
+          },
+          {
+            "$ref": "#/components/parameters/OfferPriceScale"
           }
         ],
         "responses": {
@@ -1923,7 +1954,7 @@
             }
           },
           "426": {
-            "description": "The retained client contract cannot represent this quarantine-affected posting.",
+            "description": "The retained client contract cannot represent this quarantine-affected posting. A selling price may also require a minor-unit-aware client.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2852,6 +2883,9 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "$ref": "#/components/parameters/OfferPriceScale"
           }
         ],
         "responses": {
@@ -2867,6 +2901,16 @@
           },
           "default": {
             "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Update Workbench to interpret this selling price.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2925,6 +2969,9 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "$ref": "#/components/parameters/OfferPriceScale"
           }
         ],
         "responses": {
@@ -2940,6 +2987,16 @@
           },
           "default": {
             "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Update Workbench to interpret this selling price.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2980,6 +3037,9 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "$ref": "#/components/parameters/OfferPriceScale"
           }
         ],
         "responses": {
@@ -2995,6 +3055,16 @@
           },
           "default": {
             "description": "Application error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Update Workbench to interpret this selling price.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5328,10 +5398,18 @@
             "type": "string",
             "format": "uuid"
           },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3,
+            "pattern": "^[A-Z]{3}$",
+            "description": "Selling currency of the positive manual unit price in minor units. A fresh offer may inherit the purchase currency only when legacy clients agree on its scale."
+          },
           "unitPriceMinor": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 100000000
+            "maximum": 100000000,
+            "description": "Positive integer in the selling currency's fixed minor units. Workbench uses the numeric scales in ISO 4217 List One published 2026-09-17, with two decimal places for other accepted codes. For example, 1234 is IQD 1.234, HUF 12.34 or JPY 1234."
           },
           "backing": {
             "type": "array",
@@ -5533,6 +5611,13 @@
           "backingCurrent": {
             "type": "boolean",
             "description": "False when catalog eligibility or its recorded revision has changed. The internal offer remains unpublished."
+          },
+          "priceScaleVerified": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Affirms the canonical minor-unit scale of a newly priced offer in a currency unsupported by retained clients. An absent marker on an ambiguous historical price leaves only its raw integer amount and denomination verified."
           }
         },
         "required": [
@@ -5980,6 +6065,13 @@
           "currency": {
             "type": "string",
             "pattern": "^[A-Z]{3}$"
+          },
+          "priceScaleVerified": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Affirms the canonical minor-unit scale of a newly priced offer in a currency unsupported by retained clients. An absent marker on an ambiguous historical price leaves only its raw integer amount and denomination verified."
           }
         },
         "required": [
@@ -6277,6 +6369,13 @@
           "backingCurrent": {
             "type": "boolean",
             "description": "False when catalog eligibility or its recorded revision has changed. The internal offer remains unpublished."
+          },
+          "priceScaleVerified": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Affirms the canonical minor-unit scale of a newly priced offer in a currency unsupported by retained clients. An absent marker on an ambiguous historical price leaves only its raw integer amount and denomination verified."
           }
         },
         "required": [
@@ -7735,6 +7834,13 @@
           "currency": {
             "type": "string",
             "pattern": "^[A-Z]{3}$"
+          },
+          "priceScaleVerified": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Affirms the canonical minor-unit scale of a newly priced offer in a currency unsupported by retained clients. An absent marker on an ambiguous historical price leaves only its raw integer amount and denomination verified."
           }
         },
         "required": [
@@ -8016,6 +8122,13 @@
           "currency": {
             "type": "string",
             "pattern": "^[A-Z]{3}$"
+          },
+          "priceScaleVerified": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Affirms the canonical minor-unit scale of a newly priced offer in a currency unsupported by retained clients. An absent marker on an ambiguous historical price leaves only its raw integer amount and denomination verified."
           }
         },
         "required": [
@@ -8323,6 +8436,13 @@
           "backingCurrent": {
             "type": "boolean",
             "description": "True when the offer has remaining backing and its catalog revision is current and eligible. The offer remains unpublished."
+          },
+          "priceScaleVerified": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Affirms the canonical minor-unit scale of a newly priced offer in a currency unsupported by retained clients. An absent marker on an ambiguous historical price leaves only its raw integer amount and denomination verified."
           }
         },
         "required": [
@@ -10219,6 +10339,13 @@
           },
           "canWithdraw": {
             "type": "boolean"
+          },
+          "priceScaleVerified": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Affirms the canonical minor-unit scale of a newly priced offer in a currency unsupported by retained clients. An absent marker on an ambiguous historical price leaves only its raw integer amount and denomination verified."
           }
         },
         "required": [
@@ -10584,6 +10711,13 @@
           "recordedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "priceScaleVerified": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Affirms the canonical minor-unit scale of a newly priced offer in a currency unsupported by retained clients. An absent marker on an ambiguous historical price leaves only its raw integer amount and denomination verified."
           }
         },
         "required": [
@@ -12963,6 +13097,20 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "__Host-bv_session"
+      }
+    },
+    "parameters": {
+      "OfferPriceScale": {
+        "in": "header",
+        "name": "X-BrickVault-Price-Scale",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "1"
+          ]
+        },
+        "description": "A single 1 confirms that the client uses BrickVault selling-price minor units. Other values behave as a retained client."
       }
     }
   },
