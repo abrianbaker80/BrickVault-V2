@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
+import { money, parseMoney } from '../src/receiving'
 import { audit, fixture, purchases } from './bin-fixture'
 import { test } from './trusted'
 
@@ -21,6 +22,41 @@ async function chooseStock(page: Page, purchaseId: string, catalogId: string, bi
   await page.getByLabel('Offer item').selectOption(catalogId)
   await page.getByLabel('Back units from ' + bin + ' · ' + delivery).fill('1')
 }
+
+test('minor unit precision covers whole, fractional and unlisted currency codes', () => {
+  for (const [currency, text, minor] of [
+    ['UYI', '1', 1], ['HUF', '1.00', 100], ['MGA', '1.23', 123], ['IQD', '1.234', 1234],
+    ['CLF', '1.2345', 12345], ['UYW', '1.0000', 10000], ['ZZZ', '1.00', 100]
+  ] as const) {
+    expect(parseMoney(text, currency)).toBe(minor)
+    expect(money(minor, currency).replace(/\s/g, ' ')).toBe(currency + ' ' + text)
+    expect(money(String(minor), currency).replace(/\s/g, ' ')).toBe(currency + ' ' + text)
+    expect(() => parseMoney(text.includes('.') ? text + '1' : text + '.1', currency)).toThrow()
+  }
+  expect(money('90071992547409919', 'IQD').replace(/\s/g, ' ')).toBe('IQD 90,071,992,547,409.919')
+})
+
+test('manual prices use fixed currency minor units on entry and readback', async ({ page }) => {
+  const f = await fixture(page)
+  await chooseStock(page, f.unknown.purchaseId, f.catalogId, f.a.code, f.unknown.delivery)
+  const currency = page.getByLabel('Selling currency'), price = page.getByLabel('Manual unit price')
+  const save = page.getByRole('button', { name: 'Save unpublished offer' })
+  await currency.fill('IQD')
+  await price.fill('1.2345')
+  await save.click()
+  await expect(page.getByRole('alert')).toContainText('IQD amount with up to 3 decimal places')
+  await price.fill('1.234')
+  const sent = retryResponse(page)
+  await save.click()
+  const reply = await sent
+  expect(reply.status()).toBe(200)
+  expect(reply.request().postDataJSON()).toMatchObject({ currency: 'IQD', unitPriceMinor: 1234 })
+  await page.reload()
+  await expect(page.getByRole('list', { name: 'Unpublished offers' })).toContainText('IQD 1.234 per unit')
+  const [purchase] = await purchases(page, [f.unknown.purchaseId])
+  expect(purchase.offers[0]).toMatchObject({ currency: 'IQD', unitPriceMinor: 1234 })
+  expect(purchase.currency).toBe('EUR')
+})
 
 test('an operator prices a draft in a different currency and recovers the exact price after a lost confirmation', async ({ page }, info) => {
   const f = await fixture(page)

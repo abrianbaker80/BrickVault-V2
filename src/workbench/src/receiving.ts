@@ -11,16 +11,24 @@ export function itemLabel(catalog: Catalog[], id: string, recordedRevision?: num
   return description
 }
 
-function currencyFormat(currency: string) {
-  return new Intl.NumberFormat('en', { style: 'currency', currency, currencyDisplay: 'code' })
+// BrickVault persists integer minor units. Keep this scale stable for existing records.
+// Non-default minor units from ISO 4217 List One, published 2026-09-17.
+const currencyScales: Readonly<Record<string, number>> = {
+  BIF: 0, CLP: 0, DJF: 0, GNF: 0, ISK: 0, JPY: 0, KMF: 0, KRW: 0, PYG: 0,
+  RWF: 0, UGX: 0, UYI: 0, VND: 0, VUV: 0, XAF: 0, XOF: 0, XPF: 0,
+  BHD: 3, IQD: 3, JOD: 3, KWD: 3, LYD: 3, OMR: 3, TND: 3,
+  CLF: 4, UYW: 4
 }
+
 function fractionDigits(currency: string) {
-  return currencyFormat(currency).resolvedOptions().maximumFractionDigits ?? 2
+  return currencyScales[currency.toUpperCase()] ?? 2
 }
 export function money(minor: number | string | null, currency: string) {
   if (minor === null) return 'Unknown'
   const digits = fractionDigits(currency)
-  const format = currencyFormat(currency)
+  const format = new Intl.NumberFormat('en', {
+    style: 'currency', currency, currencyDisplay: 'code', minimumFractionDigits: digits, maximumFractionDigits: digits
+  })
   if (typeof minor === 'number') return format.format(minor / 10 ** digits)
   const amount = minor.padStart(digits+1, '0')
   const whole = digits ? amount.slice(0,-digits) : amount
