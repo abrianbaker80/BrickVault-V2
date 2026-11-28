@@ -66,6 +66,7 @@ export function useWorkbench(page: Ref<string>) {
         workspace.value = null
         receiving.value = null
         notice.value = null
+        error.value = ''
         readState.value = 'loading'
       }
       session.value = authenticated
@@ -367,10 +368,17 @@ export function useWorkbench(page: Ref<string>) {
         await resolveSizeRejection(command, reason, firstAttempt)
       } else if (command.kind === 'offer' && command.body.currency && reason instanceof ApiFailure &&
           reason.status === 400 && reason.detail?.code === 'invalid_json') {
-        const reference = ' Reference ' + reason.detail.correlationId + '.'
         if (firstAttempt) {
           forget(command)
           loadPending()
+        }
+        // Navigation can start a new session read while the original write is in flight.
+        while (readState.value === 'loading') {
+          await new Promise<void>(resolve => watch(readState, () => resolve(), { once: true }))
+        }
+        if (session.value?.workspaceId !== command.workspaceId || readState.value === 'disconnected') return
+        const reference = ' Reference ' + reason.detail.correlationId + '.'
+        if (firstAttempt) {
           error.value = 'The server rejected the draft with selling currency ' + command.body.currency +
             '. Check the server version before trying again.' + reference
         } else {
