@@ -1,5 +1,5 @@
 import type { Catalog } from './api'
-import legacyCurrencies from '../../BrickVault.Api/legacy-offer-price-currencies.json'
+import legacyCurrencies from '../../BrickVault.Api/legacy-offer-price-currencies.json' with { type: 'json' }
 
 const compatibleCurrencies = new Set(legacyCurrencies)
 export function legacyPriceCompatible(currency: string) {
