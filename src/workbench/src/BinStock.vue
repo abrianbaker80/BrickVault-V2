@@ -5,7 +5,7 @@ import type { BinTransferSnapshot, Catalog, Location, TransferControls, Transfer
 import TransferForm from './TransferForm.vue'
 import CountWorkspace from './CountWorkspace.vue'
 import { countPositionLink, holdPositionLink, draftBackingLink, quarantineLink, type CountLink } from './countLinks'
-import { itemLabel, money } from './receiving'
+import { itemLabel, money, recordedOfferPrice } from './receiving'
 import { time } from './presentation'
 
 const props = defineProps<{ location: Location; asOf: string; connected: boolean; workspaceLoading: boolean; locations: Location[]; catalog: Catalog[]; transfers: TransferControls; countLink?: CountLink }>()
@@ -61,6 +61,7 @@ function sameSource(original: TransferPosition, current: TransferPosition) {
   return original.backing.every(row => {
     const offer = backing.get(row.offerId)
     return offer?.quantity === row.quantity && offer.currency === row.currency && offer.unitPriceMinor === row.unitPriceMinor
+      && offer.priceScaleVerified === row.priceScaleVerified
   })
 }
 
@@ -253,7 +254,7 @@ watch(binScope,
             <details><summary>Movement receipt</summary>
               <small>Catalog {{ move.catalogId }} · recorded revision {{ move.catalogRevision }}</small>
               <small v-if="!move.backing.length">No offer backing moved</small>
-              <small v-for="offer in move.backing" :key="offer.offerId">{{ offer.quantity }} backed · Offer {{ offer.offerId }} · {{ money(offer.unitPriceMinor, offer.currency) }} per unit</small>
+              <small v-for="offer in move.backing" :key="offer.offerId">{{ offer.quantity }} backed · Offer {{ offer.offerId }} · {{ recordedOfferPrice(offer) }}</small>
               <small>Correlation ID {{ move.correlationId }}</small>
             </details>
             <button v-if="locations.some(l => l.id === (location.id === move.sourceLocationId ? move.destinationLocationId : move.sourceLocationId))"

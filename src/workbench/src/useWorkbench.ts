@@ -366,9 +366,12 @@ export function useWorkbench(page: Ref<string>) {
       if (expired(reason)) return
       if (reason instanceof ApiFailure && reason.status === 413 && reason.detail?.code === 'request_too_large') {
         await resolveSizeRejection(command, reason, firstAttempt)
-      } else if (command.kind === 'offer' && command.body.currency && reason instanceof ApiFailure &&
-          reason.status === 400 && reason.detail?.code === 'invalid_json') {
-        if (firstAttempt) {
+      } else if (command.kind === 'offer' && reason instanceof ApiFailure && reason.detail && (
+          (command.body.currency && reason.status === 400 && reason.detail.code === 'invalid_json') ||
+          (!command.body.currency && reason.status === 409 && reason.detail.code === 'offer_price_reentry_required'))) {
+        const needsReentry = reason.detail.code === 'offer_price_reentry_required'
+        // The server checks for an exact saved receipt before requiring a new price.
+        if (firstAttempt || needsReentry) {
           forget(command)
           loadPending()
         }
@@ -378,7 +381,9 @@ export function useWorkbench(page: Ref<string>) {
         }
         if (session.value?.workspaceId !== command.workspaceId || readState.value === 'disconnected') return
         const reference = ' Reference ' + reason.detail.correlationId + '.'
-        if (firstAttempt) {
+        if (needsReentry) {
+          error.value = 'Verify the original intended unit price, then enter the selling currency and price again in Prepare offer.' + reference
+        } else if (firstAttempt) {
           error.value = 'The server rejected the draft with selling currency ' + command.body.currency +
             '. Check the server version before trying again.' + reference
         } else {

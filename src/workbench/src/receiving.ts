@@ -1,4 +1,17 @@
 import type { Catalog } from './api'
+import legacyCurrencies from '../../BrickVault.Api/legacy-offer-price-currencies.json'
+
+const compatibleCurrencies = new Set(legacyCurrencies)
+export function legacyPriceCompatible(currency: string) {
+  return compatibleCurrencies.has(currency)
+}
+
+export function recordedOfferPrice(offer: { currency: string; unitPriceMinor: number; priceScaleVerified?: boolean }) {
+  if (offer.priceScaleVerified === true || legacyPriceCompatible(offer.currency)) {
+    return money(offer.unitPriceMinor, offer.currency) + ' per unit'
+  }
+  return offer.currency + ' · ' + offer.unitPriceMinor + ' recorded minor units per unit. Verify the original price.'
+}
 
 export function itemLabel(catalog: Catalog[], id: string, recordedRevision?: number | null) {
   const row = catalog.find(item => item.id === id)

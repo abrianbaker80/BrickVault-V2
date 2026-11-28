@@ -13,7 +13,9 @@ Workbench uses a fixed minor-unit scale for both prices and costs. For example, 
 
 The reference case receives eight identified units at a total item cost of USD 8.00 and four units with unknown item cost. Eight go into B-12, three into C-03, and one remains in intake. Of eleven free units, eight have documented item cost. USD 0.60 remains a separate unapplied charge. An internal offer can use five units from B-12 and two from C-03 at USD 1.50 each, leaving four free units withheld. The case exercises an incorrect bin, replay after restart, overcommitted backing and recovery from an encrypted backup. [Issue #13](https://github.com/abrianbaker80/BrickVault-V2/issues/13)
 
-If the server rejects a newly entered selling currency, check the server version before trying again. If **Pending confirmation** appears after an interrupted save, reconnect to a server that supports the original currency and choose **Retry command**. Workbench reuses the original price and command ID.
+If the server rejects a newly entered selling currency, check the server version before trying again. If **Pending confirmation** appears after an interrupted save, reconnect to the updated server and choose **Retry command**. Workbench reuses the original price and command ID. If it asks you to enter a price again, verify the intended currency and decimal amount against your original pricing record before saving.
+
+An older draft can show its currency and an integer labeled **recorded minor units**. The original browser's decimal precision is unknown. Check your original pricing record before using that amount. If an older Workbench asks for an update, reload it before opening the affected offers.
 
 ## Inspect a storage bin
 

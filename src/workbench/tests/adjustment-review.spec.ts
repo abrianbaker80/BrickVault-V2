@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test'
-import { audit, fixture } from './bin-fixture'
+import { audit, fixture, purchases } from './bin-fixture'
 import { countReceiptLink } from '../src/countLinks'
 import { test } from './trusted'
 
@@ -34,8 +34,7 @@ test('a count review identifies protected pieces and both unpublished offers bef
   await audit(page)
   await review.getByRole('heading', { name: 'Unpublished offers (2)' }).scrollIntoViewIfNeeded()
   await page.screenshot({ path: info.outputPath('adjustment-review-mobile.png') })
-  const fresh = await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true')
-  const facts = (await fresh.json()).purchases.find((p: {id: string}) => p.id === f.paid.purchaseId)
+  const [facts] = await purchases(page, [f.paid.purchaseId])
   expect(facts.balances.physicalOnHand).toBe(8)
   expect(facts.balances.reserved).toBe(1)
   expect(facts.offers.map((offer: {backedQuantity: number}) => offer.backedQuantity).sort()).toEqual([3,3])

@@ -3,7 +3,7 @@ import { useBinRegistry } from "./useBinRegistry"
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, explain, requiresFreshCount, type Catalog, type Location, type QuarantineSnapshot, type TransferControls } from './api'
 import { closureLink, countPositionLink, countReceiptLink, holdPositionLink, lossReceiptLink } from './countLinks'
-import { itemLabel, money } from './receiving'
+import { itemLabel, recordedOfferPrice } from './receiving'
 import { label, time } from './presentation'
 import StockLossReceipt from './StockLossReceipt.vue'
 import LossAttribution from './LossAttribution.vue'
@@ -222,7 +222,7 @@ async function post() {
           <p v-if="projection && !projection.holdShortfall">Reduce exactly {{ projection.reduction }} {{ projection.reduction===1 ? 'unit' : 'units' }} of backing on this position. Enter 0 or leave a field blank to keep that offer’s backing.</p>
           <ul v-if="page.offers.length" class="receipt-lines" aria-label="Offer backing on this position">
             <li v-for="offer in page.offers" :key="offer.id">
-              <strong>{{ money(offer.unitPriceMinor,offer.currency) }} per unit · {{ offer.backedQuantity }} backed here</strong>
+              <strong>{{ recordedOfferPrice(offer) }} · {{ offer.backedQuantity }} backed here</strong>
               <label>Reduce units for offer {{ offer.id }}
                 <input type="text" inputmode="numeric" pattern="[0-9]+" :value="selections[offer.id]?.quantity || ''" :disabled="!permitted" @input="edit(offer,$event)" /></label>
               <small v-if="selections[offer.id] && !validQuantity(selections[offer.id])" class="warning">Enter 0–{{ offer.backedQuantity }} whole units.</small>
@@ -236,7 +236,7 @@ async function post() {
           <section class="decision" aria-label="Selected offer reductions"><h3>Selected reductions</h3>
             <p v-if="projection && !projection.holdShortfall" aria-live="polite">{{ chosen }} of {{ projection.reduction }} {{ projection.reduction===1 ? 'unit' : 'units' }} selected</p>
             <ul v-if="selected.length"><li v-for="entry in selected" :key="entry.offer.id">
-              {{ entry.quantity }} of {{ entry.offer.backedQuantity }} · {{ money(entry.offer.unitPriceMinor,entry.offer.currency) }}
+              {{ entry.quantity }} of {{ entry.offer.backedQuantity }} · {{ recordedOfferPrice(entry.offer) }}
               <small>Offer {{ entry.offer.id }}</small>
               <button type="button" :disabled="!permitted" :aria-label="'Remove reduction for offer ' + entry.offer.id" @click="delete selections[entry.offer.id]">Remove</button></li></ul>
           </section>
