@@ -21,6 +21,7 @@ internal abstract record ReceivingCommand
     protected static bool Text(string? text, int max) => text is { Length: > 0 } &&
         text.Length <= max && text.AsSpan().Trim().Length == text.Length && !text.Any(char.IsControl);
     protected static bool ValidQuantity(int number) => number is >= 1 and <= 1_000_000;
+    protected static bool CurrencyCode(string? code) => code is { Length: 3 } && code.All(c => c is >= 'A' and <= 'Z');
     protected static bool Money(int? number) => number is null or (>= 0 and <= 100_000_000);
     public byte[] Digest() => SHA256.HashData(Encoding.UTF8.GetBytes(
         Kind + "\n" + JsonSerializer.Serialize(this, GetType(), Wire.Json)));
@@ -37,7 +38,7 @@ internal sealed record PurchaseCommand : ReceivingCommand
     public required int? PendingChargeMinor { get; init; }
 
     protected override bool Valid() => ExpectedRevision == 0 && Text(Reference, 64) && Text(Source, 160) &&
-        Currency is { Length: 3 } && Currency.All(c => c is >= 'A' and <= 'Z') &&
+        CurrencyCode(Currency) &&
         ValidQuantity(OrderedQuantity) && Money(PendingChargeMinor);
 }
 
@@ -86,9 +87,13 @@ internal sealed record OfferCommand : PurchaseChange
     public required Guid CatalogId { get; init; }
     public required int UnitPriceMinor { get; init; }
     public required BackingRow[] Backing { get; init; }
+    // An omitted denomination retains the original command digest and purchase-currency pricing.
+    [System.Diagnostics.CodeAnalysis.DisallowNull]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Currency { get; init; }
 
     protected override bool Valid() => ValidParent && CatalogId != Guid.Empty && UnitPriceMinor > 0 &&
-        Money(UnitPriceMinor) && Backing is { Length: >= 1 and <= 64 } &&
+        Money(UnitPriceMinor) && (Currency is null || CurrencyCode(Currency)) && Backing is { Length: >= 1 and <= 64 } &&
         Backing.All(a => a is not null && a.PlacementId != Guid.Empty && ValidQuantity(a.Quantity)) &&
         Backing.Select(a => a.PlacementId).Distinct().Count() == Backing.Length;
 }

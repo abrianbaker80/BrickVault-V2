@@ -152,9 +152,8 @@ internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
                 WHERE b.placement_id=$1 AND ($2::uuid IS NULL OR b.offer_id=$2) AND ($3::uuid IS NULL OR b.offer_id>$3)
                 ORDER BY b.offer_id LIMIT $4
             )
-            SELECT o.id,o.unit_price_minor,p.currency,amounts.here,amounts.total,i.id IS NOT NULL
+            SELECT o.id,o.unit_price_minor,o.currency,amounts.here,amounts.total,i.id IS NOT NULL
             FROM candidates candidate JOIN brickvault.offers o ON o.id=candidate.offer_id
-            JOIN brickvault.purchases p ON p.id=o.purchase_id
             LEFT JOIN brickvault.internal_draft_offers i ON i.id=o.id
             CROSS JOIN LATERAL (
                 SELECT COALESCE(sum(b.quantity) FILTER (WHERE b.placement_id=$1),0)::integer AS here,
@@ -271,10 +270,10 @@ internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
         var rows = await Rows(connection, tx, """
             SELECT transaction_timestamp(),w.id,w.command_id,c.correlation_id,c.revision,w.purchase_id,w.offer_id,
                 l.id,l.revision,l.code,l.name,w.location_code,w.quantity,w.prior_backed_quantity,w.prior_total_offer_backed_quantity,
-                o.unit_price_minor,p.currency,w.reason,a.occurred_at
+                o.unit_price_minor,o.currency,w.reason,a.occurred_at
             FROM brickvault.draft_backing_withdrawals w JOIN brickvault.commands c USING(command_id)
             JOIN brickvault.audit a USING(command_id) JOIN brickvault.offers o ON o.id=w.offer_id
-            JOIN brickvault.purchases p ON p.id=w.purchase_id JOIN brickvault.locations l ON l.id=w.location_id
+            JOIN brickvault.locations l ON l.id=w.location_id
             WHERE w.position_id=$1 AND
             """ + " " + predicate, r =>
         {

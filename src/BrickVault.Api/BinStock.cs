@@ -49,11 +49,10 @@ internal sealed class BinStock(NpgsqlDataSource db)
         if (includeMovements)
         {
             var activeBacking = (await Rows(connection, tx, """
-                SELECT b.placement_id,b.offer_id,b.quantity,o.unit_price_minor,p.currency
+                SELECT b.placement_id,b.offer_id,b.quantity,o.unit_price_minor,o.currency
                 FROM brickvault.current_offer_backing b
                 JOIN brickvault.current_placement_stock s ON s.id=b.placement_id
                 JOIN brickvault.offers o ON o.id=b.offer_id
-                JOIN brickvault.purchases p ON p.id=o.purchase_id
                 WHERE s.location_id=$1 AND s.quantity>0 ORDER BY b.offer_id
                 """, r => (Position: r.GetGuid(0), Choice: ReadChoice(r)), token, locationId))
                 .ToLookup(x => x.Position, x => x.Choice);
@@ -74,11 +73,10 @@ internal sealed class BinStock(NpgsqlDataSource db)
         Guid locationId, CancellationToken token)
     {
         var backing = (await Rows(connection, tx, """
-            SELECT b.transfer_id,b.offer_id,b.quantity,o.unit_price_minor,p.currency
+            SELECT b.transfer_id,b.offer_id,b.quantity,o.unit_price_minor,o.currency
             FROM brickvault.placement_transfer_backing b
             JOIN brickvault.placement_transfers t ON t.id=b.transfer_id
             JOIN brickvault.offers o ON o.id=b.offer_id
-            JOIN brickvault.purchases p ON p.id=o.purchase_id
             WHERE t.source_location_id=$1 OR t.destination_location_id=$1
             ORDER BY b.offer_id
             """, r => (Transfer: r.GetGuid(0), Choice: ReadChoice(r)), token, locationId))

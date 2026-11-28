@@ -5328,6 +5328,13 @@
             "type": "string",
             "format": "uuid"
           },
+          "currency": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 3,
+            "pattern": "^[A-Z]{3}$",
+            "description": "Selling currency of the positive manual unit price in minor units. When omitted, uses the purchase currency."
+          },
           "unitPriceMinor": {
             "type": "integer",
             "minimum": 1,

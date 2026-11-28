@@ -59,6 +59,7 @@ SCHEMA_FACTS[13] = SCHEMA_FACTS[12] + (
 
 SCHEMA_FACTS[14] = SCHEMA_FACTS[13] + ("location_labels", "location_registry_events")
 SCHEMA_FACTS[15] = SCHEMA_FACTS[14] + ("location_capacity_events", "location_capacity_fences")
+SCHEMA_FACTS[16] = SCHEMA_FACTS[15]  # The new denomination is part of each existing offers row signature.
 
 
 def digest(path):
@@ -126,12 +127,14 @@ def signatures(s, database, token=None):
     return row_signatures(s, database, tables, session)
 
 
-def row_signatures(s, database, tables, session="BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n"):
+def row_signatures(s, database, tables, session="BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n", *, pre_currency_offers=False):
     groups = {}
     for table in tables:
+        # Only staged upgrades compare offers to their exact pre-v16 representation.
+        payload = "(to_jsonb(t) - 'currency')" if table == "offers" and pre_currency_offers else "to_jsonb(t)"
         stmt = (
             session
-            + f"SET TIME ZONE 'UTC'; SELECT to_jsonb(t)::text FROM brickvault.{table} t ORDER BY to_jsonb(t)::text COLLATE \"C\";\nCOMMIT;"
+            + f"SET TIME ZONE 'UTC'; SELECT {payload}::text FROM brickvault.{table} t ORDER BY {payload}::text COLLATE \"C\";\nCOMMIT;"
         )
         rows = s.sql(stmt, database, role="bv_migrator")
         sig = hashlib.sha256()

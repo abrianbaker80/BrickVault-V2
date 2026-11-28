@@ -152,11 +152,11 @@ internal sealed class StockLosses(NpgsqlDataSource db)
 
         var cursor = await CheckCursor(connection, tx, row.Id, after, token);
         var reductions = await Rows(connection, tx, """
-            SELECT r.offer_id,r.quantity,r.prior_backed_quantity,o.unit_price_minor
+            SELECT r.offer_id,r.quantity,r.prior_backed_quantity,o.unit_price_minor,o.currency
             FROM brickvault.stock_loss_offer_reductions r JOIN brickvault.offers o ON o.id=r.offer_id
             WHERE r.loss_id=$1 AND ($2::uuid IS NULL OR r.offer_id>$2) ORDER BY r.offer_id LIMIT $3
             """, r => new StockLossReduction(r.GetGuid(0), r.GetInt32(1), r.GetInt32(2), r.GetInt32(2)-r.GetInt32(1),
-                r.GetInt32(3), row.Receipt.Currency), token, row.Id, Nullable(NpgsqlDbType.Uuid, cursor), limit + 1);
+                r.GetInt32(3), r.GetString(4)), token, row.Id, Nullable(NpgsqlDbType.Uuid, cursor), limit + 1);
         string? next = null;
         if (reductions.Count > limit)
         {

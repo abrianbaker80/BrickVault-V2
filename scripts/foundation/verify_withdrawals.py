@@ -47,13 +47,14 @@ def verify_legacy_allocation(client):
     _, position = post(client, "receiving/putaway", delivery["revision"], **where, deliveryId=delivery["entityId"],
                        catalogId=item["entityId"], quantity=2)
     _, offer = post(client, "receiving/offers", position["revision"], purchaseId=buy["entityId"],
-                    catalogId=item["entityId"], unitPriceMinor=175,
+                    catalogId=item["entityId"], currency="JPY", unitPriceMinor=175,
                     backing=[{"placementId": position["entityId"], "quantity": 2}])
     target = dict(**where, positionId=position["entityId"], offerId=offer["entityId"], quantity=1)
     _, partial = post(client, WITHDRAW, offer["revision"], **target, reason="Withdraw one piece")
     older = ("receiving", "receiving/current", "receiving/current?holds=true")
     for route in older:
         row, = client.call(route)["purchases"]
+        assert row["currency"] == "USD" and row["offers"][0]["currency"] == "JPY"
         allocation, = row["offers"][0]["backing"]
         assert allocation["quantity"] == row["offers"][0]["backedQuantity"] == 1
     post(client, WITHDRAW, partial["revision"], **target, reason="Withdraw the final piece")
@@ -80,7 +81,7 @@ def qualify_withdrawals(client, catalog):
     _, bin_receipt = post(client, "locations", 0, code=code, name="Draft offer training shelf")
     location = bin_receipt["entityId"]
     evidence = []
-    for label, cost in (("Paid", 849), ("Zero", 0), ("Unknown", None)):
+    for label, cost, currency in (("Paid", 849, "JPY"), ("Zero", 0, "KWD"), ("Unknown", None, "EUR")):
         _, purchase = post(client, "receiving/purchases", 0, reference="Draft " + label,
                            source="Fictional purchase", currency="USD", orderedQuantity=8, pendingChargeMinor=None)
         buy = purchase["entityId"]
@@ -92,8 +93,8 @@ def qualify_withdrawals(client, catalog):
         where = dict(purchaseId=buy, positionId=pos, locationId=location, confirmedLocationCode=code)
         _, hold = post(client, "receiving/holds", put["revision"], **where, quantity=2,
                        purpose="Training build", reason="Set aside two pieces")
-        _, chosen = post(client, "receiving/offers", hold["revision"], purchaseId=buy, catalogId=catalog,
-                         unitPriceMinor=175, backing=[{"placementId": pos, "quantity": 2}])
+        price, chosen = post(client, "receiving/offers", hold["revision"], purchaseId=buy, catalogId=catalog,
+                             currency=currency, unitPriceMinor=175, backing=[{"placementId": pos, "quantity": 2}])
         _, other = post(client, "receiving/offers", chosen["revision"], purchaseId=buy, catalogId=catalog,
                         unitPriceMinor=199, backing=[{"placementId": pos, "quantity": 1}])
         verify_purchase(client, buy, cost, 3)
@@ -104,20 +105,22 @@ def qualify_withdrawals(client, catalog):
         first, partial = post(client, WITHDRAW, other["revision"], **target, quantity=1, reason="Reserve shelf capacity")
         verify_purchase(client, buy, cost, 2)
         last, full = post(client, WITHDRAW, partial["revision"], **target, quantity=1, reason="Withdraw remaining allocation")
-        evidence.append((buy, pos, delivery["entityId"], cost, chosen, other, first, partial, last, full))
+        evidence.append((buy, pos, delivery["entityId"], cost, price, chosen, other, first, partial, last, full))
     verify_recovered_withdrawals(client, evidence)
     return evidence
 
 
 def verify_recovered_withdrawals(client, evidence):
     contract = client.call("contract")
-    for purchase, position, delivery, cost, chosen, other, first, partial, last, full in evidence:
+    for purchase, position, delivery, cost, price, chosen, other, first, partial, last, full in evidence:
+        assert client.call("receiving/offers", "POST", price) == chosen
+        assert client.call("receiving/offers", "POST", {**price, "currency": "USD"}, expected=409)["code"] == "command_mismatch"
         assert client.call(WITHDRAW, "POST", first) == partial
         assert client.call(WITHDRAW, "POST", last) == full
         row = verify_purchase(client, purchase, cost, 1)
         assert row["revision"] == full["revision"]
-        offers = {o["id"]: (o["backedQuantity"], o["unitPriceMinor"]) for o in row["offers"]}
-        assert offers == {chosen["entityId"]: (0, 175), other["entityId"]: (1, 199)}
+        offers = {o["id"]: (o["backedQuantity"], o["unitPriceMinor"], o["currency"]) for o in row["offers"]}
+        assert offers == {chosen["entityId"]: (0, 175, price["currency"]), other["entityId"]: (1, 199, "USD")}
         header, positions, events = read_lot(client, delivery, withdrawals=True)
         assert (header["currentOnHandQuantity"], header["heldQuantity"], header["offerBackedQuantity"],
                 header["remainingItemCostMinor"]) == (8, 2, 1, cost)
@@ -158,7 +161,7 @@ def verify_recovered_withdrawals(client, evidence):
             assert by_id.pop("asOf") and by_command.pop("asOf") and by_id == by_command
             assert by_id["complete"] and by_id["quantity"] == 1 and by_id["reason"] == submitted["reason"]
             assert (by_id["offerId"], by_id["positionId"], by_id["purchaseId"], by_id["currency"], by_id["unitPriceMinor"]) == (
-                chosen["entityId"], position, purchase, "USD", 175)
+                chosen["entityId"], position, purchase, price["currency"], 175)
             assert (by_id["priorBackedQuantity"], by_id["remainingBackedQuantity"]) == (before, before - 1)
             assert (by_id["priorTotalOfferBackedQuantity"], by_id["remainingTotalOfferBackedQuantity"]) == (before, before - 1)
             by_event = next(r["event"] for r in events if r["event"]["commandId"] == saved["commandId"])

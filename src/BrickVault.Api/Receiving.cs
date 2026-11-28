@@ -100,10 +100,12 @@ internal sealed class Receiving(NpgsqlDataSource db)
         OfferCommand offer, CancellationToken token)
     {
         await using var create = Query(connection, tx, """
-            INSERT INTO brickvault.offers(id,command_id,purchase_id,catalog_id,catalog_revision,unit_price_minor)
-            SELECT $1,$2,$3,id,revision,$5 FROM brickvault.catalog WHERE id=$4 AND integration_eligible FOR SHARE
+            INSERT INTO brickvault.offers(id,command_id,purchase_id,catalog_id,catalog_revision,unit_price_minor,currency)
+            SELECT $1,$2,p.id,c.id,c.revision,$5,COALESCE($6,p.currency)
+            FROM brickvault.catalog c JOIN brickvault.purchases p ON p.id=$3
+            WHERE c.id=$4 AND c.integration_eligible FOR SHARE OF c
             RETURNING catalog_revision
-            """, id, offer.CommandId, offer.PurchaseId, offer.CatalogId, offer.UnitPriceMinor);
+            """, id, offer.CommandId, offer.PurchaseId, offer.CatalogId, offer.UnitPriceMinor, Nullable(NpgsqlDbType.Varchar, offer.Currency));
         if (await create.ExecuteScalarAsync(token) is not int revision)
             throw Rejected("catalog_ineligible", "Confirm a matching, eligible catalog identity and condition.");
         await using var backing = Query(connection, tx, """
@@ -212,9 +214,9 @@ internal sealed class Receiving(NpgsqlDataSource db)
             """, r => (OfferId: r.GetGuid(0), Value: new BackingRow(r.GetGuid(1), r.GetInt32(2))),
             token)).ToLookup(r => r.OfferId, r => r.Value);
         var offers = (await Rows(connection, tx, """
-            SELECT o.purchase_id,o.id,o.catalog_id,o.catalog_revision,p.currency,o.unit_price_minor,
+            SELECT o.purchase_id,o.id,o.catalog_id,o.catalog_revision,o.currency,o.unit_price_minor,
                 c.integration_eligible AND c.revision=o.catalog_revision
-            FROM brickvault.offers o JOIN brickvault.purchases p ON p.id=o.purchase_id
+            FROM brickvault.offers o
             JOIN brickvault.catalog c ON c.id=o.catalog_id ORDER BY o.id
             """, r =>
         {
