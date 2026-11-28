@@ -7,7 +7,10 @@ namespace BrickVault.Api;
 
 internal sealed class Receiving(NpgsqlDataSource db)
 {
-    public async Task<Receipt> Save(ReceivingCommand request, Guid correlationId, CancellationToken token)
+    public Task<Receipt> Save(ReceivingCommand request, Guid correlationId, CancellationToken token) =>
+        Save(request, correlationId, token, priceScaleSupported: false);
+
+    public async Task<Receipt> Save(ReceivingCommand request, Guid correlationId, CancellationToken token, bool priceScaleSupported)
     {
         request.Validate();
         var digest = request.Digest();
@@ -16,6 +19,19 @@ internal sealed class Receiving(NpgsqlDataSource db)
         await Migration.CheckWithin(connection, tx, token);
         if (await CommandJournal.Replay(connection, tx, request.CommandId, digest, token) is { } replay)
             return replay;
+
+        if (request is OfferCommand pricing)
+        {
+            var currency = pricing.Currency;
+            if (currency is null)
+            {
+                // Existing purchase currency is immutable; no write has occurred on a rejected offer.
+                await using var basis = Query(connection, tx, "SELECT currency FROM brickvault.purchases WHERE id=$1", pricing.PurchaseId);
+                currency = await basis.ExecuteScalarAsync(token) as string ??
+                    throw Rejected("revision_conflict", "This purchase has changed. Reload its current revision.");
+            }
+            OfferPriceScale.CheckNewOffer(currency, pricing.Currency is not null, priceScaleSupported);
+        }
 
         var id = Guid.NewGuid();
         var revision = 1;
@@ -100,8 +116,8 @@ internal sealed class Receiving(NpgsqlDataSource db)
         OfferCommand offer, CancellationToken token)
     {
         await using var create = Query(connection, tx, """
-            INSERT INTO brickvault.offers(id,command_id,purchase_id,catalog_id,catalog_revision,unit_price_minor,currency)
-            SELECT $1,$2,p.id,c.id,c.revision,$5,COALESCE($6,p.currency)
+            INSERT INTO brickvault.offers(id,command_id,purchase_id,catalog_id,catalog_revision,unit_price_minor,currency,price_scale_verified)
+            SELECT $1,$2,p.id,c.id,c.revision,$5,COALESCE($6,p.currency),true
             FROM brickvault.catalog c JOIN brickvault.purchases p ON p.id=$3
             WHERE c.id=$4 AND c.integration_eligible FOR SHARE OF c
             RETURNING catalog_revision
@@ -215,7 +231,7 @@ internal sealed class Receiving(NpgsqlDataSource db)
             token)).ToLookup(r => r.OfferId, r => r.Value);
         var offers = (await Rows(connection, tx, """
             SELECT o.purchase_id,o.id,o.catalog_id,o.catalog_revision,o.currency,o.unit_price_minor,
-                c.integration_eligible AND c.revision=o.catalog_revision
+                c.integration_eligible AND c.revision=o.catalog_revision,o.price_scale_verified
             FROM brickvault.offers o
             JOIN brickvault.catalog c ON c.id=o.catalog_id ORDER BY o.id
             """, r =>
@@ -223,7 +239,8 @@ internal sealed class Receiving(NpgsqlDataSource db)
             var lines = backing[r.GetGuid(1)].ToList();
             return (PurchaseId: r.GetGuid(0), Value: new OfferRow(r.GetGuid(1), r.GetGuid(2), r.GetInt32(3),
                 r.GetString(4), r.GetInt32(5), lines, lines.Sum(a => a.Quantity), PublishedQuantity: 0,
-                BackingCurrent: lines.Count > 0 && r.GetBoolean(6)));
+                BackingCurrent: lines.Count > 0 && r.GetBoolean(6),
+                PriceScaleVerified: OfferPriceScale.Verified(r.GetString(4), r.GetBoolean(7))));
         }, token)).ToLookup(r => r.PurchaseId, r => r.Value);
         return new LossReceivingWorkspace("receiving", asOf, true, purchases.Select(p =>
         {

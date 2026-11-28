@@ -42,7 +42,8 @@ internal sealed record DraftBackingWithdrawalCommand
 }
 
 internal sealed record DraftBackingOfferRow(Guid OfferId, int UnitPriceMinor, string Currency,
-    int BackedQuantity, int TotalOfferBackedQuantity, string Authority, bool CanWithdraw);
+    int BackedQuantity, int TotalOfferBackedQuantity, string Authority, bool CanWithdraw,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? PriceScaleVerified = null);
 
 internal sealed record DraftBackingSnapshot(string Scope, DateTime AsOf, bool Complete, StockRegisterRow Position,
     int PurchaseRevision, bool HasOpenShortage, int PhysicalOnHand, int HeldQuantity, int SellableQuantity,
@@ -63,7 +64,8 @@ internal sealed record DraftBackingWithdrawalEvidence(string Scope, DateTime AsO
     Guid CorrelationId, int Revision, Guid PurchaseId, Guid PositionId, Guid OfferId, LocationRow Location,
     string ConfirmedLocationCode, int Quantity, int PriorBackedQuantity, int RemainingBackedQuantity,
     int PriorTotalOfferBackedQuantity, int RemainingTotalOfferBackedQuantity, int UnitPriceMinor, string Currency,
-    string Reason, DateTime RecordedAt);
+    string Reason, DateTime RecordedAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? PriceScaleVerified = null);
 
 internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
 {
@@ -152,7 +154,7 @@ internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
                 WHERE b.placement_id=$1 AND ($2::uuid IS NULL OR b.offer_id=$2) AND ($3::uuid IS NULL OR b.offer_id>$3)
                 ORDER BY b.offer_id LIMIT $4
             )
-            SELECT o.id,o.unit_price_minor,o.currency,amounts.here,amounts.total,i.id IS NOT NULL
+            SELECT o.id,o.unit_price_minor,o.currency,amounts.here,amounts.total,i.id IS NOT NULL,o.price_scale_verified
             FROM candidates candidate JOIN brickvault.offers o ON o.id=candidate.offer_id
             LEFT JOIN brickvault.internal_draft_offers i ON i.id=o.id
             CROSS JOIN LATERAL (
@@ -166,7 +168,8 @@ internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
                 var amount = r.GetInt32(3);
                 var internalOnly = r.GetBoolean(5);
                 return new DraftBackingOfferRow(r.GetGuid(0), r.GetInt32(1), r.GetString(2), amount, r.GetInt32(4),
-                    internalOnly ? "internal-unpublished" : "unverified-origin", internalOnly && amount > 0 && !open);
+                    internalOnly ? "internal-unpublished" : "unverified-origin", internalOnly && amount > 0 && !open,
+                    OfferPriceScale.Verified(r.GetString(2), r.GetBoolean(6)));
             }, token, positionId, Nullable(NpgsqlDbType.Uuid, offerId), Nullable(NpgsqlDbType.Uuid, after), limit);
 
     public async Task<DraftBackingSnapshot> Snapshot(Guid positionId, string? after, int limit, CancellationToken token, bool quarantine = false)
@@ -270,7 +273,7 @@ internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
         var rows = await Rows(connection, tx, """
             SELECT transaction_timestamp(),w.id,w.command_id,c.correlation_id,c.revision,w.purchase_id,w.offer_id,
                 l.id,l.revision,l.code,l.name,w.location_code,w.quantity,w.prior_backed_quantity,w.prior_total_offer_backed_quantity,
-                o.unit_price_minor,o.currency,w.reason,a.occurred_at
+                o.unit_price_minor,o.currency,w.reason,a.occurred_at,o.price_scale_verified
             FROM brickvault.draft_backing_withdrawals w JOIN brickvault.commands c USING(command_id)
             JOIN brickvault.audit a USING(command_id) JOIN brickvault.offers o ON o.id=w.offer_id
             JOIN brickvault.locations l ON l.id=w.location_id
@@ -284,7 +287,7 @@ internal sealed class DraftBackingWithdrawals(NpgsqlDataSource db)
                 r.GetGuid(2), r.GetGuid(3), r.GetInt32(4), r.GetGuid(5), positionId, r.GetGuid(6),
                 new LocationRow(r.GetGuid(7), r.GetInt32(8), r.GetString(9), r.GetString(10)), r.GetString(11),
                 quantity, prior, prior - quantity, total, total - quantity, r.GetInt32(15), r.GetString(16),
-                r.GetString(17), r.GetDateTime(18));
+                r.GetString(17), r.GetDateTime(18), OfferPriceScale.Verified(r.GetString(16), r.GetBoolean(19)));
         }, token, positionId, (receiptId ?? commandId)!.Value);
         return rows.SingleOrDefault() ??
             throw new Fault(404, "unknown_draft_backing_withdrawal", "No withdrawal receipt matches this position and identifier.");

@@ -131,7 +131,7 @@ def row_signatures(s, database, tables, session="BEGIN ISOLATION LEVEL REPEATABL
     groups = {}
     for table in tables:
         # Only staged upgrades compare offers to their exact pre-v16 representation.
-        payload = "(to_jsonb(t) - 'currency')" if table == "offers" and pre_currency_offers else "to_jsonb(t)"
+        payload = "(to_jsonb(t) - 'currency' - 'price_scale_verified')" if table == "offers" and pre_currency_offers else "to_jsonb(t)"
         stmt = (
             session
             + f"SET TIME ZONE 'UTC'; SELECT {payload}::text FROM brickvault.{table} t ORDER BY {payload}::text COLLATE \"C\";\nCOMMIT;"

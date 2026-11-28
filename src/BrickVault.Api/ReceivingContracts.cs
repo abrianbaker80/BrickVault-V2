@@ -105,7 +105,8 @@ internal sealed record PlacementRow(Guid Id, Guid CatalogId, int CatalogRevision
 internal sealed record DeliveryRow(Guid Id, string Reference, int Quantity, Guid? CatalogId,
     int? CatalogRevision, int? ItemCostMinor, int IntakeQuantity, IReadOnlyList<PlacementRow> Placements);
 internal sealed record OfferRow(Guid Id, Guid CatalogId, int CatalogRevision, string Currency,
-    int UnitPriceMinor, IReadOnlyList<BackingRow> Backing, int BackedQuantity, int PublishedQuantity, bool BackingCurrent);
+    int UnitPriceMinor, IReadOnlyList<BackingRow> Backing, int BackedQuantity, int PublishedQuantity, bool BackingCurrent,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? PriceScaleVerified = null);
 internal sealed record StockBalances(long PhysicalOnHand, long Unavailable, long Reserved, long Free,
     long BackedQuantity, long WithheldQuantity, int PublishedQuantity, long KnownCostFreeQuantity,
     long UnknownCostFreeQuantity, long? KnownItemCostMinor, long? KnownPurchaseComponentsMinor);

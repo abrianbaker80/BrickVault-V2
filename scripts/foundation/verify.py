@@ -66,13 +66,15 @@ class Browser:
             ),
         )
 
-    def call(self, path, method="GET", data=None, headers=None, expected=200):
+    def call(self, path, method="GET", data=None, headers=None, expected=200, *, price_scale=True):
         h = {"Accept": "application/json"}
         if method != "GET":
             h["Origin"] = self.s.origin
         if self.token:
             h["X-CSRF-Token"] = self.token
             h["X-Workspace-Id"] = self.lineage
+            if price_scale:
+                h["X-BrickVault-Price-Scale"] = "1"
         if data is not None:
             h["Content-Type"] = "application/json"
         req = urllib.request.Request(
@@ -342,7 +344,8 @@ def qualify_staged_upgrade(lab, port, source_version):
         if source_version >= 3:
             from verify_transfer import seed_opening_position
 
-            records = seed_opening_position(original, fixture)
+            basis = "HUF" if source_version == 15 else "USD"
+            records = seed_opening_position(original, fixture, basis)
             if source_version >= 4:
                 from verify_transfer import seed_previous_transfer
 
@@ -384,7 +387,7 @@ def qualify_staged_upgrade(lab, port, source_version):
             if inst is candidate and source_version >= 3:
                 require(
                     inst.sql(f"""
-                        SELECT currency='USD'
+                        SELECT currency='{basis}' AND NOT price_scale_verified
                             AND NOT has_column_privilege('bv_api','brickvault.offers','currency','UPDATE')
                             AND NOT has_column_privilege('bv_worker','brickvault.offers','currency','SELECT')
                         FROM brickvault.offers WHERE id='{records[2]}'
@@ -1073,6 +1076,8 @@ def verify(port):
             transformations = qualify_part_outs(first)
             registered_bins = qualify_registry(first, rec["entityId"])
             bin_policies = qualify_capacity(first)
+            from verify_offer_price_scale import qualify_offer_price_scale
+            qualify_offer_price_scale(first, rec["entityId"])
             poll(lambda: first.call("diagnostics"), lambda r: r["pendingJobs"] == 0)
             before = first.call("workspace")
             archive = lab / "recovery" / "qualification.age"

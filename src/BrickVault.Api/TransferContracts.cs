@@ -68,7 +68,8 @@ internal sealed record TransferCommand
 }
 
 internal sealed record TransferBacking([property: JsonRequired] Guid OfferId, [property: JsonRequired] int Quantity);
-internal sealed record TransferBackingChoice(Guid OfferId, int Quantity, int UnitPriceMinor, string Currency);
+internal sealed record TransferBackingChoice(Guid OfferId, int Quantity, int UnitPriceMinor, string Currency,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? PriceScaleVerified = null);
 internal sealed record TransferPosition(BinStockLayer Layer, int PurchaseRevision, string LocationCodeAtPlacement,
     IReadOnlyList<TransferBackingChoice> Backing);
 internal sealed record TransferMovement(Guid Id, Guid CommandId, Guid CorrelationId, Guid PurchaseId,

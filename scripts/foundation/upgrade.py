@@ -122,10 +122,10 @@ def stage_upgrade(source, output, release=RELEASE):
                         if candidate.sql("""
                             SELECT NOT EXISTS (
                                 SELECT 1 FROM brickvault.offers o JOIN brickvault.purchases p ON p.id=o.purchase_id
-                                WHERE o.currency IS DISTINCT FROM p.currency
+                                WHERE o.currency IS DISTINCT FROM p.currency OR o.price_scale_verified
                             );
                         """) != "t":
-                            raise ValueError("An opening offer price differs from its historical purchase currency.")
+                            raise ValueError("An opening offer differs from its historical currency or claims an unverified price scale.")
                         comparable.update(row_signatures(candidate, candidate.database, ("offers",), pre_currency_offers=True))
                     if (
                         after["schema_version"]["rows"]

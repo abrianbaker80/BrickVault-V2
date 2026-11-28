@@ -72,7 +72,8 @@ internal sealed record StockLossQuarantineSelection([property: JsonRequired] Gui
 internal sealed record StockLossQuarantineAttribution(Guid QuarantineId, int Quantity, int PriorRemainingQuantity, int RemainingQuantity);
 
 internal sealed record StockLossReduction(Guid OfferId, int Quantity, int PriorBackedQuantity,
-    int RemainingBackedQuantity, int UnitPriceMinor, string Currency);
+    int RemainingBackedQuantity, int UnitPriceMinor, string Currency,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? PriceScaleVerified = null);
 
 internal sealed record StockLossSnapshot(string Scope, DateTime AsOf, bool Complete, LocationRow Location,
     Guid PositionId, Guid CaseId, Guid PurchaseId, Guid PostingId, Guid CommandId, Guid CorrelationId, int Revision,

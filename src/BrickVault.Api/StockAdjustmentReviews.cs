@@ -60,11 +60,12 @@ internal sealed class StockAdjustmentReviews(NpgsqlDataSource db)
 
         var cursor = await CheckCursor(connection, tx, caseId, positionId, position.Revision, after, token);
         var offers = await Rows(connection, tx, """
-            SELECT o.id,b.quantity,o.unit_price_minor,o.currency
+            SELECT o.id,b.quantity,o.unit_price_minor,o.currency,o.price_scale_verified
             FROM brickvault.current_offer_backing b JOIN brickvault.offers o ON o.id=b.offer_id
             WHERE b.placement_id=$1 AND ($2::uuid IS NULL OR o.id>$2)
             ORDER BY o.id LIMIT $3
-            """, r => new AdjustmentOfferBacking(r.GetGuid(0), r.GetInt32(1), r.GetInt32(2), r.GetString(3)),
+            """, r => new AdjustmentOfferBacking(r.GetGuid(0), r.GetInt32(1), r.GetInt32(2), r.GetString(3),
+                OfferPriceScale.Verified(r.GetString(3), r.GetBoolean(4))),
             token, positionId, Nullable(NpgsqlDbType.Uuid, cursor), limit + 1);
         string? next = null;
         if (offers.Count > limit)

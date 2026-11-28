@@ -11,5 +11,6 @@
     <InternalsVisibleTo Include="BrickVault.Api.Tests" />
     <EmbeddedResource Include="Migrations/*.sql" />
     <EmbeddedResource Include="openapi.v1.json" />
+    <EmbeddedResource Include="legacy-offer-price-currencies.json" />
   </ItemGroup>
 </Project>

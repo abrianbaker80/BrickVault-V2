@@ -40,6 +40,33 @@ public sealed class ContractTests
     }
 
     [Fact]
+    public void OnlyOneRecognizedCapabilityAllowsAmbiguousOfferScales()
+    {
+        var headers = new HeaderDictionary();
+        Assert.False(OfferPriceScale.Supported(headers));
+        headers[OfferPriceScale.Header] = "2";
+        Assert.False(OfferPriceScale.Supported(headers));
+        headers[OfferPriceScale.Header] = "1";
+        Assert.True(OfferPriceScale.Supported(headers));
+        headers.Append(OfferPriceScale.Header, "1");
+        Assert.False(OfferPriceScale.Supported(headers));
+        foreach (var currency in new[] { "USD", "EUR", "JPY", "KWD" })
+        {
+            OfferPriceScale.CheckNewOffer(currency, explicitlyPriced: false, supported: false);
+            Assert.Null(OfferPriceScale.Verified(currency, recorded: true));
+        }
+        foreach (var currency in new[] { "HUF", "IQD", "MGA", "BYR", "XAU", "ZZZ" })
+        {
+            Assert.Equal(426, Assert.Throws<Fault>(() => OfferPriceScale.CheckNewOffer(currency, true, false)).Status);
+            Assert.Equal("offer_price_reentry_required",
+                Assert.Throws<Fault>(() => OfferPriceScale.CheckNewOffer(currency, false, true)).Code);
+            OfferPriceScale.CheckNewOffer(currency, explicitlyPriced: true, supported: true);
+            Assert.True(OfferPriceScale.Verified(currency, recorded: true));
+            Assert.Null(OfferPriceScale.Verified(currency, recorded: false));
+        }
+    }
+
+    [Fact]
     public void StockLossUnknownAttributionRetainsLegacyDigestAndZeroIsAffirmative()
     {
         var stable = Guid.Parse(StableId);

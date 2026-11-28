@@ -228,8 +228,8 @@ public sealed class DraftBackingWithdrawalTests
             await Execute("UPDATE brickvault.purchases SET revision=revision+1 WHERE id=$1 AND revision=$2",
                 purchase.EntityId, frontier);
             await Execute("""
-                INSERT INTO brickvault.offers(id,command_id,purchase_id,catalog_id,catalog_revision,unit_price_minor,currency)
-                VALUES ($1,$2,$3,$4,$5,101,'USD')
+                INSERT INTO brickvault.offers(id,command_id,purchase_id,catalog_id,catalog_revision,unit_price_minor,currency,price_scale_verified)
+                VALUES ($1,$2,$3,$4,$5,101,'USD',false)
                 """, unverified, originalCommand, purchase.EntityId, item.EntityId, item.Revision);
             await Execute("""
                 INSERT INTO brickvault.offer_backing(purchase_id,offer_id,placement_id,catalog_id,catalog_revision,quantity)
