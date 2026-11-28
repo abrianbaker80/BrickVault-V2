@@ -444,6 +444,11 @@ export function useWorkbench(page: Ref<string>) {
       } else if (reason instanceof ApiFailure && reason.detail?.code === 'workspace_mismatch') {
         await refresh()
         error.value = 'The workspace changed. The original command is held for its issuing workspace.'
+      } else if (command.kind === 'pooled-offer' && !firstAttempt && reason instanceof ApiFailure &&
+          reason.status === 409 && reason.detail?.code === 'command_mismatch') {
+        error.value = 'Confirmation is still pending. The recorded request differs from the original offer. Reference ' +
+          reason.detail.correlationId + '.'
+        readState.value = 'disconnected'
       } else if (reason instanceof ApiFailure && reason.detail && (confirmsCapacityRejection(command,reason) ||
           ['invalid_quarantine','unknown_quarantine_receipt','quarantine_position_mismatch','quarantine_bin_conflict','quarantine_catalog_conflict',
             'quarantine_shortage_open','quarantine_quantity_unavailable','quarantine_capacity_unavailable','stock_loss_quarantine_unresolved','invalid_draft_backing_withdrawal','draft_backing_bin_conflict','draft_backing_position_mismatch','draft_backing_offer_mismatch',

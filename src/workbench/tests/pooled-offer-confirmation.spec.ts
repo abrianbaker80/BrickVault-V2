@@ -43,6 +43,16 @@ test('a size-limited retry proves the original positions and quantities after a 
     return {key,raw}
   }, commandId)
   const url = '/api/v1/receiving/pooled-offers/' + commandId + '/confirmation'
+  await page.reload()
+  const [direct] = await Promise.all([
+    page.waitForResponse(r => new URL(r.url()).pathname === '/api/v1/receiving/pooled-offers'),
+    pending.getByRole('button',{name:'Retry command'}).click()
+  ])
+  expect(direct.status()).toBe(409)
+  expect(await direct.json()).toMatchObject({code:'command_mismatch'})
+  await expect(pending).toBeVisible()
+  await expect(page.getByText(/The recorded request differs from the original offer/)).toBeVisible()
+  expect(await page.evaluate(key => localStorage.getItem(key) !== null, original.key)).toBe(true)
   await page.route(endpoint, route => route.fulfill({status:413,contentType:'application/json',
     json:{code:'request_too_large',message:'The gateway declined this retry.',correlationId:randomUUID()}}))
   await page.reload()
