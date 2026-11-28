@@ -210,7 +210,7 @@ public sealed class StockShortageClosureTests
         var timelineContract = contract.RootElement.GetProperty("paths")
             .GetProperty("/api/v1/inventory/positions/{positionId}/timeline").GetProperty("get");
         var input = timelineContract.GetProperty("parameters").EnumerateArray()
-            .Single(parameter => parameter.GetProperty("name").GetString() == "after").GetProperty("schema");
+            .Single(parameter => parameter.TryGetProperty("name",out var name) && name.GetString() == "after").GetProperty("schema");
         var output = contract.RootElement.GetProperty("components").GetProperty("schemas")
             .GetProperty("StockPositionTimeline").GetProperty("properties").GetProperty("nextAfter");
         var pattern = input.GetProperty("pattern").GetString()!;

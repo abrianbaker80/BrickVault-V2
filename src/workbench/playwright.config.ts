@@ -12,6 +12,8 @@ if (!process.env.BV_LAB_CA || !process.env.NODE_EXTRA_CA_CERTS)
 process.env.BV_BROWSER_RUN_ID ??= randomUUID()
 if (!/^[a-f0-9-]{36}$/.test(process.env.BV_BROWSER_RUN_ID)) throw new Error('Invalid browser run ID.')
 
+const setStockTests = /(?:pooled-offers|pooled-offer-confirmation|set-contents-inspection|set-contents-transfer)\.spec\.ts$/
+
 export default defineConfig({
   testDir: './tests',
   outputDir: './test-results/' + process.env.BV_BROWSER_RUN_ID,
@@ -20,6 +22,10 @@ export default defineConfig({
   retries: 0,
   timeout: 45_000,
   reporter: 'list',
+  projects: [
+    { name: 'workbench', testIgnore: setStockTests },
+    { name: 'set-stock', testMatch: setStockTests, dependencies: ['workbench'] }
+  ],
   use: {
     baseURL: origin.origin,
     viewport: { width: 1440, height: 900 },

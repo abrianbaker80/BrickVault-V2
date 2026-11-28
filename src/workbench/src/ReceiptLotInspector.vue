@@ -5,6 +5,7 @@ import type { ReceiptLot, TimelineEvent } from './api'
 import { partOutLink, closureLink, countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink, recoveryLink } from './countLinks'
 import { time } from './presentation'
 import { receiptCost } from './receiving'
+import { inspectionLink, positionContents } from './setContents'
 
 const props = defineProps<{ id: string; asOf: string; connected: boolean }>()
 const emit = defineEmits<{ failure: [reason: unknown]; inspect: [id: string] }>()
@@ -50,6 +51,7 @@ function pageBy(list: keyof Cursors, cursor?: string) {
   requested.value = { ...confirmed.value, [list]: cursor ? [...stack, cursor] : stack.slice(0, -1) }
 }
 const titles: Record<TimelineEvent['kind'], string> = {
+  'set-inspection': 'Set contents inspected',
   'putaway': 'Put away', 'transfer-in': 'Transfer within lot', 'transfer-out': 'Transfer within lot',
   'count': 'Count witnessed', 'hold': 'Build hold placed', 'hold-release': 'Build hold released',
   'quarantine': 'Quarantined in bin', 'quarantine-release': 'Released after inspection',
@@ -115,6 +117,7 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
           <li v-for="{ layer, location } in page.positions" :key="layer.placementId">
             <strong>{{ location.code }} · {{ location.name }}</strong>
             <p>{{ layer.currentCatalog.name }} · {{ layer.quantity }} positioned · {{ layer.backedQuantity }} backed</p>
+            <p v-if="positionContents(layer)">{{ positionContents(layer) }}</p>
             <p v-if="layer.catalogRevision !== layer.currentCatalog.revision" class="warning">
               Recorded at catalog revision {{ layer.catalogRevision }}. Item details show current revision {{ layer.currentCatalog.revision }}.
             </p>
@@ -153,6 +156,7 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
               <a v-if="event.kind==='part-out' && event.transformationId" :href="partOutLink(positionId,event.transformationId)">View part-out receipt</a>
           <a v-if="event.kind==='part-out-output' && event.transformationId && event.relatedPositionId" :href="partOutLink(event.relatedPositionId,event.transformationId)">View originating part-out receipt</a>
           <a v-if="event.kind === 'offer-withdrawal'" :href="draftBackingLink(event.locationId,positionId,'receipts',event.id)">View withdrawal receipt</a>
+              <a v-if="event.kind === 'set-inspection'" :href="inspectionLink(positionId,event.id)">View set inspection receipt</a>
               <a v-if="event.kind === 'count' && event.observationId" :href="countReceiptLink(event.locationId, event.observationId)">View count receipt</a>
               <a v-if="event.kind==='shortage-closure' && event.caseId" :href="closureLink(event.locationId,positionId,event.caseId,'receipt',event.id)">View shortage closure receipt</a>
               <template v-if="event.kind === 'stock-loss-recovery' && event.postingId"><a :href="recoveryLink(event.locationId, positionId, event.postingId, event.id)">View stock recovery receipt</a><small v-if="event.quarantineDelta">{{ event.quarantineDelta }} returned to quarantine</small></template>

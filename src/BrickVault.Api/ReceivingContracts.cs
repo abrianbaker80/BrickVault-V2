@@ -23,7 +23,7 @@ internal abstract record ReceivingCommand
     protected static bool ValidQuantity(int number) => number is >= 1 and <= 1_000_000;
     protected static bool CurrencyCode(string? code) => code is { Length: 3 } && code.All(c => c is >= 'A' and <= 'Z');
     protected static bool Money(int? number) => number is null or (>= 0 and <= 100_000_000);
-    public byte[] Digest() => SHA256.HashData(Encoding.UTF8.GetBytes(
+    public virtual byte[] Digest() => SHA256.HashData(Encoding.UTF8.GetBytes(
         Kind + "\n" + JsonSerializer.Serialize(this, GetType(), Wire.Json)));
 }
 
@@ -57,6 +57,9 @@ internal sealed record DeliveryCommand : PurchaseChange
     public required int Quantity { get; init; }
     public required Guid? CatalogId { get; init; }
     public required int? ItemCostMinor { get; init; }
+    [System.Diagnostics.CodeAnalysis.DisallowNull]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SetContents? SetContents { get; init; }
 
     protected override bool Valid() => ValidParent && Text(Reference, 64) &&
         ValidQuantity(Quantity) && CatalogId != Guid.Empty && Money(ItemCostMinor);
@@ -73,6 +76,9 @@ internal sealed record PutawayCommand : PurchaseChange
     // Preserve the wire digest of an existing putaway request that omitted this field.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? ConfirmedCatalogRevision { get; init; }
+    [System.Diagnostics.CodeAnalysis.DisallowNull]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SetContents? SetContents { get; init; }
     public required int Quantity { get; init; }
 
     protected override bool Valid() => ValidParent && DeliveryId != Guid.Empty &&
@@ -80,7 +86,7 @@ internal sealed record PutawayCommand : PurchaseChange
         ConfirmedCatalogRevision is null or > 0 && ValidQuantity(Quantity);
 }
 
-internal sealed record OfferCommand : PurchaseChange
+internal record OfferCommand : PurchaseChange
 {
     [JsonIgnore]
     public override string Kind => "offer";
@@ -91,6 +97,9 @@ internal sealed record OfferCommand : PurchaseChange
     [System.Diagnostics.CodeAnalysis.DisallowNull]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Currency { get; init; }
+    [System.Diagnostics.CodeAnalysis.DisallowNull]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SetContents? SetContents { get; init; }
 
     protected override bool Valid() => ValidParent && CatalogId != Guid.Empty && UnitPriceMinor > 0 &&
         Money(UnitPriceMinor) && (Currency is null || CurrencyCode(Currency)) && Backing is { Length: >= 1 and <= 64 } &&
@@ -101,12 +110,16 @@ internal sealed record OfferCommand : PurchaseChange
 internal sealed record BackingRow([property: JsonRequired] Guid PlacementId,
     [property: JsonRequired] int Quantity);
 internal sealed record PlacementRow(Guid Id, Guid CatalogId, int CatalogRevision, Guid LocationId,
-    string LocationCode, int Quantity, int BackedQuantity, int FreeToBackQuantity);
+    string LocationCode, int Quantity, int BackedQuantity, int FreeToBackQuantity,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SetContents? SetContents = null);
 internal sealed record DeliveryRow(Guid Id, string Reference, int Quantity, Guid? CatalogId,
-    int? CatalogRevision, int? ItemCostMinor, int IntakeQuantity, IReadOnlyList<PlacementRow> Placements);
+    int? CatalogRevision, int? ItemCostMinor, int IntakeQuantity, IReadOnlyList<PlacementRow> Placements,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SetContents? SetContents = null);
 internal sealed record OfferRow(Guid Id, Guid CatalogId, int CatalogRevision, string Currency,
     int UnitPriceMinor, IReadOnlyList<BackingRow> Backing, int BackedQuantity, int PublishedQuantity, bool BackingCurrent,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? PriceScaleVerified = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? PriceScaleVerified = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] OfferPool? Pool = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SetContents? SetContents = null);
 internal sealed record StockBalances(long PhysicalOnHand, long Unavailable, long Reserved, long Free,
     long BackedQuantity, long WithheldQuantity, int PublishedQuantity, long KnownCostFreeQuantity,
     long UnknownCostFreeQuantity, long? KnownItemCostMinor, long? KnownPurchaseComponentsMinor);
@@ -156,7 +169,8 @@ internal sealed record LossDeliveryRow(Guid Id, string Reference, int Quantity, 
     int? AllocatedLostItemCostMinor, int? RemainingItemCostMinor,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DeliveryRecoveryTotals? RecoveryTotals = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LayerPartOut? PartOut = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LayerPartOut? PartOut = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SetContents? SetContents = null);
 internal sealed record LossPurchaseRow(Guid Id, int Revision, string Reference, string Source, string Currency,
     int OrderedQuantity, int? PendingChargeMinor, IReadOnlyList<LossDeliveryRow> Deliveries,
     IReadOnlyList<OfferRow> Offers, StockBalances Balances,
@@ -170,4 +184,5 @@ internal sealed record BinStockLayer(Guid PlacementId, Guid PurchaseId, string P
     string DeliveryReference, Guid ReceiptCommandId, Guid ReceiptCorrelationId, int ReceiptQuantity,
     int? ReceiptItemCostMinor, string Currency, Guid CatalogId, int CatalogRevision, CatalogRow CurrentCatalog,
     string LocationCodeAtPutaway, int Quantity, int BackedQuantity, int UnbackedQuantity, int FreeToBackQuantity,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? QuarantinedQuantity = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SetContents? SetContents = null);

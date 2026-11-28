@@ -17,6 +17,14 @@ If the server rejects a newly entered selling currency, check the server version
 
 An older draft can show its currency and an integer labeled **recorded minor units**. The original browser's decimal precision is unknown. Check your original pricing record before using that amount. If an older Workbench asks for an update, reload it before opening the affected offers.
 
+## Record what comes with a set
+
+When you receive an identified set, record whether the original box is included and whether the printed instructions are included. Record copies with different contents separately. For older stock, open the position in **Inventory**, choose **Inspect set contents**, and enter the quantity you checked, the physical bin code and the reason. Its inspection receipt links back to the source position.
+
+For example, four otherwise identical used sets in one bin may have four different configurations. One includes the box and manual, one has only the box, one has only the manual and one has neither. Inspect each group separately. Its receipt layer still carries the original purchase cost. Unrecorded contents require inspection before preparing a fresh offer.
+
+In **Receiving**, select **Prepare offer**, choose the set and its contents, then enter the selling currency and unit price. **Include stock from other purchases** shows matching positions by purchase, receipt and bin. Enter the quantity from each source. After saving, review the quantity supplied by each purchase and the total for the whole offer. A buyer ordering a boxed set with instructions must be able to receive exactly that configuration. Published quantity stays at zero during draft preparation. [Set contents and offer backing](https://github.com/abrianbaker80/BrickVault-V2/issues/55)
+
 ## Inspect a storage bin
 
 In **Locations**, open the bin to see its confirmed stock. Each placement retains its purchase and delivery. The inspector shows the whole delivery’s documented cost and currency, or marks the cost unknown. One delivery may occupy several bins. Adding its displayed cost across placements would count the same evidence more than once. Backed and unbacked quantities reconcile to the on-hand count. The amount eligible for new backing also depends on the recorded catalog revision and its current eligibility.

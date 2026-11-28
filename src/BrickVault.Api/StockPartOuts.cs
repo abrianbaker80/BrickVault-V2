@@ -11,7 +11,8 @@ namespace BrickVault.Api;
 internal sealed record StockPartOutOutputInput([property: JsonRequired] Guid LineId, [property: JsonRequired] Guid CatalogId,
     [property: JsonRequired] int CatalogRevision, [property: JsonRequired] Guid LocationId,
     [property: JsonRequired] string ConfirmedLocationCode, [property: JsonRequired] int Quantity,
-    [property: JsonRequired] int? ItemCostMinor, [property: JsonRequired] string Disposition);
+    [property: JsonRequired] int? ItemCostMinor, [property: JsonRequired] string Disposition,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SetContents? SetContents = null);
 internal sealed record StockPartOutPhysicalResidual([property: JsonRequired] Guid LineId, [property: JsonRequired] string Disposition,
     [property: JsonRequired] string Description, [property: JsonRequired] int Quantity);
 
@@ -83,7 +84,8 @@ internal sealed record StockPartOutReview(string Scope,DateTime AsOf,bool Comple
     string Currency,IReadOnlyList<StockPartOutSummary> PartOuts,Guid? NextAfter);
 internal sealed record StockPartOutOutput(Guid LineId,Guid DeliveryId,Guid PositionId,Guid CommandId,Guid CorrelationId,
     CatalogRow RecordedCatalog,LocationRow Location,string ConfirmedLocationCode,int Quantity,int? ItemCostMinor,
-    string Disposition,Guid? QuarantineId);
+    string Disposition,Guid? QuarantineId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SetContents? SetContents = null);
 internal sealed record StockPartOutEvidence(string Scope,DateTime AsOf,bool Complete,Guid Id,Guid CommandId,Guid CorrelationId,
     int Revision,Guid PurchaseId,Guid SourcePositionId,LocationRow SourceLocation,string ConfirmedSourceLocationCode,
     CatalogRow RecordedSourceCatalog,AdjustmentReceiptEvidence Receipt,int Quantity,string Reason,DateTime RecordedAt,
@@ -115,16 +117,17 @@ internal sealed class StockPartOuts(NpgsqlDataSource db)
             var outputs=command.Outputs;
             await using (var insert=Query(connection,tx,"""
                 INSERT INTO brickvault.stock_part_out_outputs(part_out_id,line_id,catalog_id,catalog_revision,location_id,location_code,
-                    quantity,item_cost_minor,disposition)
-                SELECT $1,line_id,catalog_id,catalog_revision,location_id,location_code,quantity,item_cost_minor,disposition
-                FROM unnest($2::uuid[],$3::uuid[],$4::integer[],$5::uuid[],$6::text[],$7::integer[],$8::integer[],$9::text[])
-                    AS choices(line_id,catalog_id,catalog_revision,location_id,location_code,quantity,item_cost_minor,disposition)
+                    quantity,item_cost_minor,disposition,set_contents)
+                SELECT $1,line_id,catalog_id,catalog_revision,location_id,location_code,quantity,item_cost_minor,disposition,set_contents
+                FROM unnest($2::uuid[],$3::uuid[],$4::integer[],$5::uuid[],$6::text[],$7::integer[],$8::integer[],$9::text[],$10::smallint[])
+                    AS choices(line_id,catalog_id,catalog_revision,location_id,location_code,quantity,item_cost_minor,disposition,set_contents)
                 ORDER BY line_id
                 """,id,outputs.Select(o=>o.LineId).ToArray(),outputs.Select(o=>o.CatalogId).ToArray(),
                 outputs.Select(o=>o.CatalogRevision).ToArray(),outputs.Select(o=>o.LocationId).ToArray(),
                 outputs.Select(o=>o.ConfirmedLocationCode).ToArray(),outputs.Select(o=>o.Quantity).ToArray(),
                 new NpgsqlParameter {NpgsqlDbType=NpgsqlDbType.Array|NpgsqlDbType.Integer,Value=outputs.Select(o=>o.ItemCostMinor).ToArray()},
-                outputs.Select(o=>o.Disposition).ToArray()))
+                outputs.Select(o=>o.Disposition).ToArray(),
+                new NpgsqlParameter {NpgsqlDbType=NpgsqlDbType.Array|NpgsqlDbType.Smallint, Value=outputs.Select(o=>o.SetContents?.Code).ToArray()}))
                 await insert.ExecuteNonQueryAsync(token);
 
             if (command.PhysicalResiduals.Length>0)
@@ -144,12 +147,13 @@ internal sealed class StockPartOuts(NpgsqlDataSource db)
             return receipt;
         }
         catch (PostgresException error) when (error.ConstraintName is "part_out_revision" or "part_out_scope" or "part_out_bin" or
-            "part_out_catalog" or "part_out_amount" or "part_out_identity_gain" or "part_out_cost_mismatch" or "stock_shortage_open" or "location_destination_archived" or "location_capacity_exceeded")
+            "part_out_catalog" or "part_out_amount" or "part_out_identity_gain" or "part_out_cost_mismatch" or "stock_shortage_open" or "location_destination_archived" or "location_capacity_exceeded" or "set_contents_not_set" or "set_contents_mismatch")
         {
             throw error.ConstraintName switch
             {
                 "location_destination_archived" => LocationRegistry.ArchivedDestination(),
                 "location_capacity_exceeded" => LocationCapacities.Rejection(error),
+                "set_contents_not_set" or "set_contents_mismatch" => SetContents.Conflict(error.ConstraintName),
                 "part_out_revision"=>Fault.Conflict(),
                 "part_out_scope"=>new Fault(409,"part_out_scope","Choose a current source position from the specified purchase and bin."),
                 "part_out_bin"=>new Fault(409,"part_out_bin","Confirm the current registered code for the source and each output bin."),
@@ -193,7 +197,7 @@ internal sealed class StockPartOuts(NpgsqlDataSource db)
         await BeginRead(connection,tx,token);
         var positions=await Rows(connection,tx,"SELECT "+PositionRows.RegisterSelect+",transaction_timestamp()\n"+
             PositionRows.RegisterFrom+"\nWHERE p.id=$1",r=>(Position:PositionRows.ReadRegister(r,true),
-                Revision:r.GetInt32(29),Shortage:r.GetBoolean(31),Held:r.GetInt32(32),AsOf:r.GetDateTime(39)),token,positionId);
+                Revision:r.GetInt32(29),Shortage:r.GetBoolean(31),Held:r.GetInt32(32),AsOf:r.GetDateTime(40)),token,positionId);
         if (positions.Count==0) throw new Fault(404,"unknown_position","No stock position has that identifier.");
         var position=positions.Single();
         var layer=position.Position.Layer;
@@ -271,14 +275,14 @@ internal sealed class StockPartOuts(NpgsqlDataSource db)
         }
         var outputs=await Rows(connection,tx,"""
             SELECT o.line_id,o.delivery_id,o.position_id,c.command_id,c.correlation_id,o.recorded_catalog,l.id,l.revision,l.code,l.name,
-                o.location_code,o.quantity,o.item_cost_minor,o.disposition
+                o.location_code,o.quantity,o.item_cost_minor,o.disposition,o.set_contents
             FROM brickvault.stock_part_out_outputs o JOIN brickvault.commands c ON c.command_id=o.child_command_id
             JOIN brickvault.locations l ON l.id=o.location_id
             WHERE o.part_out_id=$1 AND ($2::uuid IS NULL OR o.line_id>$2) ORDER BY o.line_id LIMIT $3
             """,r=>new StockPartOutOutput(r.GetGuid(0),r.GetGuid(1),r.GetGuid(2),r.GetGuid(3),r.GetGuid(4),
                 JsonSerializer.Deserialize<CatalogRow>(r.GetString(5),Wire.Json)!,
                 new LocationRow(r.GetGuid(6),r.GetInt32(7),r.GetString(8),r.GetString(9)),r.GetString(10),r.GetInt32(11),
-                Optional<int>(r,12),r.GetString(13),r.GetString(13)=="retained"?r.GetGuid(2):null),
+                Optional<int>(r,12),r.GetString(13),r.GetString(13)=="retained"?r.GetGuid(2):null,SetContents.Read(r,14)),
             token,evidence.Id,Nullable(NpgsqlDbType.Uuid,outputAnchor),outputLimit+1);
         var residuals=await Rows(connection,tx,"""
             SELECT line_id,disposition,description,quantity FROM brickvault.stock_part_out_residuals

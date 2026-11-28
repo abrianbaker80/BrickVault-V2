@@ -150,6 +150,7 @@ function openForm() {
             <a v-if="notice.capacityReceipt" :href="notice.capacityReceipt">View piece limit receipt</a>
             <a v-if="notice.registryReceipt" :href="notice.registryReceipt">View bin registry receipt</a>
             <a v-if="notice.partOutReceipt" :href="notice.partOutReceipt">View part-out receipt</a>
+            <a v-if="notice.setReceipt" :href="notice.setReceipt">View set inspection receipt</a>
             <a v-if="notice.recoveryReceipt" :href="notice.recoveryReceipt">View recovery receipt</a>
             <a v-if="notice.closureReceipt" :href="notice.closureReceipt">View shortage closure receipt</a>
             <a v-if="notice.lossLink" :href="notice.lossLink">View posted stock loss</a>

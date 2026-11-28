@@ -7,6 +7,7 @@ import CountWorkspace from './CountWorkspace.vue'
 import { countPositionLink, holdPositionLink, draftBackingLink, quarantineLink, type CountLink } from './countLinks'
 import { itemLabel, receiptCost, recordedOfferPrice } from './receiving'
 import { time } from './presentation'
+import { contentKey, positionContents } from './setContents'
 
 const props = defineProps<{ location: Location; asOf: string; connected: boolean; workspaceLoading: boolean; locations: Location[]; catalog: Catalog[]; transfers: TransferControls; countLink?: CountLink }>()
 const emit = defineEmits<{ failure: [reason: unknown]; inspect: [id: string]; recover: [] }>()
@@ -54,6 +55,7 @@ function sameSource(original: TransferPosition, current: TransferPosition) {
       before.deliveryId !== now.deliveryId || before.catalogId !== now.catalogId || before.catalogRevision !== now.catalogRevision ||
       before.currentCatalog.id !== now.currentCatalog.id || now.currentCatalog.id !== now.catalogId ||
       before.currentCatalog.revision !== now.currentCatalog.revision || before.quantity !== now.quantity ||
+      contentKey(before.setContents) !== contentKey(now.setContents) ||
       before.unbackedQuantity !== now.unbackedQuantity || now.unbackedQuantity !== now.quantity - now.backedQuantity ||
       before.backedQuantity !== now.backedQuantity || before.quarantinedQuantity !== now.quarantinedQuantity ||
       original.backing.length !== current.backing.length) return false
@@ -223,6 +225,7 @@ watch(binScope,
           <li v-for="({ layer, locationCodeAtPlacement }, index) in stock.positions" :key="layer.placementId">
             <div class="receipt-line-head"><strong>{{ layer.purchaseReference }} · {{ layer.deliveryReference }}</strong><span>{{ layer.quantity }} in bin</span></div>
             <p><strong v-if="layer.catalogRevision !== layer.currentCatalog.revision">Current catalog item · </strong>{{ itemLabel([layer.currentCatalog], layer.catalogId) }}</p>
+            <p v-if="positionContents(layer)">{{ positionContents(layer) }}</p>
             <p v-if="layer.catalogRevision !== layer.currentCatalog.revision" class="warning">Placed at catalog revision {{ layer.catalogRevision }}. Item details show current revision {{ layer.currentCatalog.revision }}.</p>
             <p v-if="!layer.currentCatalog.integrationEligible" class="warning">The current catalog item is ineligible for offer backing.</p>
             <small v-if="arrivals.has(layer.placementId)">Transferred from {{ arrivals.get(layer.placementId)?.sourceLocationCode }} · {{ time(arrivals.get(layer.placementId)!.occurredAt) }}</small>
@@ -234,7 +237,7 @@ watch(binScope,
             <details><summary>Placement details</summary><small>Placement {{ layer.placementId }}</small>
               <small>Receipt correlation ID {{ layer.receiptCorrelationId }}</small></details>
             <button type="button" class="move-stock" :disabled="!ready || !transfers.enabled || locations.length < 2 || checking || fenced.has(layer.placementId)"
-              :aria-label="'Transfer stock from ' + layer.purchaseReference + ' · ' + layer.deliveryReference"
+              :aria-label="['Transfer stock from ' + layer.purchaseReference, layer.deliveryReference, positionContents(layer)].filter(Boolean).join(' · ')"
               @click="openTransfer(stock.positions[index], $event)">Transfer stock</button>
             <a class="count-link" :href="countPositionLink(location.id, layer.placementId)" :aria-label="'Count stock for ' + layer.purchaseReference + ' · ' + layer.deliveryReference">Count stock</a>
             <a class="count-link" :href="holdPositionLink(location.id, layer.placementId)" :aria-label="'Build holds for ' + layer.purchaseReference + ' · ' + layer.deliveryReference + ' · Position ID ' + layer.placementId">Build holds</a>

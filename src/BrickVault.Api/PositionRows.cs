@@ -23,9 +23,11 @@ internal static class PositionRows
             JOIN brickvault.deliveries d ON d.id=p.delivery_id
             JOIN brickvault.commands j ON j.command_id=d.command_id
             JOIN brickvault.catalog c ON c.id=p.catalog_id
+            LEFT JOIN brickvault.position_set_contents contents ON contents.position_id=p.id
             """;
 
-    internal const string RegisterSelect = Select + ",p.origin_placement_id,loc.id,loc.revision,loc.code,loc.name";
+    internal const string SetContentsColumn = ",contents.set_contents AS physical_set_contents";
+    internal const string RegisterSelect = Select + ",p.origin_placement_id,loc.id,loc.revision,loc.code,loc.name" + SetContentsColumn;
     internal const string RegisterFrom = From + "\nJOIN brickvault.locations loc ON loc.id=p.location_id";
 
     internal static StockRegisterRow ReadRegister(NpgsqlDataReader r) =>
@@ -43,10 +45,12 @@ internal static class PositionRows
         var unbacked = quantity - backed;
         var current = References.ReadCatalog(r, 15);
         var unavailable = r.GetInt32(33);
+        var contents = SetContents.Read(r,r.GetOrdinal("physical_set_contents"));
         return new BinStockLayer(r.GetGuid(0), r.GetGuid(1), r.GetString(2), r.GetGuid(3), r.GetString(4),
             r.GetGuid(5), r.GetGuid(6), r.GetInt32(7), Optional<int>(r, 8), r.GetString(9), r.GetGuid(10),
             recordedRevision, current, r.GetString(12), quantity, backed, unbacked,
-            current.IntegrationEligible && current.Revision == recordedRevision && !r.GetBoolean(31)
-                ? unbacked - r.GetInt32(32) - unavailable : 0, quarantine ? unavailable : null);
+            current.IntegrationEligible && current.Revision == recordedRevision && !r.GetBoolean(31) &&
+                (current.ItemType != "set" || contents is not null)
+                ? unbacked - r.GetInt32(32) - unavailable : 0, quarantine ? unavailable : null, contents);
     }
 }

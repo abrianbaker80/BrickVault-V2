@@ -99,9 +99,11 @@ internal sealed class StockReceiptLots(NpgsqlDataSource db)
             SELECT count(*)::integer, COALESCE(sum(s.quantity),0)::integer, COALESCE(sum(b.quantity),0)::integer,
                 COALESCE(sum(h.quantity),0)::integer,
                 COALESCE(sum(CASE WHEN c.integration_eligible AND c.revision=s.catalog_revision AND sc.id IS NULL
+                    AND (c.item_type<>'set' OR contents.set_contents IS NOT NULL)
                     THEN s.quantity-COALESCE(b.quantity,0)-COALESCE(h.quantity,0)-COALESCE(q.quantity,0) ELSE 0 END),0)::integer,
                 COALESCE(sum(q.quantity),0)::integer
             FROM stock s JOIN brickvault.catalog c ON c.id=s.catalog_id
+            LEFT JOIN brickvault.position_set_contents contents ON contents.position_id=s.id
             LEFT JOIN brickvault.stock_shortage_cases sc ON sc.position_id=s.id AND sc.resolved_by_command_id IS NULL
             LEFT JOIN backing b ON b.placement_id=s.id LEFT JOIN held h ON h.position_id=s.id
             LEFT JOIN brickvault.current_position_quarantine q ON q.position_id=s.id

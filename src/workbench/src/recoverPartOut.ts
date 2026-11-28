@@ -1,4 +1,5 @@
 import { sameLabel } from './binLabels'
+import { contentKey } from './setContents'
 import { api, ApiFailure, ContractFailure, type PartOutCommand, type PartOutEvidence } from './api'
 
 export async function recoverPartOut(command: PartOutCommand) {
@@ -27,7 +28,8 @@ export async function recoverPartOut(command: PartOutCommand) {
         const expected=outputs.get(row.lineId)
         if (!expected || expected.catalogId!==row.recordedCatalog.id || expected.catalogRevision!==row.recordedCatalog.revision ||
             expected.locationId!==row.location.id || !sameLabel(expected.confirmedLocationCode,row.confirmedLocationCode) ||
-            expected.quantity!==row.quantity || expected.itemCostMinor!==row.itemCostMinor || expected.disposition!==row.disposition) throw new ContractFailure()
+            expected.quantity!==row.quantity || expected.itemCostMinor!==row.itemCostMinor || expected.disposition!==row.disposition ||
+            contentKey(expected.setContents)!==contentKey(row.setContents)) throw new ContractFailure()
         outputs.delete(row.lineId)
       }
       outputAfter=page.nextOutputAfter || ''

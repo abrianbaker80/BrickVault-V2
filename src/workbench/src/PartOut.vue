@@ -7,9 +7,11 @@ import { partOutLink } from './countLinks'
 import { itemLabel, receiptCost, parseMoney } from './receiving'
 import { time } from './presentation'
 import PartOutReceipt from './PartOutReceipt.vue'
+import SetContentsFields from './SetContentsFields.vue'
+import { positionContents, recordedContents, type Presence } from './setContents'
 
 type Output = {id:string; catalog:string; revision:number; bin:string; binRevision:number; code:string; quantity:string;
-  disposition:''|'stock'|'retained'; basis:''|'known'|'unassigned'; amount:string}
+  disposition:''|'stock'|'retained'; basis:''|'known'|'unassigned'; amount:string; box:Presence; instructions:Presence}
 type Residual = {id:string; disposition:''|'discarded'|'lost'; description:string; quantity:string}
 const props=defineProps<{source:string;receiptId?:string;workspace:Workspace;connected:boolean;controls:TransferControls}>()
 const emit=defineEmits<{failure:[reason:unknown];refresh:[]}>()
@@ -18,7 +20,7 @@ const requested=shallowRef<string[]>(['']),confirmed=shallowRef<string[]>([''])
 const loading=ref(false),error=ref(''),stale=ref(false),retry=ref(0),sending=ref(false),feedback=ref('')
 const input=ref(''),code=ref(''),reason=ref(''),acknowledged=ref(false),residualCost=ref('')
 const residualMode=ref<''|'none'|'record'>('')
-const makeOutput=():Output=>({id:crypto.randomUUID(),catalog:'',revision:0,bin:'',binRevision:0,code:'',quantity:'',disposition:'',basis:'',amount:''})
+const makeOutput=():Output=>({id:crypto.randomUUID(),catalog:'',revision:0,bin:'',binRevision:0,code:'',quantity:'',disposition:'',basis:'',amount:'',box:'',instructions:''})
 const outputs=ref<Output[]>([makeOutput()]),physical=ref<Residual[]>([])
 const bins=useBinRegistry(()=>[code.value,...outputs.value.map(o=>o.code)])
 const historyHeading=ref<HTMLElement>()
@@ -59,6 +61,7 @@ const destinationRoom=computed(()=>{
   })
 })
 const validOutputs=computed(()=>!destinationRoom.value.some(d=>exceedsCapacity(d.row,d.net)) && !repeatsInput.value && outputs.value.length>0 && outputs.value.every(o=>(o.disposition==='retained' || catalog(o.catalog)?.integrationEligible) && o.revision===catalog(o.catalog)?.revision &&
+  (catalog(o.catalog)?.itemType!=='set' || (page.value?.setContentsSupported && recordedContents(o.box,o.instructions))) &&
   bins.isActive(o.bin) && bins.matches(location(o.bin),o.code) && integer(o.quantity) && !!o.disposition && (!known.value || (o.basis && outputCost(o)!==undefined))) &&
   outputs.value.reduce((n,o)=>n+Number(o.quantity),0)<=1_000_000)
 const validResiduals=computed(()=>residualMode.value==='none' || (residualMode.value==='record' && physical.value.length>0 &&
@@ -67,6 +70,7 @@ const allowed=computed(()=>editable.value && !loading.value && selected.value &&
   validOutputs.value && validResiduals.value && balanced.value && !!reason.value.trim() && acknowledged.value)
 function selectCatalog(o:Output,event:Event) {
   o.catalog=(event.target as HTMLSelectElement).value; o.revision=catalog(o.catalog)?.revision ?? 0;acknowledged.value=false
+  o.box=''; o.instructions=''
 }
 function selectBin(o:Output,event:Event) {
   o.bin=(event.target as HTMLSelectElement).value;o.binRevision=location(o.bin)?.revision ?? 0;o.code='';acknowledged.value=false
@@ -117,7 +121,8 @@ async function save() {
     sourcePositionId:props.source,sourceLocationId:reviewed.position.location.id,confirmedSourceLocationCode:code.value,
     sourceCatalogId:current.value.id,sourceCatalogRevision:current.value.revision,quantity:Number(input.value),reason:reason.value.trim(),
     outputs:outputs.value.map(o=>({lineId:o.id,catalogId:o.catalog,catalogRevision:o.revision,locationId:o.bin,confirmedLocationCode:o.code,
-      disposition:o.disposition as 'stock'|'retained',quantity:Number(o.quantity),itemCostMinor:outputCost(o) ?? null})),
+      disposition:o.disposition as 'stock'|'retained',quantity:Number(o.quantity),itemCostMinor:outputCost(o) ?? null,
+      ...(catalog(o.catalog)?.itemType==='set' ? {setContents:recordedContents(o.box,o.instructions)} : {})})),
     residualItemCostMinor:known.value ? amount(residualCost.value)! : null,
     physicalResiduals:physical.value.map(r=>({lineId:r.id,disposition:r.disposition as 'discarded'|'lost',description:r.description.trim(),quantity:Number(r.quantity)}))}
   sending.value=true
@@ -141,6 +146,7 @@ async function save() {
     <template v-if="page && current">
       <div class="layout"><aside class="panel context" aria-label="Input receipt and commitments">
         <h3>Input receipt</h3><p><strong>{{ itemLabel([current],current.id) }}</strong><small>Current catalog revision {{ current.revision }} · Placed at revision {{ page.position.layer.catalogRevision }}</small></p>
+        <p v-if="positionContents(page.position.layer)">{{ positionContents(page.position.layer) }}</p>
         <p>{{ page.position.layer.purchaseReference }} · {{ page.position.layer.deliveryReference }}<small>Bin {{ page.position.location.code }} · {{ page.position.location.name }}</small></p>
         <p>Original input lot · {{ page.position.layer.receiptQuantity }} units · {{ receiptCost(page.position.layer.receiptItemCostMinor,page.currency) }} item cost</p>
         <a :href="'#inventory/lot/'+page.position.layer.deliveryId">Inspect input receipt lot</a>
@@ -167,6 +173,11 @@ async function save() {
             <label>Output item<select :value="o.catalog" @change="selectCatalog(o,$event)" required><option disabled value="">Choose registered catalog item</option>
               <option v-for="c in workspace.catalog" :key="c.id" :value="c.id">{{ itemLabel([c],c.id) }}{{ c.integrationEligible ? '' : ' · Quarantine only' }}</option></select></label>
             <small v-if="o.catalog" class="narrow-identity">{{ itemLabel(workspace.catalog,o.catalog) }} · Revision {{ o.revision }}</small>
+            <template v-if="catalog(o.catalog)?.itemType === 'set'">
+              <SetContentsFields v-model:box="o.box" v-model:instructions="o.instructions" />
+              <small v-if="!page.setContentsSupported" class="warning">Update the server to record a set output’s box and instructions.</small>
+              <small v-else>Use separate output lines for sets with different contents.</small>
+            </template>
             <small v-if="catalog(o.catalog) && !catalog(o.catalog)?.integrationEligible">Quarantine only · Mapping {{ catalog(o.catalog)?.mapping }} · License {{ catalog(o.catalog)?.license }} · Color {{ catalog(o.catalog)?.colorState }}</small>
             <div class="pair"><label>Output quantity<input v-model="o.quantity" inputmode="numeric" maxlength="7" required /></label>
               <label>Output disposition<select v-model="o.disposition" required><option disabled value="">Choose disposition</option><option value="stock">Accepted stock</option><option value="retained">Retain in quarantine</option></select></label></div>

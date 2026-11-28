@@ -2,6 +2,8 @@
 
 ## M3 receiving
 
+- Receiving records a set’s original box and printed instructions separately. Operators can prepare distinct drafts for different contents and select matching stock from more than one purchase. Each contributing purchase keeps its own costs, currency and receipt history. [Set contents and offer backing](https://github.com/abrianbaker80/BrickVault-V2/issues/55)
+
 - Receiving lets operators set the selling currency and manual unit price of an unpublished offer. Receipt costs keep their purchase currency. Transfer, stock-loss and withdrawal receipts show the recorded offer price. [Draft offer currency](https://github.com/abrianbaker80/BrickVault-V2/issues/52)
 
 - The movement history keeps its source and destination buttons in place while Workbench refreshes the bin read and capacity status.
