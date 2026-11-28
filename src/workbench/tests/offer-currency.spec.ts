@@ -1,10 +1,19 @@
 import { expect, type Page } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
 import { audit, fixture, purchases } from './bin-fixture'
 import { test } from './trusted'
 
 const offersPath = '/api/v1/receiving/offers'
 const pending = (page: Page) => page.getByRole('region', { name: 'Pending confirmations' })
 const retryResponse = (page: Page) => page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === offersPath)
+
+async function rejectUnsupportedCommand(page: Page) {
+  const correlationId = randomUUID()
+  await page.route('**' + offersPath, r => r.fulfill({ status: 400, json: {
+    code: 'invalid_json', message: 'The request must match the version 1 JSON contract.', correlationId
+  } }), { times: 1 })
+  return correlationId
+}
 
 async function chooseStock(page: Page, purchaseId: string, catalogId: string, bin: string, delivery: string) {
   await page.goto('/#receiving/' + purchaseId)
@@ -65,6 +74,12 @@ test('an operator prices a draft in a different currency and recovers the exact 
   await save.click()
   await expect(pending(page)).toContainText('Unpublished offer')
   await page.reload()
+  const rejectedRetry = await rejectUnsupportedCommand(page)
+  await pending(page).getByRole('button', { name: 'Retry command' }).click()
+  await expect(page.getByRole('alert')).toContainText('Confirmation is still pending.')
+  await expect(page.getByRole('alert')).toContainText(rejectedRetry)
+  await expect(pending(page)).toContainText(JSON.parse(original).commandId)
+  await page.reload()
   const replay = retryResponse(page)
   await pending(page).getByRole('button', { name: 'Retry command' }).click()
   const response = await replay
@@ -78,6 +93,29 @@ test('an operator prices a draft in a different currency and recovers the exact 
   expect(purchase.offers).toHaveLength(1)
   expect(purchase.offers[0]).toMatchObject({ id: offerId, unitPriceMinor: 1234, currency: 'KWD', backedQuantity: 1 })
   expect(purchase.balances).toMatchObject({ physicalOnHand: 2, backedQuantity: 1, withheldQuantity: 1, publishedQuantity: 0, knownItemCostMinor: 0 })
+})
+
+test('a definite first-attempt rejection keeps the entered price available and permits another offer', async ({ page }) => {
+  const f = await fixture(page)
+  await chooseStock(page, f.unknown.purchaseId, f.catalogId, f.a.code, f.unknown.delivery)
+  const currency = page.getByLabel('Selling currency'), price = page.getByLabel('Manual unit price')
+  const save = page.getByRole('button', { name: 'Save unpublished offer' })
+  await currency.fill('JPY')
+  await price.fill('225')
+  const correlation = await rejectUnsupportedCommand(page)
+  await save.click()
+  await expect(page.getByRole('alert')).toContainText('The server rejected the draft with selling currency JPY.')
+  await expect(page.getByRole('alert')).toContainText(correlation)
+  await expect(pending(page)).toHaveCount(0)
+  await expect(price).toHaveValue('225')
+  await expect(save).toBeEnabled()
+  expect((await purchases(page, [f.unknown.purchaseId]))[0].offers).toHaveLength(0)
+  await currency.fill('EUR')
+  await expect(price).toBeEmpty()
+  await price.fill('2.25')
+  await save.click()
+  await expect(page.getByRole('list', { name: 'Unpublished offers' })).toContainText('EUR 2.25 per unit')
+  expect((await purchases(page, [f.unknown.purchaseId]))[0].offers).toHaveLength(1)
 })
 
 test('a same-currency draft keeps the original command shape and replays from the previous Workbench journal', async ({ page }) => {
