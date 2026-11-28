@@ -22,7 +22,8 @@ async function prepare(page: Page, line: Locator, source: string, destination: {
 
 test('a counted transfer replays the same receipt and carries the chosen offers through an onward move', async ({ page, context }, info) => {
   const f = await fixture(page)
-  const offer2 = await f.secondOffer()
+  const offer2 = await f.write('receiving/offers', 5, { purchaseId: f.paid.purchaseId, catalogId: f.catalogId,
+    currency: 'JPY', unitPriceMinor: 225, backing: [{ placementId: f.position, quantity: 2 }] })
   const purchase = async () => (await purchases(page, [f.paid.purchaseId]))[0]
   const before = await purchase()
   await page.setViewportSize({ width: 320, height: 800 })
@@ -44,6 +45,7 @@ test('a counted transfer replays the same receipt and carries the chosen offers 
     await expect(allocation).toHaveValue('1')
   })
   await expect(form.getByRole('button',{name:'Confirm transfer'})).toBeEnabled()
+  await expect(form).toContainText('JPY 225 per unit')
   await form.getByLabel('Move backed units for offer ' + offer2).fill('2')
   await expect(form).toContainText('4 units to move · 3 backed')
   await expect(form.getByRole('alert')).toHaveCount(0)
@@ -78,7 +80,7 @@ test('a counted transfer replays the same receipt and carries the chosen offers 
   await firstMove.getByText('Movement receipt', { exact: true }).click()
   await expect(firstMove.getByText('Correlation ID ' + correlation, { exact: true })).toBeVisible()
   await expect(firstMove).toContainText('1 backed · Offer ' + f.firstOffer)
-  await expect(firstMove).toContainText('2 backed · Offer ' + offer2)
+  await expect(firstMove).toContainText('2 backed · Offer ' + offer2 + ' · JPY 225 per unit')
   await firstMove.getByRole('button', { name: 'Inspect destination bin' }).click()
   await totals(page, [6, 3, 3, 3])
   const arrival = layers(page).filter({ hasText: 'Transferred from ' + f.a.code })

@@ -253,7 +253,7 @@ watch(binScope,
             <details><summary>Movement receipt</summary>
               <small>Catalog {{ move.catalogId }} · recorded revision {{ move.catalogRevision }}</small>
               <small v-if="!move.backing.length">No offer backing moved</small>
-              <small v-for="offer in move.backing" :key="offer.offerId">{{ offer.quantity }} backed · Offer {{ offer.offerId }}</small>
+              <small v-for="offer in move.backing" :key="offer.offerId">{{ offer.quantity }} backed · Offer {{ offer.offerId }} · {{ money(offer.unitPriceMinor, offer.currency) }} per unit</small>
               <small>Correlation ID {{ move.correlationId }}</small>
             </details>
             <button v-if="locations.some(l => l.id === (location.id === move.sourceLocationId ? move.destinationLocationId : move.sourceLocationId))"

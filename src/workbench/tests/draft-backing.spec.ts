@@ -22,7 +22,7 @@ async function eight(page:Page) {
   const deliveryId=await f.write('receiving/deliveries',1,{purchaseId,quantity:8,reference:'Eight pieces',catalogId:f.catalogId,itemCostMinor:800})
   const position=await f.write('receiving/putaway',2,{purchaseId,deliveryId,locationId:f.a.id,catalogId:f.catalogId,confirmedLocationCode:f.a.code,quantity:8})
   await f.write('receiving/holds',3,{purchaseId,positionId:position,locationId:f.a.id,confirmedLocationCode:f.a.code,quantity:2,purpose:'Bridge test',reason:'Reserve two for a bridge'})
-  const offer=await f.write('receiving/offers',4,{purchaseId,catalogId:f.catalogId,unitPriceMinor:175,backing:[{placementId:position,quantity:3}]})
+  const offer=await f.write('receiving/offers',4,{purchaseId,catalogId:f.catalogId,currency:'KWD',unitPriceMinor:175,backing:[{placementId:position,quantity:3}]})
   return {...f,purchaseId,reference,deliveryId,position,offer}
 }
 
@@ -32,6 +32,7 @@ test('selected draft backing can be partially and fully withdrawn without losing
   const chosen=page.getByRole('list',{name:'Unpublished offers'}).getByRole('listitem').filter({hasText:f.offer})
   await chosen.getByRole('link',{name:'Review draft offer '+f.offer+' at position '+f.position}).click()
   const dialog=view(page), published=proof(page)
+  await expect(dialog.getByRole('region',{name:'Selected offer'})).toContainText('KWD 0.175 per unit')
   await expect(dialog.getByLabel('Position balances').locator('dd')).toHaveText(['8','2','0','6','3','3','3'])
   const start=dialog.getByRole('button',{name:'Withdraw backing',exact:true})
   await start.focus(); await page.keyboard.press('Enter')
@@ -53,6 +54,7 @@ test('selected draft backing can be partially and fully withdrawn without losing
   await audit(page)
   await save.click()
   await expect(published).toContainText('1 unit withdrawn')
+  await expect(published).toContainText('KWD 0.175 per unit')
   await expect(published).toContainText('Reserve one piece for another draft')
   const id=page.url().split('/').at(-1)!
   await page.reload()
@@ -63,7 +65,8 @@ test('selected draft backing can be partially and fully withdrawn without losing
   await expect(published).toContainText('2 units withdrawn')
   const final=page.url().split('/').at(-1)!
   await published.getByRole('link',{name:'View purchase'}).click()
-  await expect(chosen).toContainText('1.75 per unit')
+  await expect(chosen).toContainText('KWD 0.175 per unit')
+  await expect(page.getByRole('region',{name:'Cost coverage'})).toContainText('USD 8.00')
   await expect(chosen).toContainText('0 backed')
   const [purchase]=await purchases(page,[f.purchaseId])
   expect(purchase.balances).toMatchObject({physicalOnHand:8,free:6,reserved:2,withheldQuantity:6,knownItemCostMinor:800,publishedQuantity:0})
