@@ -83,7 +83,7 @@ async function savePurchase() {
     </form>
   </section>
   <div v-else-if="purchase" class="receiving-grid">
-    <ReceivingTask :key="purchase.id" :purchase="purchase" :workspace="workspace" :workspace-id="workspaceId" :enabled="enabled" :dispatch="dispatch" />
-    <ReceivingBalance :purchase="purchase" :catalog="workspace.catalog" />
+    <ReceivingTask :key="purchase.id" :purchase="purchase" :stock="stock" :workspace="workspace" :workspace-id="workspaceId" :enabled="enabled" :dispatch="dispatch" />
+    <ReceivingBalance :purchase="purchase" :stock="stock" :catalog="workspace.catalog" />
   </div>
 </template>

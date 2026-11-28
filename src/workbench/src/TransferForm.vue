@@ -4,6 +4,7 @@ import { useBinRegistry } from './useBinRegistry'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Location, TransferControls, TransferPosition } from './api'
 import { itemLabel, recordedOfferPrice } from './receiving'
+import { contentKey, positionContents } from './setContents'
 
 const props = defineProps<{ source: Location; locations: Location[]; original: TransferPosition;
   current?: TransferPosition; reserved: number; ready: boolean; confirmedBin: boolean; controls: TransferControls }>()
@@ -29,7 +30,8 @@ const restricted = computed(() => props.reserved + (line.quarantinedQuantity ?? 
 const movable = computed(() => line.quantity - restricted.value)
 const movableUnbacked = computed(() => line.unbackedQuantity - restricted.value)
 const stale = computed(() => !props.current || props.current.purchaseRevision !== props.original.purchaseRevision ||
-  props.source.code !== sourceAtOpen || props.current.layer.currentCatalog.revision !== line.currentCatalog.revision)
+  props.source.code !== sourceAtOpen || props.current.layer.currentCatalog.revision !== line.currentCatalog.revision ||
+  contentKey(props.current.layer.setContents) !== contentKey(line.setContents))
 const backing = computed(() => props.original.backing.map(offer => ({
   offerId: offer.offerId, quantity: Number(quantities.value[offer.offerId] || 0)
 })).filter(row => row.quantity > 0))
@@ -79,6 +81,7 @@ async function submit() {
     <form class="form-body" @submit.prevent="submit">
       <div><strong>{{ line.purchaseReference }} · {{ line.deliveryReference }}</strong>
         <p class="field-hint">{{ itemLabel([line.currentCatalog], line.catalogId) }}</p>
+        <p v-if="positionContents(line)">{{ positionContents(line) }}</p>
         <p>{{ line.quantity }} in {{ sourceAtOpen }} · {{ line.unbackedQuantity }} unbacked</p>
         <p v-if="restricted" class="field-hint">{{ reserved }} reserved for builds · <template v-if="line.quarantinedQuantity">{{ line.quarantinedQuantity }} quarantined · </template>{{ movable }} can move, including {{ movableUnbacked }} without offer backing.</p></div>
       <p v-if="line.catalogRevision !== line.currentCatalog.revision || !line.currentCatalog.integrationEligible" class="warning">
@@ -114,7 +117,7 @@ async function submit() {
             type="number" inputmode="numeric" min="0" :max="offer.quantity" />
         </label>
       </fieldset>
-      <p v-if="count" class="preview" aria-live="polite">{{ count }} units to move · {{ movedBacking }} backed</p>
+      <p v-if="count" class="preview" aria-live="polite">{{ count }} units to move · {{ movedBacking }} backed<small v-if="positionContents(line)">{{ positionContents(line) }}</small></p>
       <p v-if="issue || (attempted && controls.feedback)" role="alert" class="warning">{{ issue || controls.feedback }}</p>
       <div class="actions"><button type="button" :disabled="sending" @click="emit('close')">Cancel</button>
         <button class="primary" :disabled="!available">Confirm transfer</button></div>

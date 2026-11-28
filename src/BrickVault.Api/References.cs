@@ -104,7 +104,7 @@ internal sealed class References(NpgsqlDataSource db)
         return await Snapshot(connection, tx, true, token);
     }
 
-    public async Task<Workspace> Workspace(CancellationToken token, bool allAudit = false)
+    public async Task<Workspace> Workspace(CancellationToken token, bool allAudit = false, bool acceptSetInspections = false)
     {
         await using var connection = await db.OpenConnectionAsync(token);
         await using var tx = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, token);
@@ -112,10 +112,11 @@ internal sealed class References(NpgsqlDataSource db)
         var audit = await Rows(connection, tx, """
             SELECT c.command_id,c.entity_id,c.revision,c.kind,c.correlation_id,a.actor,a.occurred_at
             FROM brickvault.audit a JOIN brickvault.commands c USING (command_id)
-            WHERE c.kind NOT IN ('transfer','count','hold','hold-release','stock-loss','recount','quarantine','quarantine-release','offer-withdrawal','shortage-closure','stock-loss-recovery','part-out','part-out-output','location-label','location-archive','location-capacity')
-              AND ($1 OR c.kind IN ('catalog','location')) ORDER BY a.occurred_at DESC,c.command_id
+            WHERE c.kind IN ('catalog','location')
+               OR ($1 AND (c.kind IN ('purchase','delivery','putaway','offer') OR ($2 AND c.kind='set-inspection')))
+            ORDER BY a.occurred_at DESC,c.command_id
             """, r => new AuditRow(r.GetGuid(0),r.GetGuid(1),r.GetInt32(2),r.GetString(3),r.GetGuid(4),
-                r.GetString(5),r.GetDateTime(6)), token, allAudit);
+                r.GetString(5),r.GetDateTime(6)), token, allAudit, acceptSetInspections);
         var health = await Worker.Health(connection, tx, token);
         return new Workspace(snapshot.Scope, snapshot.AsOf, snapshot.Complete, snapshot.Catalog, snapshot.Locations, audit, health);
     }

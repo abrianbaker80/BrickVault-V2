@@ -8,6 +8,8 @@ import ReceiptLotInspector from './ReceiptLotInspector.vue'
 import RecountPreview from './RecountPreview.vue'
 import RecountWork from './RecountWork.vue'
 import PartOut from './PartOut.vue'
+import SetInspection from './SetInspection.vue'
+import { positionContents } from './setContents'
 
 const props = defineProps<{ workspace: Workspace; connected: boolean; controls: TransferControls; csrf: string }>()
 const emit = defineEmits<{ failure: [reason: unknown]; refresh: [] }>()
@@ -36,6 +38,11 @@ const partOutRoute = () => {
   return match ? {source:match[1].toLowerCase(),receipt:match[2]?.toLowerCase()} : undefined
 }
 const partOut = ref(partOutRoute())
+const setInspectionRoute = () => {
+  const match = /^#inventory\/set-contents\/([a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})(?:\/([a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}))?$/i.exec(location.hash)
+  return match ? { position: match[1].toLowerCase(), receipt: match[2]?.toLowerCase() } : undefined
+}
+const setInspection = ref(setInspectionRoute())
 const recountView = ref(recountRoute())
 const checked = ref(new Set<string>())
 const outsidePage = computed(() => checked.value.size - (result.value?.rows.filter(r => checked.value.has(r.layer.placementId)).length ?? 0))
@@ -54,7 +61,7 @@ async function closePreview() {
   if (opener && !opener.disabled) opener.focus()
   else search.value?.focus()
 }
-const routeId = () => !partOutRoute() && !recountRoute() && !location.hash.startsWith('#inventory/lot/') && location.hash.startsWith('#inventory/')
+const routeId = () => !partOutRoute() && !setInspectionRoute() && !recountRoute() && !location.hash.startsWith('#inventory/lot/') && location.hash.startsWith('#inventory/')
   ? location.hash.slice('#inventory/'.length).toLowerCase() : ''
 const selected = ref(routeId())
 const selectedLot = ref(lotRoute())
@@ -130,6 +137,7 @@ async function close() {
 }
 function routeChanged() {
   partOut.value = partOutRoute()
+  setInspection.value = setInspectionRoute()
   recountView.value = recountRoute()
   preview.value = undefined
   selected.value = routeId()
@@ -169,6 +177,8 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <PartOut v-if="partOut" :key="[controls.workspaceId,partOut.source,partOut.receipt].join('/')" :source="partOut.source" :receipt-id="partOut.receipt" :workspace="workspace" :connected="connected" :controls="controls" @failure="emit('failure',$event)" @refresh="emit('refresh')" />
+  <SetInspection v-else-if="setInspection" :key="[controls.workspaceId,setInspection.position,setInspection.receipt].join('/')"
+    :position="setInspection.position" :receipt-id="setInspection.receipt" :workspace="workspace" :connected="connected" :controls="controls" @failure="emit('failure',$event)" />
   <RecountWork v-else-if="recountView" :key="recountView" :route="recountView" :as-of="workspace.asOf" :state="connected ? 'ready' : 'unavailable'" @failure="emit('failure',$event)" />
   <template v-else>
   <div class="metrics inventory-metrics" role="group" :aria-label="lastRead ? 'Last received matching totals' : 'Matching inventory totals'">
@@ -213,6 +223,7 @@ onBeforeUnmount(() => {
               @click="inspect(layer.placementId)"><strong>{{ layer.currentCatalog.name }}</strong>
               <small>{{ label(layer.currentCatalog.itemType) }} · {{ layer.currentCatalog.itemNumber }}{{ layer.currentCatalog.variant ? ' · ' + layer.currentCatalog.variant : '' }}</small></button>
               <small class="bin-short">Bin {{ location.code }}</small>
+              <small v-if="positionContents(layer)">{{ positionContents(layer) }}</small>
               <small class="receipt-short">{{ layer.purchaseReference }} · {{ layer.deliveryReference }}</small>
               <small v-if="layer.catalogRevision !== layer.currentCatalog.revision" class="identity-note">Catalog revision changed</small></td>
             <td class="bin-col">{{ location.code }}</td><td class="receipt-col">{{ layer.purchaseReference }}<small>{{ layer.deliveryReference }}</small></td>

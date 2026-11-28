@@ -17,8 +17,8 @@ def seed_location(instance, location_id, code, name):
     """, role="bv_migrator")
 
 
-def seed_opening_position(instance, location_id, currency="USD"):
-    """Create a backed position with valid v3 facts before the stopped-copy upgrade."""
+def seed_opening_position(instance, location_id, currency="USD", *, independent_price=False):
+    """Create an opening purchase, offer and backing in their historical schema."""
     item, purchase, delivery, placement, offer = [str(uuid.uuid4()) for _ in range(5)]
     facts = [
         (kind, str(uuid.uuid4()), entity, rev)
@@ -36,20 +36,23 @@ def seed_opening_position(instance, location_id, currency="USD"):
         f"('{cmd}','{kind}',decode(repeat('00',32),'hex'),'{entity}',{rev},gen_random_uuid())"
         for kind, cmd, entity, rev in facts
     )
+    price_columns = ",currency,price_scale_verified" if independent_price else ""
+    price_values = ",'IQD',true" if independent_price else ""
+    item_type, title, condition = ("set", "Historical used set", "used") if independent_price else ("part", "Training part", "new")
     instance.sql(
         f"""
         BEGIN;
         INSERT INTO brickvault.catalog(id,revision,item_type,item_number,name,color_state,color_id,condition,
-            completeness,source,license,mapping) VALUES ('{item}',1,'part','FIX-17','Training part','known',0,
-            'new','complete','Training fixture','operator-owned','confirmed');
+            completeness,source,license,mapping) VALUES ('{item}',1,'{item_type}','FIX-17','{title}','known',0,
+            '{condition}','complete','Training fixture','operator-owned','confirmed');
         INSERT INTO brickvault.purchases(id,command_id,revision,reference,source,currency,ordered_quantity)
             VALUES ('{purchase}','{facts[0][1]}',4,'MIG-1','Training purchase','{currency}',4);
         INSERT INTO brickvault.deliveries(id,command_id,purchase_id,reference,quantity,catalog_id,item_cost_minor)
             VALUES ('{delivery}','{facts[1][1]}','{purchase}','Box',4,'{item}',NULL);
         INSERT INTO brickvault.placements(id,command_id,purchase_id,delivery_id,catalog_id,location_id,location_code,quantity)
             VALUES ('{placement}','{facts[2][1]}','{purchase}','{delivery}','{item}','{location_id}','OLD-01',3);
-        INSERT INTO brickvault.offers(id,command_id,purchase_id,catalog_id,catalog_revision,unit_price_minor)
-            VALUES ('{offer}','{facts[3][1]}','{purchase}','{item}',1,150);
+        INSERT INTO brickvault.offers(id,command_id,purchase_id,catalog_id,catalog_revision,unit_price_minor{price_columns})
+            VALUES ('{offer}','{facts[3][1]}','{purchase}','{item}',1,150{price_values});
         INSERT INTO brickvault.offer_backing(purchase_id,offer_id,placement_id,catalog_id,catalog_revision,quantity)
             VALUES ('{purchase}','{offer}','{placement}','{item}',1,2);
         INSERT INTO brickvault.commands(command_id,kind,digest,entity_id,revision,correlation_id) VALUES {journal};

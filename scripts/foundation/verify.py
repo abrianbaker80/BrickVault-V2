@@ -303,6 +303,16 @@ def migration_test(s):
         "An interrupted offer currency upgrade changed the previous database.",
     )
     s.sql("ALTER TABLE brickvault.offers DROP CONSTRAINT offers_currency_check", db, "bv_migrator")
+    s.migrate(db, to=16)
+    s.sql("ALTER TABLE brickvault.draft_backing_withdrawals ADD CONSTRAINT draft_backing_withdrawal_offer_total CHECK (true)", db, "bv_migrator")
+    expected_failure(lambda: s.migrate(db))
+    require(
+        s.sql("SELECT max(version) FROM brickvault.schema_version", db) == "16"
+        and s.sql("SELECT count(*) FROM information_schema.columns WHERE table_schema='brickvault' AND table_name='offer_backing' AND column_name='purchase_revision'", db) == "0"
+        and s.sql(inspect, db) == expected,
+        "An interrupted pooled offer upgrade changed the previous database.",
+    )
+    s.sql("ALTER TABLE brickvault.draft_backing_withdrawals DROP CONSTRAINT draft_backing_withdrawal_offer_total", db, "bv_migrator")
     s.migrate(db)
     s.grants(db)
     require(
@@ -316,11 +326,11 @@ def migration_test(s):
     )
     expected_failure(lambda: s.migrate(db))
     require(
-        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "16",
+        s.sql("SELECT count(*) FROM brickvault.schema_version", db) == "17",
         "Version ledger changed unexpectedly.",
     )
     print(
-        "Migrations through v16, interrupted upgrade rollback, checksum rejection: passed.",
+        "Migrations through v17, interrupted upgrade rollback, checksum rejection: passed.",
         flush=True,
     )
 
@@ -345,7 +355,7 @@ def qualify_staged_upgrade(lab, port, source_version):
             from verify_transfer import seed_opening_position
 
             basis = "HUF" if source_version == 15 else "USD"
-            records = seed_opening_position(original, fixture, basis)
+            records = seed_opening_position(original, fixture, basis, independent_price=source_version >= 16)
             if source_version >= 4:
                 from verify_transfer import seed_previous_transfer
 
@@ -372,7 +382,7 @@ def qualify_staged_upgrade(lab, port, source_version):
         qualify_windows_pg_stop(original)
     stage_upgrade(original, output)
     candidate = Instance(output / "instance")
-    for inst, schema in ((candidate, "16"), (original, str(source_version))):
+    for inst, schema in ((candidate, "17"), (original, str(source_version))):
         inst.pg_start()
         try:
             require(
@@ -385,15 +395,27 @@ def qualify_staged_upgrade(lab, port, source_version):
                 "Upgrade lost a baseline location.",
             )
             if inst is candidate and source_version >= 3:
+                offer_currency = "IQD" if source_version >= 16 else basis
+                was_verified = "true" if source_version >= 16 else "false"
                 require(
                     inst.sql(f"""
-                        SELECT currency='{basis}' AND NOT price_scale_verified
+                        SELECT currency='{offer_currency}' AND price_scale_verified={was_verified}
+                            AND unit_price_minor=150 AND set_contents IS NULL
                             AND NOT has_column_privilege('bv_api','brickvault.offers','currency','UPDATE')
                             AND NOT has_column_privilege('bv_worker','brickvault.offers','currency','SELECT')
                         FROM brickvault.offers WHERE id='{records[2]}'
                     """, role="bv_api") == "t",
                     "The upgraded offer lost its original currency or its access restrictions.",
                 )
+                require(inst.sql(f"""
+                    SELECT b.purchase_revision=c.revision AND b.purchase_id=o.purchase_id
+                        AND NOT has_column_privilege('bv_api','brickvault.draft_backing_withdrawals','prior_total_offer_backed_quantity','INSERT')
+                        AND NOT has_column_privilege('bv_api','brickvault.set_position_inspections','result_position_id','INSERT')
+                        AND NOT has_table_privilege('bv_api','brickvault.position_set_contents','INSERT')
+                    FROM brickvault.offer_backing b JOIN brickvault.offers o ON o.id=b.offer_id
+                    JOIN brickvault.commands c ON c.command_id=o.command_id
+                    WHERE o.id='{records[2]}'
+                """, role="bv_api") == "t", "The original source revision or the API's inspection permissions changed.")
             if source_version >= 8:
                 require(
                     inst.sql("SELECT count(*) FROM brickvault.recount_tasks WHERE observation_id IS NOT NULL") == "1",
@@ -747,14 +769,26 @@ def keep_verifier_awake():
             raise ctypes.WinError(ctypes.get_last_error())
 
 
+def run_workbench_tests(instance, project):
+    password = (instance.path / "owner-login.txt").read_text().splitlines()[1]
+    npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
+    subprocess.run(
+        [npm, "test", "--", "--project=" + project, "--no-deps"], cwd=UI, check=True,
+        env={**os.environ, "BV_OWNER_PASSWORD": password, "BV_LAB_CA": str(instance.ca),
+             "NODE_EXTRA_CA_CERTS": str(instance.ca), "BV_PUBLIC_ORIGIN": instance.origin},
+    )
+
+
 def verify(port):
     if not 1024 <= port <= 65527:
         raise ValueError("Qualification needs nine consecutive unprivileged ports.")
     qualify_listener_probe()
     with keep_verifier_awake(), tempfile.TemporaryDirectory(prefix="bv-m2-qualification-") as tmp:
         lab = Path(tmp)
-        for source_version in range(2, 16):
+        for source_version in range(2, 17):
             qualify_staged_upgrade(lab, port, source_version)
+        from verify_pooled_offers import qualify_set_workspace
+        qualify_set_workspace(lab, port, init, Browser, run_workbench_tests, poll)
         from verify_withdrawals import verify_legacy_allocation
         legacy = init(lab / "legacy-withdrawal", lab / "legacy-keys", port)
         try:
@@ -981,13 +1015,15 @@ def verify(port):
             # Keep compatibility tests on their own workspace regardless of xUnit execution order.
             testdb = "bv_m2_test_contract"
             part_out_db = "bv_m2_test_part_out"
-            for database in (testdb, part_out_db):
+            pool_db = "bv_m2_test_pooled_offers"
+            for database in (testdb, part_out_db, pool_db):
                 s.create_db(database)
                 s.migrate(database)
                 s.grants(database)
             testenv = s.app_env("bv_api", testdb)
             testenv["BV_TEST_DB"] = testenv["BV_DB"]
             testenv["BV_TEST_PART_OUT_DB"] = s.app_env("bv_api", part_out_db)["BV_DB"]
+            testenv["BV_TEST_POOL_DB"] = s.app_env("bv_api", pool_db)["BV_DB"]
             project = ROOT / "tests/BrickVault.Api.Tests"
             subprocess.run(
                 [DOTNET, "restore", project, "--locked-mode"],
@@ -1001,19 +1037,7 @@ def verify(port):
                 cwd=ROOT,
                 check=True,
             )
-            npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
-            subprocess.run(
-                [npm, "test"],
-                cwd=UI,
-                env={
-                    **os.environ,
-                    "BV_OWNER_PASSWORD": password,
-                    "BV_LAB_CA": str(s.ca),
-                    "NODE_EXTRA_CA_CERTS": str(s.ca),
-                    "BV_PUBLIC_ORIGIN": s.origin,
-                },
-                check=True,
-            )
+            run_workbench_tests(s, "workbench")
             with ThreadPoolExecutor(max_workers=2) as pool:
                 list(pool.map(lambda _: rotate(Instance(s.path)), range(2)))
             # Recreate the state immediately after the committed config flip and before login publication.

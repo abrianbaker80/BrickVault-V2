@@ -1,6 +1,7 @@
 import type { components, operations } from './schema'
 import * as valid from './validators.cjs'
 import { sameLabel } from './binLabels'
+import { validOfferSources } from './pooledOffers'
 
 type Schema = components['schemas']
 export type Session = Schema['Session']
@@ -35,17 +36,19 @@ export type CountObservation = Schema['StockCountObservation']
 export type TransferPosition = BinTransferSnapshot['positions'][number]
 export type TransferCommand = Schema['TransferCommand']
 export type TransferControls = { enabled: boolean; pending: boolean; feedback: string; workspaceId: string; dispatch: Dispatch }
-export type ReceivingWorkspace = Schema['LossReceivingWorkspace']
+export type ReceivingWorkspace = Schema['LossReceivingWorkspace'] & { pooledOffersSupported?: boolean; setContentsSupported?: boolean }
 export type Purchase = ReceivingWorkspace['purchases'][number]
 export type QuarantineSnapshot = Schema['StockQuarantineSnapshot']
 export type QuarantineEvidence = Schema['StockQuarantineEvidence']
 export type DraftBackingPage = Schema['DraftBackingSnapshot']
-export type DraftOfferHistory = Schema['DraftBackingHistory']
+export type DraftOfferHistory = Schema['DraftBackingHistory'] & { pooledOffersSupported?: boolean }
 export type WithdrawalEvidence = Schema['DraftBackingWithdrawalEvidence']
-export type PartOutReview = Schema['StockPartOutReview']
+export type SetPositionContents = Schema['SetPositionContents']
+export type SetInspectionEvidence = Schema['SetInspectionEvidence']
+export type PartOutReview = Schema['StockPartOutReview'] & { setContentsSupported?: boolean }
 export type PartOutEvidence = Schema['StockPartOutEvidence']
 export type PartOutCommand = Schema['StockPartOutCommand']
-export type RecoveryReview = Schema['StockLossRecoveryReview']
+export type RecoveryReview = Schema['StockLossRecoveryReview'] & { setContentsSupported?: boolean }
 export type RecoveryEvidence = Schema['StockLossRecoveryEvidence']
 export type RecoveryCommand = Schema['StockLossRecoveryCommand']
 export type StockLoss = Schema['StockLossSnapshot']
@@ -62,6 +65,8 @@ export type ReceivingCommand = { workspaceId: string } & (
   | { kind: 'delivery'; body: Schema['DeliveryCommand'] }
   | { kind: 'putaway'; body: Schema['PutawayCommand'] }
   | { kind: 'offer'; body: Schema['OfferCommand'] }
+  | { kind: 'pooled-offer'; body: Schema['PooledOfferCommand'] }
+  | { kind: 'set-inspection'; body: Schema['SetInspectionCommand'] }
   | { kind: 'transfer'; body: TransferCommand }
   | { kind: 'count'; body: Schema['StockCountCommand'] }
   | { kind: 'stock-loss'; body: StockLossCommand }
@@ -74,7 +79,7 @@ export type Command = ReceivingCommand | { workspaceId: string } & (
   | { kind: 'catalog'; body: Schema['CatalogCommand'] }
   | { kind: 'location'; body: Schema['LocationCommand'] })
 export type Held = { workspaceId: string | null; commandId: string }
-export type Dispatch = (command: ReceivingCommand) => Promise<Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | Schema['RecountReceipt'] | Schema['StockQuarantineReceipt'] | Schema['DraftBackingWithdrawalReceipt'] | Schema['StockShortageClosureReceipt'] | Schema['StockLossRecoveryReceipt'] | Schema['StockPartOutReceipt'] | Schema['LocationLabelReceipt'] | Schema['LocationArchiveReceipt'] | Schema['LocationCapacityReceipt'] | undefined>
+export type Dispatch = (command: ReceivingCommand) => Promise<Schema['SetInspectionReceipt'] | Schema['Receipt'] | Schema['ReceivingReceipt'] | Schema['TransferReceipt'] | Schema['StockCountReceipt'] | Schema['StockHoldReceipt'] | Schema['StockLossReceipt'] | Schema['RecountReceipt'] | Schema['StockQuarantineReceipt'] | Schema['DraftBackingWithdrawalReceipt'] | Schema['StockShortageClosureReceipt'] | Schema['StockLossRecoveryReceipt'] | Schema['StockPartOutReceipt'] | Schema['LocationLabelReceipt'] | Schema['LocationArchiveReceipt'] | Schema['LocationCapacityReceipt'] | undefined>
 
 export function commandLabel(command: Command) {
   switch (command.kind) {
@@ -90,6 +95,8 @@ export function commandLabel(command: Command) {
     case 'delivery': return 'Delivery ' + command.body.reference
     case 'putaway': return 'Putaway to ' + command.body.confirmedLocationCode
     case 'offer': return 'Unpublished offer'
+    case 'pooled-offer': return 'Unpublished offer from multiple purchases'
+    case 'set-inspection': return 'Set inspection in ' + command.body.confirmedLocationCode
     case 'hold': return 'Build hold for ' + command.body.purpose
     case 'hold-release': return 'Release of ' + command.body.quantity + (command.body.quantity === 1 ? ' held unit' : ' held units')
     case 'shortage-closure': return 'Shortage closure in ' + command.body.confirmedLocationCode
@@ -115,6 +122,8 @@ const commands = {
   delivery: { path: 'receiving/deliveries', valid: valid.DeliveryCommand },
   putaway: { path: 'receiving/putaway', valid: valid.PutawayCommand },
   offer: { path: 'receiving/offers', valid: valid.OfferCommand },
+  'pooled-offer': { path: 'receiving/pooled-offers', valid: valid.PooledOfferCommand },
+  'set-inspection': { path: 'inventory/set-inspections', valid: valid.SetInspectionCommand },
   'shortage-closure': { path:'receiving/shortage-closures', valid: valid.StockShortageClosureCommand },
   'part-out': { path: 'receiving/part-outs', valid: valid.StockPartOutCommand },
   'stock-loss-recovery': { path:'receiving/stock-loss-recoveries',valid:valid.StockLossRecoveryCommand },
@@ -142,7 +151,7 @@ async function request(path: string, options: RequestInit = {}) {
   const response = await fetch('/api/v1/' + path, {
     ...options, cache: 'no-store', mode: 'same-origin', credentials: 'same-origin', redirect: 'error',
     signal: AbortSignal.timeout(15000),
-    headers: { Accept: 'application/json', ...options.headers, 'X-BrickVault-Price-Scale': '1' }
+    headers: { Accept: 'application/json', ...options.headers, 'X-BrickVault-Price-Scale': '1', 'X-BrickVault-Set-Contents': '1' }
   })
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null)
@@ -151,13 +160,33 @@ async function request(path: string, options: RequestInit = {}) {
   return response
 }
 
-async function read<T>(path: string, guard: (value: unknown) => value is T, options?: RequestInit) {
-  const response = await request(path, options)
+async function validatedBody<T>(response: Response, guard: (value: unknown) => value is T) {
   const data: unknown = await response.json().catch(() => null)
   if (!guard(data)) throw new ContractFailure()
   return data
 }
 
+async function read<T>(path: string, guard: (value: unknown) => value is T, options?: RequestInit) {
+  return validatedBody(await request(path, options), guard)
+}
+
+async function readWithOfferSources<T>(path: string, guard: (value: unknown) => value is T) {
+  const response = await request(path + '&pooledOffers=true')
+  return { value: await validatedBody(response, guard), supported: capability(response, 'X-BrickVault-Pooled-Offers'),
+    setContentsSupported: capability(response, 'X-BrickVault-Set-Contents') }
+}
+
+function capability(response: Response, name: string) {
+  const version = response.headers.get(name)
+  if (version !== null && version !== '1') throw new ContractFailure()
+  return version === '1'
+}
+function verifyPositionContents(layer: StockPosition['layer'], supported: boolean) {
+  const sameIdentity = layer.catalogRevision === layer.currentCatalog.revision
+  const set = layer.currentCatalog.itemType === 'set'
+  if ((layer.setContents && (!supported || (sameIdentity && !set))) ||
+      (set && !layer.setContents && layer.freeToBackQuantity > 0)) throw new ContractFailure()
+}
 function recountCursor(after: string) {
   const params = new URLSearchParams({limit: '25'})
   if (after) params.set('after', after)
@@ -174,11 +203,14 @@ function checkedPreview(page: RecountPreviewPage, input: RecountPreviewRequest) 
 }
 
 function invalidTimelineEvent(event: TimelineEvent) {
+  if (event.kind === 'set-inspection') return event.quantity < 1 || event.reservedDelta !== 0 || event.offerBackedDelta !== 0 ||
+    (event.relatedPositionId ? Math.abs(event.physicalDelta) !== event.quantity : event.physicalDelta !== 0)
   if (event.kind==='part-out' || event.kind==='part-out-output') return !event.transformationId ||
     event.physicalDelta!==(event.kind==='part-out' ? -event.quantity : event.quantity) || event.quantity<1 ||
     event.reservedDelta!==0 || event.offerBackedDelta!==0
-  if (event.kind==='stock-loss-recovery') return !event.postingId || event.quantity < 1 || event.physicalDelta !== event.quantity ||
-    event.reservedDelta !== 0 || event.offerBackedDelta !== 0 || (event.quarantineDelta ?? 0) < 0 || (event.quarantineDelta ?? 0) > event.quantity
+  if (event.kind==='stock-loss-recovery') return !event.postingId || event.quantity < 1 ||
+    (event.physicalDelta !== event.quantity && !(event.relatedPositionId && event.physicalDelta === 0)) ||
+    event.reservedDelta !== 0 || event.offerBackedDelta !== 0 || (event.quarantineDelta ?? 0) < 0 || (event.quarantineDelta ?? 0) > event.physicalDelta
   if (event.kind==='shortage-closure') return !event.caseId || !event.observationId || event.quantity!==event.ledgerQuantityAtWitness ||
     event.physicalDelta!==0 || event.reservedDelta!==0 || event.offerBackedDelta!==0
   return event.kind === 'offer-withdrawal' && (!event.offerId || event.physicalDelta !== 0 || event.reservedDelta !== 0 ||
@@ -226,6 +258,28 @@ function verifyRegistryRow(row:RegistryRow) {
       row.positionCount>row.physicalQuantity) throw new ContractFailure()
 }
 export const api = {
+  async confirmPooledOffer(command: Extract<ReceivingCommand, {kind:'pooled-offer'}>, csrf: string) {
+    const body = command.body
+    const sources = [body, ...body.additionalSources].map(source => [
+      source.purchaseId.toLowerCase(), source.expectedRevision,
+      source.backing.map(row => [row.placementId.toLowerCase(), row.quantity])
+    ])
+    const contents = body.setContents ? [body.setContents.includesBox, body.setContents.includesInstructions] : null
+    const fields = ['brickvault.pooled-offer.v1', body.commandId.toLowerCase(), body.catalogId.toLowerCase(),
+      body.expectedCatalogRevision, body.currency, body.unitPriceMinor, contents, sources]
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(fields)))
+    const digest = Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('')
+    const response = await request('receiving/pooled-offers/' + encodeURIComponent(body.commandId) + '/confirmation',
+      {method:'POST', headers:{'X-CSRF-Token':csrf, 'X-Workspace-Id':command.workspaceId, 'X-BrickVault-Command-Digest':digest}})
+    if (response.status === 204) {
+      if (response.headers.get('X-BrickVault-Settled-Digest') !== digest) throw new ContractFailure()
+      return undefined
+    }
+    const receipt = await validatedBody(response, valid.ReceivingReceipt)
+    if (receipt.kind !== 'offer' || receipt.commandId !== body.commandId || receipt.revision !== body.expectedRevision+1)
+      throw new ContractFailure()
+    return receipt
+  },
   async registryPage(after='') {
     const params=new URLSearchParams({limit:'100',capacity:'true'})
     if (after) params.set('after',after)
@@ -280,11 +334,15 @@ export const api = {
     await request('session', { method: 'DELETE', headers: { 'X-CSRF-Token': csrf } })
   },
   workspace: (allAudit = false) => read(allAudit ? 'workspace?audit=all' : 'workspace', valid.Workspace),
-  positions(query: StockQuery) {
+  async positions(query: StockQuery) {
     const params = new URLSearchParams({ quarantine: 'true' })
     for (const [key, value] of Object.entries(query))
       if (value !== undefined && value !== '') params.set(key, String(value))
-    return read('inventory/positions?' + params, valid.StockRegisterPage)
+    const response = await request('inventory/positions?' + params)
+    const page = await validatedBody(response, valid.StockRegisterPage)
+    const supported = capability(response, 'X-BrickVault-Set-Contents')
+    for (const {layer} of page.rows) verifyPositionContents(layer, supported)
+    return page
   },
   positionMovements(id: string, after: string) {
     const query = new URLSearchParams({ limit: '25' })
@@ -295,11 +353,19 @@ export const api = {
     const query = new URLSearchParams({ positionLimit: '25', eventLimit: '25', quarantine: 'true', withdrawals: 'true', closures:'true', recoveries:'true', partOuts:'true' })
     if (positionAfter) query.set('positionAfter', positionAfter)
     if (eventAfter) query.set('eventAfter', eventAfter)
-    const lot = await read('inventory/receipt-lots/' + encodeURIComponent(id) + '?' + query, valid.StockReceiptLot)
+    const response = await request('inventory/receipt-lots/' + encodeURIComponent(id) + '?' + query)
+    const lot = await validatedBody(response, valid.StockReceiptLot)
+    const supportsContents = capability(response,'X-BrickVault-Set-Contents')
+    for (const {layer} of lot.positions) verifyPositionContents(layer, supportsContents)
+    if (!supportsContents && lot.events.some(({event}) => event.kind === 'set-inspection' ||
+        (event.kind === 'stock-loss-recovery' && event.relatedPositionId))) throw new ContractFailure()
     if (lot.deliveryId !== id || lot.positions.some(p => p.layer.deliveryId !== id || p.layer.purchaseId !== lot.purchaseId))
       throw new ContractFailure()
     if (lot.complete) {
       if (!lot.partOut) throw new ContractFailure()
+      const pageEligible = lot.positions.reduce((sum, row) => sum + row.layer.freeToBackQuantity, 0)
+      if (pageEligible > lot.freeToBackQuantity ||
+          (!positionAfter && !lot.nextPositionAfter && pageEligible !== lot.freeToBackQuantity)) throw new ContractFailure()
       verifyRecoveryTotals(lot)
     }
     if (lot.complete && (lot.receivedQuantity !== lot.unplacedQuantity + lot.positionedQuantity + lot.lostQuantity + (lot.partOut?.consumedQuantity ?? 0) ||
@@ -314,6 +380,7 @@ export const api = {
     for (const row of lot.events) {
       const event = row.event
       if (invalidTimelineEvent(event) || event.kind === 'transfer-in' ||
+          ((event.kind === 'set-inspection' || event.kind === 'stock-loss-recovery') && event.relatedPositionId === row.positionId) ||
           (event.kind === 'transfer-out' && (event.id !== event.relatedPositionId || event.relatedPositionId === row.positionId ||
             !event.relatedLocationId || !event.relatedLocationCode || !event.locationCodeAtEvent ||
             event.physicalDelta !== 0 || event.offerBackedDelta !== 0 || row.transferBackedQuantity > event.quantity)) ||
@@ -326,7 +393,12 @@ export const api = {
   async positionTimeline(id: string, after: string, previous?: StockPosition) {
     const query = new URLSearchParams({ limit: '25', quarantine: 'true', withdrawals: 'true', closures:'true', recoveries:'true', partOuts:'true' })
     if (after) query.set('after', after)
-    const page = await read('inventory/positions/' + encodeURIComponent(id) + '/timeline?' + query, valid.StockPositionTimeline)
+    const response = await request('inventory/positions/' + encodeURIComponent(id) + '/timeline?' + query)
+    const page = await validatedBody(response, valid.StockPositionTimeline)
+    const supportsContents = capability(response,'X-BrickVault-Set-Contents')
+    verifyPositionContents(page.position.layer, supportsContents)
+    if (!supportsContents && page.events.some(event => event.kind === 'set-inspection' ||
+        (event.kind === 'stock-loss-recovery' && event.relatedPositionId))) throw new ContractFailure()
     const position = page.position
     if (page.positionId !== id || position.layer.placementId !== id || page.originPlacementId !== position.originPlacementId ||
         page.purchaseId !== position.layer.purchaseId || page.deliveryId !== position.layer.deliveryId ||
@@ -347,13 +419,17 @@ export const api = {
             event.id !== destinationId) throw new ContractFailure()
       } else if (event.kind==='part-out-output') {
         if (!event.relatedPositionId || event.relatedPositionId===id || !event.relatedLocationId || !event.relatedLocationCode) throw new ContractFailure()
+      } else if (event.kind==='set-inspection' || event.kind==='stock-loss-recovery') {
+        if (event.relatedPositionId===id || event.relatedLocationId || event.relatedLocationCode) throw new ContractFailure()
       } else if (event.relatedPositionId) throw new ContractFailure()
     }
     return page
   },
   async quarantine(bin: string, position: string, after = '') {
-    const result = await read('inventory/positions/' + encodeURIComponent(position) + '/quarantine' + recountCursor(after) + '&lossAttribution=true&recoveries=true&partOuts=true', valid.StockQuarantineSnapshot)
+    const response = await request('inventory/positions/' + encodeURIComponent(position) + '/quarantine' + recountCursor(after) + '&lossAttribution=true&recoveries=true&partOuts=true')
+    const result = await validatedBody(response, valid.StockQuarantineSnapshot)
     const layer = result.position.layer
+    verifyPositionContents(layer, capability(response,'X-BrickVault-Set-Contents'))
     if (result.position.location.id !== bin || layer.placementId !== position || layer.currentCatalog.id !== layer.catalogId ||
         (result.complete && (result.onHandQuantity !== layer.quantity || result.offerBackedQuantity !== layer.backedQuantity ||
           result.sellableQuantity + result.heldQuantity + result.quarantinedQuantity !== result.onHandQuantity ||
@@ -372,18 +448,40 @@ export const api = {
     return result
   },
   async draftBacking(bin: string, position: string, after: string) {
-    const result = await read(draftPath(position) + recountCursor(after) + '&quarantine=true', valid.DraftBackingSnapshot)
+    const { value: result, supported, setContentsSupported } = await readWithOfferSources(draftPath(position) + recountCursor(after) + '&quarantine=true', valid.DraftBackingSnapshot)
+    verifyPositionContents(result.position.layer, setContentsSupported)
+    if (!setContentsSupported && result.offers.some(offer => offer.setContents)) throw new ContractFailure()
+    if (!supported && result.offers.some(offer => offer.totalOfferBackedQuantity > 1_000_000)) throw new ContractFailure()
     verifyDraftBalance(result,bin,position)
     return result
+  },
+  async setPosition(position: string) {
+    const response = await request('inventory/positions/' + encodeURIComponent(position) + '/set-contents')
+    const result = await validatedBody(response, valid.SetPositionContents)
+    if (!capability(response,'X-BrickVault-Set-Contents') || result.positionId !== position ||
+        result.freeToClassifyQuantity > result.physicalQuantity) throw new ContractFailure()
+    return result
+  },
+  async setInspection(position: string, selector: { inspectionId: string } | { commandId: string }) {
+    const response = await request('inventory/positions/' + encodeURIComponent(position) + '/set-inspection-receipt?' + new URLSearchParams(selector))
+    const receipt = await validatedBody(response, valid.SetInspectionEvidence)
+    if (!capability(response,'X-BrickVault-Set-Contents') || (receipt.positionId !== position && receipt.resultPositionId !== position) ||
+        ('inspectionId' in selector ? receipt.id !== selector.inspectionId : receipt.commandId !== selector.commandId) ||
+        receipt.quantity > receipt.priorPhysicalQuantity) throw new ContractFailure()
+    return receipt
   },
   async draftOfferHistory(bin: string, position: string, offer: string, after: string) {
-    const result = await read(draftPath(position) + '/' + encodeURIComponent(offer) + '/history' + recountCursor(after) + '&quarantine=true', valid.DraftBackingHistory)
+    const { value: result, supported, setContentsSupported } = await readWithOfferSources(draftPath(position) + '/' + encodeURIComponent(offer) + '/history' + recountCursor(after) + '&quarantine=true', valid.DraftBackingHistory)
+    verifyPositionContents(result.position.layer, setContentsSupported)
+    if (result.offer.setContents && !setContentsSupported) throw new ContractFailure()
     verifyDraftBalance(result,bin,position)
-    if (result.offer.offerId !== offer) throw new ContractFailure()
-    return result
+    if (result.offer.offerId !== offer || (!supported && result.offer.totalOfferBackedQuantity > 1_000_000)) throw new ContractFailure()
+    return { ...result, pooledOffersSupported: supported }
   },
   async withdrawalReceipt(bin: string, position: string, selector: { receiptId:string } | { commandId:string }) {
-    const result = await read(draftPath(position) + '/receipts?' + new URLSearchParams(selector), valid.DraftBackingWithdrawalEvidence)
+    const { value: result, supported, setContentsSupported } = await readWithOfferSources(draftPath(position) + '/receipts?' + new URLSearchParams(selector), valid.DraftBackingWithdrawalEvidence)
+    if (result.setContents && !setContentsSupported) throw new ContractFailure()
+    if (!supported && result.priorTotalOfferBackedQuantity > 1_000_000) throw new ContractFailure()
     if (result.positionId !== position || result.location.id !== bin ||
         ('receiptId' in selector ? result.id !== selector.receiptId : result.commandId !== selector.commandId) ||
         result.quantity !== result.priorBackedQuantity - result.remainingBackedQuantity ||
@@ -431,20 +529,26 @@ export const api = {
   async partOutReview(source:string,quantity:number,after='') {
     const query=new URLSearchParams({quantity:String(quantity),limit:'25'})
     if (after) query.set('after',after)
-    const page=await read('inventory/positions/'+encodeURIComponent(source)+'/part-out-review?'+query,valid.StockPartOutReview)
+    const response=await request('inventory/positions/'+encodeURIComponent(source)+'/part-out-review?'+query)
+    const page=await validatedBody(response,valid.StockPartOutReview)
     const layer=page.position.layer
+    const setContentsSupported=capability(response,'X-BrickVault-Set-Contents')
+    verifyPositionContents(layer,setContentsSupported)
     if (layer.placementId!==source || layer.catalogId!==layer.currentCatalog.id || page.requestedQuantity!==quantity ||
         (page.complete && (layer.quarantinedQuantity===undefined ||
          page.availableQuantity!==(page.hasOpenShortage ? 0 : layer.quantity-page.heldQuantity-layer.backedQuantity-layer.quarantinedQuantity) ||
          page.selectionAvailable!==(quantity<=page.availableQuantity) ||
          (!page.selectionAvailable && page.sourceItemCostMinor!==null)))) throw new ContractFailure()
-    return page
+    return { ...page, setContentsSupported }
   },
   async partOutReceipt(source:string,selector:{partOutId:string}|{commandId:string},outputAfter='',residualAfter='',limit=25) {
     const query=new URLSearchParams({...selector,outputLimit:String(limit),residualLimit:String(limit)})
     if (outputAfter) query.set('outputAfter',outputAfter)
     if (residualAfter) query.set('residualAfter',residualAfter)
-    const page=await read('inventory/positions/'+encodeURIComponent(source)+'/part-out-receipt?'+query,valid.StockPartOutEvidence)
+    const response=await request('inventory/positions/'+encodeURIComponent(source)+'/part-out-receipt?'+query)
+    const page=await validatedBody(response,valid.StockPartOutEvidence)
+    if (page.outputs.some(o=>o.setContents && o.recordedCatalog.itemType!=='set') ||
+        (!capability(response,'X-BrickVault-Set-Contents') && page.outputs.some(o=>o.setContents))) throw new ContractFailure()
     if (page.sourcePositionId!==source || ('partOutId' in selector ? page.id!==selector.partOutId : page.commandId!==selector.commandId) ||
         page.recordedSourceCatalog.id!==page.receipt.catalogId || (page.complete && (
           new Set(page.outputs.map(row=>row.lineId)).size!==page.outputs.length ||
@@ -459,8 +563,11 @@ export const api = {
     const query=new URLSearchParams({limit:'25',historyLimit:'25'})
     if (after) query.set('after',after)
     if (historyAfter) query.set('historyAfter',historyAfter)
-    const page=await read(recoveryPath(bin,position,posting)+'/recovery-review?'+query,valid.StockLossRecoveryReview)
+    const response=await request(recoveryPath(bin,position,posting)+'/recovery-review?'+query)
+    const page=await validatedBody(response,valid.StockLossRecoveryReview)
     const layer=page.position.layer
+    const setContentsSupported=capability(response,'X-BrickVault-Set-Contents')
+    verifyPositionContents(layer,setContentsSupported)
     if (page.postingId!==posting || page.position.location.id!==bin || layer.placementId!==position ||
         layer.catalogId!==layer.currentCatalog.id || page.receipt.deliveryId!==layer.deliveryId || page.receipt.catalogId!==layer.catalogId ||
         (page.complete && (page.originalLostQuantity!==page.recoveredQuantity+page.remainingQuantity ||
@@ -468,13 +575,15 @@ export const api = {
           new Set(page.sources.map(s=>s.quarantineId)).size!==page.sources.length || (!after && page.sources[0]?.quarantineId!==null) ||
           page.sources.some(s=>s.originalQuantity!==s.recoveredQuantity+s.remainingQuantity || !costConserved(s.originalItemCostMinor,s.restoredItemCostMinor,s.remainingItemCostMinor)) ||
           page.recoveries.some(h=>h.saleableQuantity+h.quarantineQuantity<=0 || (h.quarantineQuantity>0 ? h.recoveredQuarantineId!==h.id : h.recoveredQuarantineId!==null))))) throw new ContractFailure()
-    return page
+    return { ...page,setContentsSupported }
   },
   async recoveryReceipt(bin:string,position:string,posting:string,exact:{recoveryId:string}|{commandId:string},after='',limit=25) {
     const query=new URLSearchParams({...exact,limit:String(limit)})
     if (after) query.set('after',after)
-    const page=await read(recoveryPath(bin,position,posting)+'/recovery-receipt?'+query,valid.StockLossRecoveryEvidence)
-    if (page.postingId!==posting || page.positionId!==position || page.location.id!==bin ||
+    const response=await request(recoveryPath(bin,position,posting)+'/recovery-receipt?'+query)
+    const page=await validatedBody(response,valid.StockLossRecoveryEvidence)
+    if ((page.setContents || page.resultPositionId) && (!capability(response,'X-BrickVault-Set-Contents') || page.recordedCatalog.itemType!=='set')) throw new ContractFailure()
+    if (page.postingId!==posting || (page.positionId!==position && page.resultPositionId!==position) || page.resultPositionId===page.positionId || page.location.id!==bin ||
         ('recoveryId' in exact ? page.id!==exact.recoveryId : page.commandId!==exact.commandId) ||
         page.recordedCatalog.id!==page.receipt.catalogId || (page.complete && (
           (page.quarantineQuantity>0 ? page.recoveredQuarantineId!==page.id : page.recoveredQuarantineId!==null) ||
@@ -554,9 +663,18 @@ export const api = {
         ((query.observationId || query.commandId) && result.complete && result.observations.length !== 1)) throw new ContractFailure()
     return result
   },
-  binTransfers: (id: string) => read('receiving/bins/' + encodeURIComponent(id) + '/movements?quarantine=true', valid.BinTransferSnapshot),
+  async binTransfers(id: string) {
+    const response = await request('receiving/bins/' + encodeURIComponent(id) + '/movements?quarantine=true')
+    const page = await validatedBody(response, valid.BinTransferSnapshot)
+    const supported = capability(response,'X-BrickVault-Set-Contents')
+    for (const {layer} of page.positions) verifyPositionContents(layer,supported)
+    if (page.complete && page.positions.reduce((sum, row) => sum + row.layer.freeToBackQuantity, 0) !== page.freeToBackQuantity)
+      throw new ContractFailure()
+    return page
+  },
   async receiving() {
-    const page=await read('receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true',valid.LossReceivingWorkspace)
+    const { value: page, supported, setContentsSupported } = await readWithOfferSources('receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true',valid.LossReceivingWorkspace)
+    if (!validOfferSources(page, supported, setContentsSupported)) throw new ContractFailure()
     if (page.complete) for (const purchase of page.purchases) {
       if (!purchase.derivedLayers) throw new ContractFailure()
       for (const layer of [...purchase.deliveries,...purchase.derivedLayers]) {
@@ -564,7 +682,7 @@ export const api = {
         verifyRecoveryTotals(layer)
       }
     }
-    return page
+    return { ...page, pooledOffersSupported: supported, setContentsSupported }
   },
   diagnostic: (id: string) => read('diagnostics/' + encodeURIComponent(id), valid.Diagnostic),
   async save(command: Command, csrf: string) {
@@ -577,6 +695,7 @@ export const api = {
     const path = commands[command.kind].path
     const receipt = command.kind === 'catalog' || command.kind === 'location'
       ? await read(path, valid.Receipt, options)
+      : command.kind === 'set-inspection' ? await read(path,valid.SetInspectionReceipt,options)
       : command.kind === 'location-capacity' ? await read(path,valid.LocationCapacityReceipt,options)
       : command.kind === 'location-label' ? await read(path,valid.LocationLabelReceipt,options)
       : command.kind === 'location-archive' ? await read(path,valid.LocationArchiveReceipt,options)
@@ -590,7 +709,9 @@ export const api = {
       : command.kind === 'stock-loss' ? await read(path, valid.StockLossReceipt, options)
       : command.kind === 'count' ? await read(path, valid.StockCountReceipt, options)
       : command.kind === 'transfer' ? await read(path, valid.TransferReceipt, options) : await read(path, valid.ReceivingReceipt, options)
-    if (receipt.commandId !== command.body.commandId || receipt.kind !== command.kind ||
+    if (receipt.commandId !== command.body.commandId || receipt.kind !== (command.kind === 'pooled-offer' ? 'offer' : command.kind) ||
+        (command.kind === 'pooled-offer' && receipt.revision !== command.body.expectedRevision + 1) ||
+        (command.kind === 'set-inspection' && receipt.revision !== command.body.expectedRevision + 1) ||
         ((command.kind === 'quarantine' || command.kind === 'quarantine-release') && receipt.revision !== command.body.expectedRevision + 1) ||
         ((command.kind === 'location-capacity' || command.kind === 'location-label' || command.kind === 'location-archive' || command.kind === 'part-out' || command.kind === 'stock-loss-recovery' || command.kind === 'shortage-closure' || command.kind === 'offer-withdrawal') && receipt.revision !== command.body.expectedRevision + 1) ||
         (command.kind === 'recount' && (receipt.entityId !== command.body.previewId || receipt.revision !== 1))) throw new ContractFailure()

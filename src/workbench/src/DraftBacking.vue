@@ -6,6 +6,7 @@ import type { DraftBackingPage, DraftOfferHistory, Location, TransferControls, W
 import { draftBackingLink, quarantineLink } from './countLinks'
 import { itemLabel, recordedOfferPrice } from './receiving'
 import { time } from './presentation'
+import { contentKey, contentLabel, positionContents } from './setContents'
 import { usePositionPage, type PositionReadState } from './usePositionPage'
 
 const props = defineProps<{ bin: Location; position: string; offer?: string; receipt?: string; asOf: string; connected: boolean; workspaceReady: boolean; controls: TransferControls }>()
@@ -51,7 +52,10 @@ const stale = computed(() => {
   if (!original || !current) return false
   const prior = original.data
   return original.workspaceId !== props.controls.workspaceId || prior.purchaseRevision !== current.purchaseRevision ||
+    prior.pooledOffersSupported !== current.pooledOffersSupported ||
     prior.position.location.revision !== current.position.location.revision ||
+    contentKey(prior.position.layer.setContents) !== contentKey(current.position.layer.setContents) ||
+    contentKey(prior.offer.setContents) !== contentKey(current.offer.setContents) ||
     prior.offer.offerId !== current.offer.offerId || prior.offer.backedQuantity !== current.offer.backedQuantity ||
     prior.offer.totalOfferBackedQuantity !== current.offer.totalOfferBackedQuantity ||
     prior.offer.canWithdraw !== current.offer.canWithdraw || prior.hasOpenShortage !== current.hasOpenShortage
@@ -83,7 +87,8 @@ async function save() {
   const {data,workspaceId}=baseline, source=window.location.hash, target=dialog.value
   const body={commandId:crypto.randomUUID(),purchaseId:data.position.layer.purchaseId,expectedRevision:data.purchaseRevision,
     positionId:props.position,offerId:data.offer.offerId,locationId:props.bin.id,confirmedLocationCode:binCode.value,
-    quantity:Number(quantity.value),reason:reason.value.trim()}
+    quantity:Number(quantity.value),reason:reason.value.trim(),
+    ...(data.pooledOffersSupported ? {expectedTotalOfferBackedQuantity:data.offer.totalOfferBackedQuantity} : {})}
   sending.value=true
   try {
     const ack=await props.controls.dispatch({kind:'offer-withdrawal',workspaceId,body})
@@ -108,6 +113,7 @@ async function save() {
       <template v-if="receipt">
         <h3>{{ receipt.quantity }} {{ receipt.quantity===1 ? 'unit withdrawn' : 'units withdrawn' }} from draft backing</h3>
         <p>{{ recordedOfferPrice(receipt) }} · Confirmed bin {{ receipt.confirmedLocationCode }}</p>
+        <p v-if="receipt.setContents">Recorded offer contents · {{ contentLabel(receipt.setContents) }}</p>
         <dl class="details"><dt>Offer at this position</dt><dd>{{ receipt.priorBackedQuantity }} → {{ receipt.remainingBackedQuantity }}</dd>
           <dt>Offer across all positions</dt><dd>{{ receipt.priorTotalOfferBackedQuantity }} → {{ receipt.remainingTotalOfferBackedQuantity }}</dd></dl>
         <p>{{ receipt.reason }}</p><small>Recorded {{ time(receipt.recordedAt) }} · Purchase revision {{ receipt.revision }}</small>
@@ -120,6 +126,7 @@ async function save() {
         <section aria-label="Selected position">
           <strong>{{ snapshot.position.layer.purchaseReference }} · {{ snapshot.position.layer.deliveryReference }}</strong>
           <p>{{ itemLabel([snapshot.position.layer.currentCatalog],snapshot.position.layer.catalogId,snapshot.position.layer.catalogRevision) }}</p>
+          <p v-if="positionContents(snapshot.position.layer)">{{ positionContents(snapshot.position.layer) }}</p>
           <small>Bin {{ snapshot.position.location.code }} · Position {{ position }}</small>
         </section>
         <dl class="details" aria-label="Position balances">
@@ -133,6 +140,7 @@ async function save() {
           <h3>Offers at this position</h3>
           <ul v-if="snapshot.offers.length" class="receipt-lines" aria-label="Offers at this position"><li v-for="o in snapshot.offers" :key="o.offerId">
             <strong>{{ recordedOfferPrice(o) }}</strong><p>{{ o.backedQuantity }} backed here · {{ o.totalOfferBackedQuantity }} across all positions</p>
+            <p v-if="o.setContents || positionContents(snapshot.position.layer)">Recorded offer contents · {{ contentLabel(o.setContents) }}</p>
             <small>Offer {{ o.offerId }}</small><p v-if="o.authority==='unverified-origin'" class="warning">Internal origin unverified</p>
             <a :href="link('offers',o.offerId)" :aria-label="'Review offer '+o.offerId">Review offer and history</a></li></ul>
           <p v-else-if="!loading && !error && !partial && connected">No offers recorded on this page.</p>
@@ -140,6 +148,7 @@ async function save() {
         <template v-if="history">
           <section aria-label="Selected offer"><h3>{{ recordedOfferPrice(history.offer) }}</h3>
             <p>{{ history.offer.authority==='internal-unpublished' ? 'Internal unpublished offer' : 'Internal origin unverified' }}</p>
+            <p v-if="history.offer.setContents || positionContents(history.position.layer)">Recorded offer contents · {{ contentLabel(history.offer.setContents) }}</p>
             <small>Offer {{ history.offer.offerId }}</small>
             <p>{{ history.offer.backedQuantity }} backed at this position · {{ history.offer.totalOfferBackedQuantity }} across all positions</p></section>
           <form v-if="frozen" @submit.prevent="save">

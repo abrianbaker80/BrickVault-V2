@@ -5,6 +5,7 @@ import type { PositionTimelinePage, TimelineEvent } from './api'
 import StockPositionDetails from './StockPositionDetails.vue'
 import { partOutLink, closureLink, countReceiptLink, lossReceiptLink, draftBackingLink, quarantineLink, recoveryLink } from './countLinks'
 import { time } from './presentation'
+import { inspectionLink } from './setContents'
 import { usePositionPage, type PositionReadState } from './usePositionPage'
 
 const props = defineProps<{ id: string; asOf: string; state: PositionReadState }>()
@@ -20,6 +21,7 @@ const { page, confirmed, requested, attempt, loading, partial, error, heading, r
   })
 
 const titles: Record<TimelineEvent['kind'], string> = {
+  'set-inspection': 'Set contents inspected',
   'putaway': 'Put away', 'transfer-in': 'Transferred in', 'transfer-out': 'Transferred out',
   'count': 'Count witnessed', 'hold': 'Build hold placed', 'hold-release': 'Build hold released',
   'quarantine': 'Quarantined in bin', 'quarantine-release': 'Released after inspection',
@@ -70,11 +72,12 @@ function signed(value: number) { return value > 0 ? '+' + value : String(value) 
           <a v-if="event.kind==='part-out' && event.transformationId" :href="partOutLink(page.positionId,event.transformationId)">View part-out receipt</a>
           <a v-if="event.kind==='part-out-output' && event.transformationId && event.relatedPositionId" :href="partOutLink(event.relatedPositionId,event.transformationId)">View originating part-out receipt</a>
           <a v-if="event.kind === 'offer-withdrawal'" :href="draftBackingLink(event.locationId,page.positionId,'receipts',event.id)">View withdrawal receipt</a>
+          <a v-if="event.kind === 'set-inspection'" :href="inspectionLink(page.positionId,event.id)">View set inspection receipt</a>
           <a v-if="event.kind === 'count' && event.observationId" :href="countReceiptLink(event.locationId, event.observationId)">View count receipt</a>
           <a v-if="event.kind==='shortage-closure' && event.caseId" :href="closureLink(event.locationId,page.positionId,event.caseId,'receipt',event.id)">View shortage closure receipt</a>
           <template v-if="event.kind === 'stock-loss-recovery' && event.postingId"><a :href="recoveryLink(event.locationId, page.positionId, event.postingId, event.id)">View stock recovery receipt</a><small v-if="event.quarantineDelta">{{ event.quarantineDelta }} returned to quarantine</small></template>
           <a v-if="event.kind === 'stock-loss' && event.postingId" :href="lossReceiptLink(event.locationId, page.positionId, event.postingId)">View posted loss receipt</a>
-          <a v-if="event.relatedPositionId" :href="'#inventory/' + event.relatedPositionId" @click.exact.prevent="emit('related', event.relatedPositionId)">Inspect {{ event.kind === 'transfer-out' ? 'destination' : 'source' }} position</a>
+          <a v-if="event.relatedPositionId" :href="'#inventory/' + event.relatedPositionId" @click.exact.prevent="emit('related', event.relatedPositionId)">Inspect {{ event.kind === 'transfer-out' || (event.kind === 'set-inspection' && event.physicalDelta < 0) || (event.kind === 'stock-loss-recovery' && !event.physicalDelta) ? 'destination' : 'source' }} position</a>
           <details><summary>Event references</summary><dl>
             <template v-if="event.offerId"><dt>Offer ID</dt><dd>{{ event.offerId }}</dd></template>
             <template v-if="event.holdId"><dt>Build hold ID</dt><dd>{{ event.holdId }}</dd></template>

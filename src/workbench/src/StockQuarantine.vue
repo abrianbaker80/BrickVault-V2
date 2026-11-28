@@ -5,6 +5,7 @@ import { api, ContractFailure, explain } from './api'
 import type { Location, QuarantineEvidence, QuarantineSnapshot, TransferControls } from './api'
 import { partOutLink, draftBackingLink, quarantineLink, recoveryLink } from './countLinks'
 import { itemLabel } from './receiving'
+import { positionContents } from './setContents'
 import { time } from './presentation'
 import { usePositionPage } from './usePositionPage'
 
@@ -136,6 +137,7 @@ async function save() {
         <section aria-label="Selected receipt position">
           <strong>{{ layer.purchaseReference }} · {{ layer.deliveryReference }}</strong>
           <p>{{ itemLabel([layer.currentCatalog],layer.catalogId) }} · Bin {{ stock.position.location.code }}</p>
+          <p v-if="positionContents(layer)">{{ positionContents(layer) }}</p>
           <small>Position {{ positionId }}</small>
           <p v-if="layer.catalogRevision !== layer.currentCatalog.revision" class="warning">Placed at catalog revision {{ layer.catalogRevision }}. Current identity is revision {{ layer.currentCatalog.revision }}.</p>
         </section>

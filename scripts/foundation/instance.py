@@ -398,6 +398,13 @@ class Instance:
                     GRANT INSERT (id,command_id,location_id,revision,piece_limit,reason)
                         ON brickvault.location_capacity_events TO bv_api;
                 END IF;
+                IF (SELECT max(version) FROM brickvault.schema_version) >= 17 THEN
+                    GRANT INSERT (expected_offer_total) ON brickvault.draft_backing_withdrawals TO bv_api;
+                    GRANT INSERT (set_contents) ON brickvault.stock_part_out_outputs, brickvault.stock_loss_recoveries TO bv_api;
+                    GRANT INSERT (id,command_id,purchase_id,expected_purchase_revision,source_position_id,
+                        catalog_id,catalog_revision,location_id,location_code,quantity,set_contents,reason)
+                        ON brickvault.set_position_inspections TO bv_api;
+                END IF;
             END $grants$;
             COMMIT;
         """,

@@ -60,6 +60,22 @@ SCHEMA_FACTS[13] = SCHEMA_FACTS[12] + (
 SCHEMA_FACTS[14] = SCHEMA_FACTS[13] + ("location_labels", "location_registry_events")
 SCHEMA_FACTS[15] = SCHEMA_FACTS[14] + ("location_capacity_events", "location_capacity_fences")
 SCHEMA_FACTS[16] = SCHEMA_FACTS[15]  # The new denomination is part of each existing offers row signature.
+SCHEMA_FACTS[17] = SCHEMA_FACTS[16] + ("set_position_inspections", "position_set_contents")
+
+# Only the stopped-copy upgrade uses these column introductions to reconstruct
+# the historical row shape. Backups and restores sign every current column.
+ADDED_COLUMNS = {
+    16: {"offers": ("currency", "price_scale_verified")},
+    17: {
+        "offer_backing": ("purchase_revision",),
+        "draft_backing_withdrawals": ("expected_offer_total",),
+        "deliveries": ("set_contents",),
+        "placements": ("set_contents",),
+        "stock_part_out_outputs": ("set_contents",),
+        "stock_loss_recoveries": ("set_contents", "result_position_id"),
+        "offers": ("set_contents",),
+    },
+}
 
 
 def digest(path):
@@ -127,11 +143,16 @@ def signatures(s, database, token=None):
     return row_signatures(s, database, tables, session)
 
 
-def row_signatures(s, database, tables, session="BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n", *, pre_currency_offers=False):
+def row_signatures(s, database, tables, session="BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n", *, source_version=None):
     groups = {}
     for table in tables:
-        # Only staged upgrades compare offers to their exact pre-v16 representation.
-        payload = "(to_jsonb(t) - 'currency' - 'price_scale_verified')" if table == "offers" and pre_currency_offers else "to_jsonb(t)"
+        payload = "to_jsonb(t)"
+        if source_version is not None:
+            for version, fields in ADDED_COLUMNS.items():
+                if version > source_version:
+                    for field in fields.get(table, ()):
+                        payload += f" - '{field}'"
+            payload = f"({payload})"
         stmt = (
             session
             + f"SET TIME ZONE 'UTC'; SELECT {payload}::text FROM brickvault.{table} t ORDER BY {payload}::text COLLATE \"C\";\nCOMMIT;"

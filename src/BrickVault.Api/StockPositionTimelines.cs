@@ -78,6 +78,14 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
             JOIN scope_positions s ON s.id=h.position_id
 
             UNION ALL
+            SELECT s.id,'set-inspection',i.id,i.command_id,NULL,i.quantity,
+                CASE WHEN i.source_position_id=i.result_position_id THEN 0 WHEN s.id=i.source_position_id THEN -i.quantity ELSE i.quantity END,0,0,
+                i.location_id,i.location_code,i.reason,
+                CASE WHEN i.source_position_id=i.result_position_id THEN NULL WHEN s.id=i.source_position_id THEN i.result_position_id ELSE i.source_position_id END,
+                NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL
+            FROM brickvault.set_position_inspections i JOIN scope_positions s ON s.id=i.source_position_id OR s.id=i.result_position_id
+
+            UNION ALL
             SELECT q.position_id,'quarantine',q.id,q.command_id,NULL,q.quantity,0,0,0,
                 q.location_id,q.location_code,q.reason,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL
             FROM brickvault.stock_quarantines q JOIN scope_positions s ON s.id=q.position_id
@@ -95,10 +103,11 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
             FROM brickvault.stock_shortage_closures c JOIN scope_positions s ON s.id=c.position_id
 
             UNION ALL
-            SELECT r.position_id,'stock-loss-recovery',r.id,r.command_id,NULL,r.saleable_quantity+r.quarantine_quantity,
-                r.saleable_quantity+r.quarantine_quantity,0,0,r.location_id,r.location_code,r.reason,NULL,NULL,NULL,NULL,
-                l.case_id,r.loss_id,NULL,NULL,NULL,NULL
-            FROM brickvault.stock_loss_recoveries r JOIN scope_positions s ON s.id=r.position_id
+            SELECT s.id,'stock-loss-recovery',r.id,r.command_id,NULL,r.saleable_quantity+r.quarantine_quantity,
+                CASE WHEN s.id=r.result_position_id THEN r.saleable_quantity+r.quarantine_quantity ELSE 0 END,0,0,
+                r.location_id,r.location_code,r.reason,CASE WHEN r.result_position_id=r.position_id THEN NULL
+                    WHEN s.id=r.position_id THEN r.result_position_id ELSE r.position_id END,NULL,NULL,NULL,l.case_id,r.loss_id,NULL,NULL,NULL,NULL
+            FROM brickvault.stock_loss_recoveries r JOIN scope_positions s ON s.id=r.position_id OR s.id=r.result_position_id
             JOIN brickvault.stock_loss_postings l ON l.id=r.loss_id
 
             UNION ALL
@@ -118,8 +127,10 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
             JOIN brickvault.placement_positions p ON p.id=b.placement_id
             JOIN scope_positions s ON s.id=b.placement_id
         ), events AS (
-            SELECT f.*,c.revision AS purchase_revision,c.correlation_id,COALESCE(f.evidence_time,a.occurred_at) AS occurred_at
+            SELECT f.*,COALESCE(origin.purchase_revision,c.revision) AS purchase_revision,c.correlation_id,COALESCE(f.evidence_time,a.occurred_at) AS occurred_at
             FROM facts f JOIN brickvault.commands c ON c.command_id=f.command_id
+            LEFT JOIN brickvault.offer_backing origin ON f.kind='offer-backing'
+                AND origin.offer_id=f.offer_id AND origin.placement_id=f.position_id
             LEFT JOIN brickvault.audit a ON a.command_id=f.command_id
         )
         """;
@@ -188,7 +199,8 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
                     ORDER BY opening.expected_purchase_revision DESC LIMIT 1
                 ) ELSE e.case_id END,
                 e.posting_id,e.hold_id,e.hold_purpose,e.offer_id,e.ledger_at_witness,e.purchase_revision,e.position_id,
-                CASE WHEN output.disposition='retained' THEN output.quantity ELSE recovery.quarantine_quantity END,
+                CASE WHEN output.disposition='retained' THEN output.quantity WHEN recovery.id IS NOT NULL
+                    THEN CASE WHEN e.position_id=recovery.result_position_id THEN recovery.quarantine_quantity ELSE 0 END END,
                 CASE WHEN e.kind='part-out' THEN e.id ELSE output.part_out_id END
             FROM (
                 SELECT * FROM events
@@ -216,7 +228,7 @@ internal sealed class StockPositionTimelines(NpgsqlDataSource db)
         if (parts.Length != 3 || !Guid.TryParseExact(parts[0],"N",out var scope) || scope != positionId ||
             parts[1] is not ("putaway" or "transfer-in" or "transfer-out" or "count" or "hold" or "hold-release" or
             "stock-loss" or "offer-backing" or "quarantine" or "quarantine-release" or "offer-withdrawal" or "shortage-closure" or "stock-loss-recovery"
-            or "part-out" or "part-out-output") ||
+            or "part-out" or "part-out-output" or "set-inspection") ||
             !Guid.TryParseExact(parts[2],"N",out var id)) throw InvalidCursor();
         await using var anchor = Query(connection, tx, ScopedEvents(false) + "\n" + """
             SELECT purchase_revision FROM events WHERE kind=$2 AND id=$3

@@ -6,7 +6,7 @@ import shutil
 import tempfile
 
 from instance import Instance, RELEASE, ROOT, private_dir
-from recovery import row_signatures, signatures
+from recovery import ADDED_COLUMNS, row_signatures, signatures
 from runtime import exclusive, operation
 
 
@@ -116,7 +116,9 @@ def stage_upgrade(source, output, release=RELEASE):
                     candidate.grants()
                     after = signatures(candidate, candidate.database)
                     comparable = after.copy()
-                    if "offers" in before and before["schema_version"]["rows"] < 16 <= after["schema_version"]["rows"]:
+                    source_version = before["schema_version"]["rows"]
+                    target_version = after["schema_version"]["rows"]
+                    if "offers" in before and source_version < 16 <= target_version:
                         # The old price had been entered in the purchase currency. Verify that fact
                         # and compare every pre-existing offer column against its original signature.
                         if candidate.sql("""
@@ -126,7 +128,31 @@ def stage_upgrade(source, output, release=RELEASE):
                             );
                         """) != "t":
                             raise ValueError("An opening offer differs from its historical currency or claims an unverified price scale.")
-                        comparable.update(row_signatures(candidate, candidate.database, ("offers",), pre_currency_offers=True))
+                    if "offer_backing" in before and source_version < 17 <= target_version:
+                        if candidate.sql("""
+                            SELECT NOT EXISTS (
+                                SELECT 1 FROM brickvault.offer_backing b
+                                JOIN brickvault.offers o ON o.id=b.offer_id
+                                JOIN brickvault.commands c ON c.command_id=o.command_id
+                                WHERE b.purchase_id IS DISTINCT FROM o.purchase_id
+                                   OR b.purchase_revision IS DISTINCT FROM c.revision
+                            ) AND NOT EXISTS (
+                                SELECT 1 FROM brickvault.draft_backing_withdrawals WHERE expected_offer_total IS NOT NULL
+                            )
+                        """) != "t":
+                            raise ValueError("A migrated allocation differs from its original purchase revision or a past withdrawal acquired a new confirmation.")
+                        contents_tables = ("deliveries", "placements", "stock_part_out_outputs", "offers", "stock_loss_recoveries")
+                        for table in contents_tables:
+                            if candidate.sql(f"SELECT EXISTS (SELECT 1 FROM brickvault.{table} WHERE set_contents IS NOT NULL)") != "f":
+                                raise ValueError(f"The upgrade assigned unobserved box or manual contents to existing {table}.")
+                        if candidate.sql("SELECT EXISTS (SELECT 1 FROM brickvault.stock_loss_recoveries WHERE result_position_id IS DISTINCT FROM position_id)") != "f":
+                            raise ValueError("An earlier stock recovery changed its receiving position during upgrade.")
+                    reshaped = {
+                        name for version, tables in ADDED_COLUMNS.items() if source_version < version <= target_version
+                        for name in tables if name in before
+                    }
+                    if reshaped:
+                        comparable.update(row_signatures(candidate, candidate.database, reshaped, source_version=source_version))
                     if (
                         after["schema_version"]["rows"]
                         <= before["schema_version"]["rows"]

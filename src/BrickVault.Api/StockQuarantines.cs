@@ -161,7 +161,7 @@ internal sealed class StockQuarantines(NpgsqlDataSource db)
         if (!recoveries)
         {
             await using var recovered = Query(connection, tx, """
-                SELECT EXISTS (SELECT 1 FROM brickvault.stock_loss_recoveries r WHERE r.position_id=$1 AND r.quarantine_quantity>0)
+                SELECT EXISTS (SELECT 1 FROM brickvault.stock_loss_recoveries r WHERE r.result_position_id=$1 AND r.quarantine_quantity>0)
                 """, positionId);
             if ((bool)(await recovered.ExecuteScalarAsync(token))!) throw StockLossRecoveries.Upgrade();
         }

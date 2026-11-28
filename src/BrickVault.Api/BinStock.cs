@@ -34,7 +34,7 @@ internal sealed class BinStock(NpgsqlDataSource db)
             throw new Fault(404, "unknown_location", "No registered location has that identifier.");
 
         var layers = await Rows(connection, tx, $"""
-            SELECT {PositionRows.Select}
+            SELECT {PositionRows.Select}{PositionRows.SetContentsColumn}
             {PositionRows.From}
             WHERE p.location_id=$1 AND p.quantity > 0
             ORDER BY p.catalog_id,p.catalog_revision,buy.reference,d.reference,p.id

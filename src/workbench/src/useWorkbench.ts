@@ -1,6 +1,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
-import { api, ApiFailure, commandLabel, explain, forget, InvalidCommand, readJournal, remember } from './api'
+import { api, ApiFailure, commandLabel, ContractFailure, explain, forget, InvalidCommand, readJournal, remember } from './api'
 import { recoverPartOut } from './recoverPartOut'
+import { contentKey, inspectionLink } from './setContents'
+import {validOfferCatalog} from './pooledOffers'
 import {capacityLink,confirmsCapacityRejection} from './binCapacity'
 import { registryLink, sameLabel } from './binLabels'
 import { recoverInspection } from './recoverInspection'
@@ -18,7 +20,7 @@ export function useWorkbench(page: Ref<string>) {
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
   const error = ref('')
-  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string; recountLink?: string; quarantineReceipt?: string; withdrawalLink?: string; closureReceipt?:string; recoveryReceipt?:string; partOutReceipt?:string; registryReceipt?:string; capacityReceipt?:string } | null>(null)
+  const notice = ref<{ message: string; correlationId: string; sourceLocationId?: string; countLink?: string; lossLink?: string; recountLink?: string; quarantineReceipt?: string; withdrawalLink?: string; closureReceipt?:string; recoveryReceipt?:string; partOutReceipt?:string; registryReceipt?:string; capacityReceipt?:string; setReceipt?:string } | null>(null)
   const pending = shallowRef<Command[]>([])
   const held = shallowRef<Held[]>([])
   const journalError = ref('')
@@ -80,6 +82,7 @@ export function useWorkbench(page: Ref<string>) {
         page.value === 'receiving' ? api.receiving() : null
       ]).then(([result, stock]) => {
         if (current !== generation) return
+        if (result.complete && stock?.complete && !validOfferCatalog(stock,result.catalog)) throw new ContractFailure()
         workspaceRead.value = { data: result, allAudit }
         receiving.value = stock
         readState.value = result.complete && (!stock || stock.complete) ? 'ready' : 'partial'
@@ -169,6 +172,7 @@ export function useWorkbench(page: Ref<string>) {
         let partOutReceipt: string | undefined
         let registryReceipt:string|undefined
         let capacityReceipt:string|undefined
+        let setReceipt:string|undefined
         let recoveryReceipt: string | undefined
         let closureReceipt: string | undefined
         let countLink: string | undefined
@@ -176,7 +180,21 @@ export function useWorkbench(page: Ref<string>) {
         let recountLink: string | undefined
         let withdrawalLink: string | undefined
         let quarantineReceipt: string | undefined
-        if(command.kind==='location-capacity'){
+        if(command.kind==='set-inspection'){
+          const body=command.body
+          try {
+            const row=await api.setInspection(body.positionId,{commandId:body.commandId})
+            if (!row.complete || row.positionId!==body.positionId || row.revision!==body.expectedRevision+1 || row.purchaseId!==body.purchaseId ||
+                row.locationId!==body.locationId || !sameLabel(row.confirmedLocationCode,body.confirmedLocationCode) ||
+                row.catalogId!==body.catalogId || row.catalogRevision!==body.catalogRevision ||
+                row.quantity!==body.quantity || row.reason!==body.reason || contentKey(row.setContents)!==contentKey(body.setContents)) {
+              throw new Error('Set inspection receipt mismatch')
+            }
+            committed=row; setReceipt=inspectionLink(body.positionId,row.id)
+          } catch (failure) {
+            if (!(failure instanceof ApiFailure && failure.status===404 && failure.detail?.code==='unknown_set_inspection')) throw failure
+          }
+        } else if(command.kind==='location-capacity'){
           const body=command.body
           try{
             const result=await api.capacityReceipt(body.locationId,{commandId:body.commandId}),event=result.event
@@ -302,12 +320,17 @@ export function useWorkbench(page: Ref<string>) {
           if (entry && (entry.kind !== command.kind || entry.revision !== command.body.expectedRevision + 1 ||
               (command.body.id && entry.entityId !== command.body.id))) throw new Error('Reference receipt mismatch')
           committed = entry
+        } else if (command.kind === 'pooled-offer') {
+          const originalSession = await api.session()
+          if (checking !== generation || originalSession.workspaceId !== command.workspaceId) return
+          committed = await api.confirmPooledOffer(command, originalSession.csrfToken)
         } else {
           const snapshot = command.kind === 'transfer'
             ? await api.binTransfers(command.body.sourceLocationId) : await api.workspace(true)
           if (!snapshot.complete) throw new Error('Incomplete command history')
           const history = 'movements' in snapshot ? snapshot.movements : snapshot.audit
           committed = history.find(row => row.commandId === command.body.commandId)
+
         }
         const authenticated = await api.session()
         if (checking !== generation) return
@@ -316,7 +339,7 @@ export function useWorkbench(page: Ref<string>) {
           forget(command)
           loadPending()
           notice.value = { message: 'Confirmed the original ' + commandLabel(command) + '.',
-            correlationId: committed.correlationId, capacityReceipt, registryReceipt, countLink, lossLink, recountLink, quarantineReceipt, withdrawalLink, closureReceipt, recoveryReceipt, partOutReceipt, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
+            correlationId: committed.correlationId, setReceipt, capacityReceipt, registryReceipt, countLink, lossLink, recountLink, quarantineReceipt, withdrawalLink, closureReceipt, recoveryReceipt, partOutReceipt, sourceLocationId: command.kind === 'transfer' ? command.body.sourceLocationId : undefined }
           const read = await beginRefresh(false, { session: authenticated, references })
           await read?.finished
           return
@@ -344,6 +367,7 @@ export function useWorkbench(page: Ref<string>) {
       forget(command)
       loadPending()
       const savedNotice = { message: 'Saved ' + commandLabel(command) + ' · revision ' + receipt.revision + '.',
+        setReceipt: command.kind==='set-inspection' ? inspectionLink(command.body.positionId,receipt.entityId) : undefined,
         capacityReceipt: command.kind==='location-capacity' ? capacityLink(command.body.locationId,receipt.entityId) : undefined,
         registryReceipt: command.kind==='location-label' || command.kind==='location-archive' ? registryLink(command.body.locationId,receipt.entityId) : undefined,
         quarantineReceipt: command.kind === 'quarantine' || command.kind === 'quarantine-release' ? quarantineLink(command.body.locationId, command.body.positionId, receipt.entityId) : undefined,
@@ -369,6 +393,29 @@ export function useWorkbench(page: Ref<string>) {
       if (expired(reason)) return
       if (reason instanceof ApiFailure && reason.status === 413 && reason.detail?.code === 'request_too_large') {
         await resolveSizeRejection(command, reason, firstAttempt)
+      } else if (reason instanceof ApiFailure && reason.status === 426 && reason.detail?.code === 'pooled_offer_client_upgrade_required' &&
+          command.kind === 'offer-withdrawal' && command.body.expectedTotalOfferBackedQuantity === undefined) {
+        // The server looks up an exact original receipt before asking for current whole-offer backing.
+        forget(command)
+        loadPending()
+        if (session.value?.workspaceId === command.workspaceId) {
+          error.value = 'Review the current backing across all purchases before confirming a new withdrawal. Reference ' + reason.detail.correlationId + '.'
+        }
+      } else if (reason instanceof ApiFailure && reason.status === 400 && reason.detail?.code === 'invalid_json' &&
+          (('setContents' in command.body && command.body.setContents) ||
+            (command.kind === 'part-out' && command.body.outputs.some(output => output.setContents)) ||
+            (command.kind === 'offer-withdrawal' && command.body.expectedTotalOfferBackedQuantity !== undefined))) {
+        if (firstAttempt) {
+          forget(command)
+          loadPending()
+        }
+        while (readState.value === 'loading') {
+          await new Promise<void>(resolve => watch(readState, () => resolve(), {once:true}))
+        }
+        if (session.value?.workspaceId === command.workspaceId && readState.value !== 'disconnected') {
+          error.value = (firstAttempt ? 'The server could not record these details. Check the server version before trying again.' :
+            'Confirmation is still pending. Reconnect to the updated server to verify the original command.') + ' Reference ' + reason.detail.correlationId + '.'
+        }
       } else if (command.kind === 'offer' && reason instanceof ApiFailure && reason.detail && (
           (command.body.currency && reason.status === 400 && reason.detail.code === 'invalid_json') ||
           (!command.body.currency && reason.status === 409 && reason.detail.code === 'offer_price_reentry_required'))) {
@@ -397,10 +444,17 @@ export function useWorkbench(page: Ref<string>) {
       } else if (reason instanceof ApiFailure && reason.detail?.code === 'workspace_mismatch') {
         await refresh()
         error.value = 'The workspace changed. The original command is held for its issuing workspace.'
+      } else if (command.kind === 'pooled-offer' && !firstAttempt && reason instanceof ApiFailure &&
+          reason.status === 409 && reason.detail?.code === 'command_mismatch') {
+        error.value = 'Confirmation is still pending. The recorded request differs from the original offer. Reference ' +
+          reason.detail.correlationId + '.'
+        readState.value = 'disconnected'
       } else if (reason instanceof ApiFailure && reason.detail && (confirmsCapacityRejection(command,reason) ||
           ['invalid_quarantine','unknown_quarantine_receipt','quarantine_position_mismatch','quarantine_bin_conflict','quarantine_catalog_conflict',
             'quarantine_shortage_open','quarantine_quantity_unavailable','quarantine_capacity_unavailable','stock_loss_quarantine_unresolved','invalid_draft_backing_withdrawal','draft_backing_bin_conflict','draft_backing_position_mismatch','draft_backing_offer_mismatch',
-            'draft_backing_authority_unverified','draft_backing_quantity_unavailable','invalid_recount', 'empty_recount_preview', 'recount_preview_used', 'unknown_recount_preview',
+            'draft_backing_authority_unverified','draft_backing_quantity_unavailable','draft_backing_total_conflict','invalid_recount', 'empty_recount_preview', 'recount_preview_used', 'unknown_recount_preview',
+            'pooled_offer_unapplied','set_contents_mismatch','set_contents_unverified','set_contents_not_set','set_contents_already_recorded','set_inspection_identity',
+            'set_inspection_committed','set_inspection_quantity','set_inspection_bin','invalid_set_inspection',
             'invalid_location_capacity','invalid_location_label','invalid_location_archive','invalid_location_registry_command','duplicate_location_label','location_destination_archived',
             'location_archive_stock_changed','location_already_archived','location_label_mismatch','invalid_reference', 'duplicate_reference', 'invalid_receiving', 'duplicate_receiving_reference',
             'revision_conflict', 'command_mismatch', 'catalog_ineligible', 'catalog_reconfirmation_required', 'bin_confirmation_mismatch',

@@ -21,6 +21,9 @@ internal sealed record StockLossRecoveryCommand
     public required Guid CatalogId { get; init; }
     public required int CatalogRevision { get; init; }
     public required bool ConfirmedIdentity { get; init; }
+    [System.Diagnostics.CodeAnalysis.DisallowNull]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SetContents? SetContents { get; init; }
     public required string Reason { get; init; }
     public required StockLossRecoverySelection[] Allocations { get; init; }
 
@@ -78,7 +81,9 @@ internal sealed record StockLossRecoveryEvidence(string Scope, DateTime AsOf, bo
     Guid CorrelationId, int Revision, Guid PurchaseId, Guid PositionId, Guid PostingId, LocationRow Location,
     string ConfirmedLocationCode, CatalogRow RecordedCatalog, AdjustmentReceiptEvidence Receipt,
     string Reason, DateTime RecordedAt, int SaleableQuantity, int QuarantineQuantity, int? RestoredItemCostMinor,
-    Guid? RecoveredQuarantineId, IReadOnlyList<StockLossRecoveryAllocation> Allocations, string? NextAfter);
+    Guid? RecoveredQuarantineId, IReadOnlyList<StockLossRecoveryAllocation> Allocations, string? NextAfter,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SetContents? SetContents = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? ResultPositionId = null);
 
 internal sealed class StockLossRecoveries(NpgsqlDataSource db)
 {
@@ -95,11 +100,11 @@ internal sealed class StockLossRecoveries(NpgsqlDataSource db)
         {
             await using (var receiptRow = Query(connection, tx, """
                 INSERT INTO brickvault.stock_loss_recoveries(id,command_id,purchase_id,position_id,location_id,location_code,loss_id,
-                    expected_purchase_revision,catalog_id,catalog_revision,confirmed_identity,reason)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                    expected_purchase_revision,catalog_id,catalog_revision,confirmed_identity,reason,set_contents)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
                 """, id, command.CommandId, command.PurchaseId, command.PositionId, command.LocationId,
                 command.ConfirmedLocationCode, command.PostingId, command.ExpectedRevision,
-                command.CatalogId, command.CatalogRevision, command.ConfirmedIdentity, command.Reason))
+                command.CatalogId, command.CatalogRevision, command.ConfirmedIdentity, command.Reason, SetContents.Parameter(command.SetContents)))
                 await receiptRow.ExecuteNonQueryAsync(token);
             await using (var lines = Query(connection, tx, """
                 INSERT INTO brickvault.stock_loss_recovery_allocations(recovery_id,quarantine_id,saleable_quantity,quarantine_quantity)
@@ -116,10 +121,11 @@ internal sealed class StockLossRecoveries(NpgsqlDataSource db)
         }
         catch (PostgresException error) when (error.ConstraintName is "stock_loss_recovery_revision" or "stock_loss_recovery_scope" or
             "stock_loss_recovery_bin" or "stock_loss_recovery_catalog" or "stock_loss_recovery_amount" or
-            "stock_loss_recovery_allocations_quarantine_id_fkey")
+            "stock_loss_recovery_allocations_quarantine_id_fkey" or "set_contents_not_set")
         {
             throw error.ConstraintName switch
             {
+                "set_contents_not_set" => SetContents.Conflict(error.ConstraintName),
                 "stock_loss_recovery_revision" => Fault.Conflict(),
                 "stock_loss_recovery_scope" => Conflict(error.ConstraintName, "Choose the exact original posted loss at this receipt position and bin."),
                 "stock_loss_recovery_bin" => Conflict(error.ConstraintName, "Confirm the current registered code for the original bin."),
@@ -273,18 +279,19 @@ internal sealed class StockLossRecoveries(NpgsqlDataSource db)
             SELECT transaction_timestamp(),r.id,r.command_id,c.correlation_id,c.revision,r.purchase_id,
                 loc.revision,loc.code,loc.name,r.location_code,r.recorded_catalog,r.reason,a.occurred_at,
                 r.saleable_quantity,r.quarantine_quantity,r.restored_item_cost_minor,
-                d.id,d.reference,d.quantity,d.item_cost_minor,p.currency,stock.origin_placement_id,stock.catalog_id,stock.catalog_revision
+                d.id,d.reference,d.quantity,d.item_cost_minor,p.currency,stock.origin_placement_id,stock.catalog_id,stock.catalog_revision,
+                r.set_contents,CASE WHEN r.result_position_id<>r.position_id THEN r.result_position_id END,r.position_id
             FROM brickvault.stock_loss_recoveries r JOIN brickvault.commands c USING(command_id)
             JOIN brickvault.audit a USING(command_id)
             JOIN brickvault.stock_loss_postings l ON l.id=r.loss_id JOIN brickvault.deliveries d ON d.id=l.delivery_id
             JOIN brickvault.purchases p ON p.id=r.purchase_id JOIN brickvault.placement_positions stock ON stock.id=r.position_id
             JOIN brickvault.locations loc ON loc.id=r.location_id
-            WHERE r.location_id=$1 AND r.position_id=$2 AND r.loss_id=$3 AND
+            WHERE r.location_id=$1 AND (r.position_id=$2 OR r.result_position_id=$2) AND r.loss_id=$3 AND
             """ + " " + selector, r => new StockLossRecoveryEvidence("stock-loss-recovery",r.GetDateTime(0),true,r.GetGuid(1),
-                r.GetGuid(2),r.GetGuid(3),r.GetInt32(4),r.GetGuid(5),positionId,postingId,
+                r.GetGuid(2),r.GetGuid(3),r.GetInt32(4),r.GetGuid(5),r.GetGuid(26),postingId,
                 new LocationRow(locationId,r.GetInt32(6),r.GetString(7),r.GetString(8)),r.GetString(9),
                 JsonSerializer.Deserialize<CatalogRow>(r.GetString(10),Wire.Json)!,ReadReceipt(r,16),r.GetString(11),r.GetDateTime(12),
-                r.GetInt32(13),r.GetInt32(14),Optional<int>(r,15),r.GetInt32(14)>0?r.GetGuid(1):null,[],null),
+                r.GetInt32(13),r.GetInt32(14),Optional<int>(r,15),r.GetInt32(14)>0?r.GetGuid(1):null,[],null,SetContents.Read(r,24),Optional<Guid>(r,25)),
             token, locationId, positionId, postingId, (recoveryId ?? commandId)!.Value)).SingleOrDefault() ??
             throw new Fault(404, "unknown_stock_loss_recovery", "No matching recovery receipt belongs to this loss and position.");
 

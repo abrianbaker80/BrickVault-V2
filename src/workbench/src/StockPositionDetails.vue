@@ -4,6 +4,7 @@ import type { StockPosition } from './api'
 import { partOutLink, countPositionLink, draftBackingLink, quarantineLink } from './countLinks'
 import { receiptCost } from './receiving'
 import { label, time } from './presentation'
+import { inspectionLink, positionContents } from './setContents'
 
 const props = defineProps<{ record: StockPosition; asOf: string }>()
 const emit = defineEmits<{ inspect: [id: string]; lot: [id: string] }>()
@@ -15,7 +16,9 @@ const layer = computed(() => props.record.layer)
     <div class="identity"><h3>{{ layer.currentCatalog.name }}</h3><p>{{ label(layer.currentCatalog.itemType) }} · {{ layer.currentCatalog.itemNumber }}{{ layer.currentCatalog.variant ? ' · ' + layer.currentCatalog.variant : '' }}</p>
       <small>{{ layer.currentCatalog.colorState === 'known' ? 'Color ' + layer.currentCatalog.colorId : label(layer.currentCatalog.colorState) + ' color' }} · {{ label(layer.currentCatalog.condition) }} · {{ label(layer.currentCatalog.completeness) }}</small></div>
     <p v-if="layer.catalogRevision !== layer.currentCatalog.revision" class="warning" role="status">Recorded at catalog revision {{ layer.catalogRevision }}. Item details show current revision {{ layer.currentCatalog.revision }}.</p>
+    <p v-if="positionContents(layer)">{{ positionContents(layer) }}</p>
     <p v-if="layer.quantity === 0" class="held-note">No units remain in this position.</p>
+    <p v-if="layer.currentCatalog.itemType === 'set'"><a :href="inspectionLink(layer.placementId)">Inspect set contents</a></p>
     <h3>Stock position</h3><dl class="details">
       <dt>Bin</dt><dd>{{ record.location.code }} · {{ record.location.name }}</dd>
       <dt>Physical on hand</dt><dd>{{ layer.quantity }}</dd><dt>Backed by offers</dt><dd>{{ layer.backedQuantity }}</dd>

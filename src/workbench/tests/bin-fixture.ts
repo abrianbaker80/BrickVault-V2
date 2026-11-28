@@ -124,8 +124,8 @@ export async function audit(page: Page) {
   expect(scan.violations.map(v => ({ id: v.id, targets: v.nodes.map(n => n.target) }))).toEqual([])
 }
 export async function purchases(page: Page, ids: string[]) {
-  const response = await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true',
-    { headers: { 'X-BrickVault-Price-Scale': '1' } })
+  const response = await page.request.get('/api/v1/receiving/current?holds=true&losses=true&quarantine=true&recoveries=true&partOuts=true&pooledOffers=true',
+    { headers: { 'X-BrickVault-Price-Scale': '1', 'X-BrickVault-Set-Contents': '1' } })
   expect(response.ok()).toBe(true)
   const snapshot: ReceivingWorkspace = await response.json()
   return snapshot.purchases.filter(p => ids.includes(p.id))

@@ -5,6 +5,8 @@ import { api, ApiFailure, ContractFailure, explain, type Location, type Recovery
 import { lossReceiptLink, quarantineLink, recoveryLink, type CountLink } from './countLinks'
 import { itemLabel, receiptCost } from './receiving'
 import { time } from './presentation'
+import SetContentsFields from './SetContentsFields.vue'
+import { contentLabel, positionContents, recordedContents, type Presence } from './setContents'
 
 type Route = NonNullable<NonNullable<CountLink>['recovery']>
 type Source = RecoveryReview['sources'][number]
@@ -20,8 +22,10 @@ const requested = shallowRef(first()), confirmed = shallowRef(first())
 const loading = ref(false), stale = ref(false), error = ref(''), attempt = ref(0)
 const choices = ref<Record<string, Choices>>({})
 const bin = ref(''), reason = ref(''), identity = ref(false), sending = ref(false), feedback = ref('')
+const contentsMode = ref<'' | 'observed' | 'unrecorded'>(''), box = ref<Presence>(''), instructions = ref<Presence>('')
+const observed = computed(() => contentsMode.value === 'observed' ? recordedContents(box.value,instructions.value) : undefined)
 const bins=useBinRegistry(()=>[bin.value])
-const dirty = computed(() => Object.keys(choices.value).length || bin.value || reason.value || identity.value)
+const dirty = computed(() => Object.keys(choices.value).length || bin.value || reason.value || identity.value || contentsMode.value)
 const current = computed(() => review.value?.position.layer.currentCatalog)
 const healthy = computed(() => props.connected && props.workspaceReady && !loading.value && !error.value && !stale.value)
 const editable = computed(() => !!review.value?.remainingQuantity && healthy.value && props.controls.enabled && !sending.value)
@@ -33,6 +37,7 @@ function validRow(row: Choices) {
   return values.every(n => n === '' || /^\d+$/.test(n)) && Number.isSafeInteger(quantity) && quantity > 0 && quantity <= row.source.remainingQuantity
 }
 const allowed = computed(() => editable.value && rows.value.length > 0 && rows.value.every(validRow) && identity.value &&
+  (current.value?.itemType!=='set' || (review.value?.setContentsSupported && (observed.value || contentsMode.value==='unrecorded'))) &&
   bins.matches(review.value?.position.location,bin.value) && !!reason.value.trim())
 const sourceKey = (row: Source) => row.quarantineId ?? 'ordinary'
 function select(row: Source, key: 'saleable' | 'quarantine', event: Event) {
@@ -44,6 +49,7 @@ function select(row: Source, key: 'saleable' | 'quarantine', event: Event) {
 }
 function clear() {
   choices.value = {}; bin.value = ''; reason.value = ''; identity.value = false; feedback.value = ''
+  contentsMode.value='';box.value='';instructions.value=''
   requested.value = first(); review.value = undefined; stale.value = false; attempt.value++
 }
 function pageBy(key: 'sources' | 'history', cursor?: string | null) {
@@ -103,6 +109,7 @@ async function submit() {
       commandId: crypto.randomUUID(), purchaseId: page.position.layer.purchaseId, expectedRevision: page.purchaseRevision,
       positionId: props.route.position, postingId: props.route.posting, locationId: props.location.id, confirmedLocationCode: bin.value,
       catalogId: page.position.layer.catalogId, catalogRevision: page.position.layer.currentCatalog.revision, confirmedIdentity: true,
+      ...(current.value?.itemType==='set' && observed.value ? {setContents:observed.value} : {}),
       reason: reason.value.trim(), allocations: rows.value.map(row => ({ quarantineId: row.source.quarantineId,
         saleableQuantity: Number(row.saleable), quarantineQuantity: Number(row.quarantine) }))
     } })
@@ -126,6 +133,7 @@ async function submit() {
       <template v-if="review && current">
         <p><strong>{{ itemLabel([current],current.id) }} · Bin {{ review.position.location.code }}</strong>
           <small>{{ review.position.layer.purchaseReference }} · {{ review.receipt.deliveryReference }} · Position {{ route.position }}</small></p>
+        <p v-if="positionContents(review.position.layer)">Current position contents · {{ positionContents(review.position.layer) }}</p>
         <p>{{ review.originalReason }}<small>Loss posted {{ time(review.originalPostedAt) }}</small></p>
         <dl class="details" aria-label="Loss balance"><dt>Originally posted loss</dt><dd>{{ review.originalLostQuantity }}</dd>
           <dt>Already recovered</dt><dd>{{ review.recoveredQuantity }}</dd><dt>Still missing</dt><dd>{{ review.remainingQuantity }}</dd>
@@ -160,6 +168,14 @@ async function submit() {
             <details v-if="rows.length"><summary>Review selected sources</summary><ul><li v-for="row in rows" :key="sourceKey(row.source)">
               {{ row.source.quarantineId ? row.source.originalQuarantineReason + ' · ' + row.source.quarantineId : 'Ordinary stock' }} · {{ row.saleable || 0 }} saleable · {{ row.quarantine || 0 }} to quarantine</li></ul></details>
             <fieldset class="confirm" :disabled="!editable">
+              <template v-if="current.itemType==='set'">
+                <label>Returned set contents<select v-model="contentsMode" required>
+                  <option disabled value="">Choose the inspection outcome</option><option value="observed">Record inspected contents</option>
+                  <option value="unrecorded">Contents could not be verified</option></select></label>
+                <SetContentsFields v-if="contentsMode==='observed'" v-model:box="box" v-model:instructions="instructions" />
+                <small v-if="!review.setContentsSupported" class="warning">Update the server before recording recovered sets.</small>
+                <small v-else>Record sets with different contents separately. Unverified contents require inspection before a new offer.</small>
+              </template>
               <label>Confirm physical bin code<input v-model="bin" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
               <small v-if="bin && !bins.pending(bin) && !bins.matches(review.position.location,bin)" class="warning">Enter the code on the registered bin.</small>
               <label>Inspection findings and reason<input v-model="reason" required maxlength="200" /></label>
@@ -180,19 +196,21 @@ async function submit() {
       <template v-if="receipt"><p><strong>{{ itemLabel([receipt.recordedCatalog],receipt.recordedCatalog.id) }} · Confirmed bin {{ receipt.confirmedLocationCode }}</strong>
         <small>{{ receipt.receipt.deliveryReference }} · Inspected at revision {{ receipt.recordedCatalog.revision }} · {{ time(receipt.recordedAt) }}</small></p>
         <p>{{ receipt.reason }}</p>
+        <p v-if="receipt.recordedCatalog.itemType==='set'">{{ contentLabel(receipt.setContents) }}</p>
+        <p v-if="receipt.resultPositionId"><a :href="'#inventory/'+receipt.resultPositionId">Inspect resulting position</a></p>
         <dl class="details" aria-label="Recorded inspection"><dt>Returned to saleable stock</dt><dd>{{ receipt.saleableQuantity }}</dd><dt>Returned to quarantine</dt><dd>{{ receipt.quarantineQuantity }}</dd>
           <dt>Restored item cost</dt><dd>{{ receiptCost(receipt.restoredItemCostMinor,receipt.receipt.currency) }}</dd></dl>
         <h3 ref="sourceHeading" tabindex="-1">Recovery by original source</h3><div v-for="row in receipt.allocations" :key="row.quarantineId ?? 'ordinary'" class="source">
-          <a v-if="row.quarantineId" :href="quarantineLink(location.id,route.position,row.quarantineId)">Original quarantine {{ row.quarantineId }}</a><strong v-else>Ordinary stock</strong>
+          <a v-if="row.quarantineId" :href="quarantineLink(location.id,receipt.positionId,row.quarantineId)">Original quarantine {{ row.quarantineId }}</a><strong v-else>Ordinary stock</strong>
           <small>{{ row.saleableQuantity }} saleable · {{ row.quarantineQuantity }} quarantined · {{ receiptCost(row.restoredItemCostMinor,receipt.receipt.currency) }} restored</small></div>
         <div class="pager" v-if="confirmed.sources.length > 1 || receipt.nextAfter"><button :disabled="!healthy || confirmed.sources.length < 2" @click="pageBy('sources')">Previous receipt sources</button>
           <button :disabled="!healthy || !receipt.nextAfter" @click="pageBy('sources',receipt.nextAfter)">Next receipt sources</button></div>
-        <nav aria-label="Recovery evidence"><a v-if="receipt.recoveredQuarantineId" :href="quarantineLink(location.id,route.position,receipt.recoveredQuarantineId)">Recovered pieces in quarantine</a>
-          <a :href="recoveryLink(location.id,route.position,route.posting)">Current recovery balance and history</a></nav>
+        <nav aria-label="Recovery evidence"><a v-if="receipt.recoveredQuarantineId" :href="quarantineLink(location.id,receipt.resultPositionId ?? route.position,receipt.recoveredQuarantineId)">Recovered pieces in quarantine</a>
+          <a :href="recoveryLink(location.id,receipt.positionId,route.posting)">Current recovery balance and history</a></nav>
         <details><summary>Receipt identifiers</summary><small>Recovery {{ receipt.id }}</small><small>Position {{ route.position }}</small>
           <small>Command {{ receipt.commandId }}</small><small>Correlation {{ receipt.correlationId }}</small></details>
       </template>
-      <nav aria-label="Recovery navigation"><a :href="lossReceiptLink(location.id,route.position,route.posting)">Original posted loss</a><a :href="'#inventory/'+route.position">Position timeline</a>
+      <nav aria-label="Recovery navigation"><a :href="lossReceiptLink(location.id,receipt?.positionId ?? route.position,route.posting)">Original posted loss</a><a :href="'#inventory/'+route.position">Position timeline</a>
         <a v-if="review || receipt" :href="'#inventory/lot/'+(review || receipt)!.receipt.deliveryId">Receipt lot</a></nav>
     </div>
   </dialog>

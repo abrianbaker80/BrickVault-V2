@@ -7,7 +7,7 @@ namespace BrickVault.Api;
 internal static class CommandJournal
 {
     public static async Task<Receipt?> Replay(NpgsqlConnection connection, NpgsqlTransaction tx,
-        Guid commandId, byte[] digest, CancellationToken token)
+        Guid commandId, byte[] digest, CancellationToken token, bool allowUnapplied = false)
     {
         // The same command ID serializes across endpoints and API instances before the first write.
         await using var guard = Query(connection, tx,
@@ -20,6 +20,8 @@ internal static class CommandJournal
         if (!await row.ReadAsync(token)) return null;
         if (!CryptographicOperations.FixedTimeEquals(digest, row.GetFieldValue<byte[]>(0)))
             throw new Fault(409, "command_mismatch", "This command ID already identifies a different request.");
+        if (!allowUnapplied && row.GetString(3) == PooledOfferConfirmation.Unapplied)
+            throw new Fault(409, "pooled_offer_unapplied", "This request was closed without creating an offer.");
         return new Receipt(commandId, row.GetGuid(1), row.GetInt32(2), row.GetString(3), row.GetGuid(4));
     }
 
