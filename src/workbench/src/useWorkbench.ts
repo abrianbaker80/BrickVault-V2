@@ -365,6 +365,19 @@ export function useWorkbench(page: Ref<string>) {
       if (expired(reason)) return
       if (reason instanceof ApiFailure && reason.status === 413 && reason.detail?.code === 'request_too_large') {
         await resolveSizeRejection(command, reason, firstAttempt)
+      } else if (command.kind === 'offer' && command.body.currency && reason instanceof ApiFailure &&
+          reason.status === 400 && reason.detail?.code === 'invalid_json') {
+        const reference = ' Reference ' + reason.detail.correlationId + '.'
+        if (firstAttempt) {
+          forget(command)
+          loadPending()
+          error.value = 'The server rejected the draft with selling currency ' + command.body.currency +
+            '. Check the server version before trying again.' + reference
+        } else {
+          error.value = 'Confirmation is still pending. Reconnect to a server that supports the original draft currency ' +
+            command.body.currency + ' and retry the command.' + reference
+          readState.value = 'disconnected'
+        }
       } else if (reason instanceof ApiFailure && reason.detail?.code === 'workspace_mismatch') {
         await refresh()
         error.value = 'The workspace changed. The original command is held for its issuing workspace.'
