@@ -11,7 +11,9 @@ import type { CatalogInput, Command, Held, LocationInput, ReceivingWorkspace, Se
 type ReadState = 'loading' | 'ready' | 'disconnected' | 'partial'
 export function useWorkbench(page: Ref<string>) {
   const session = shallowRef<Session | null>(null)
-  const workspace = shallowRef<Workspace | null>(null)
+  const workspaceRead = shallowRef<{ data: Workspace; allAudit: boolean } | null>(null)
+  const workspace = computed(() => workspaceRead.value?.data ?? null)
+  const activityWorkspace = computed(() => workspaceRead.value?.allAudit ? workspaceRead.value.data : null)
   const receiving = shallowRef<ReceivingWorkspace | null>(null)
   const signedOut = ref(false)
   const readState = ref<ReadState>('loading')
@@ -39,7 +41,7 @@ export function useWorkbench(page: Ref<string>) {
   function clearSession(message = '') {
     ++generation
     session.value = null
-    workspace.value = null
+    workspaceRead.value = null
     receiving.value = null
     pending.value = []
     held.value = []
@@ -63,7 +65,7 @@ export function useWorkbench(page: Ref<string>) {
       const authenticated = verified?.session ?? await api.session()
       if (current !== generation) return
       if (session.value?.workspaceId !== authenticated.workspaceId) {
-        workspace.value = null
+        workspaceRead.value = null
         receiving.value = null
         notice.value = null
         error.value = ''
@@ -72,12 +74,13 @@ export function useWorkbench(page: Ref<string>) {
       session.value = authenticated
       signedOut.value = false
       loadPending()
+      const allAudit = page.value === 'activity'
       const finished = Promise.all([
-        (page.value === 'catalog' || page.value === 'locations' ? verified?.references : undefined) ?? api.workspace(page.value === 'activity'),
+        (page.value === 'catalog' || page.value === 'locations' ? verified?.references : undefined) ?? api.workspace(allAudit),
         page.value === 'receiving' ? api.receiving() : null
       ]).then(([result, stock]) => {
         if (current !== generation) return
-        workspace.value = result
+        workspaceRead.value = { data: result, allAudit }
         receiving.value = stock
         readState.value = result.complete && (!stock || stock.complete) ? 'ready' : 'partial'
       }).catch(reason => failedRefresh(current, reason))
@@ -453,6 +456,6 @@ export function useWorkbench(page: Ref<string>) {
     return send(command, true)
   }
 
-  return { session, workspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
+  return { session, workspace, activityWorkspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
     canSend, canCreate, refresh, signIn, signOut, create, record, send, expired }
 }

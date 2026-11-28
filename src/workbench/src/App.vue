@@ -36,7 +36,7 @@ const route = () => {
 const page = ref<Page>(route())
 const hash = ref(window.location.hash)
 const countLink = computed(() => readCountLink(hash.value))
-const { session, workspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
+const { session, workspace, activityWorkspace, receiving, signedOut, readState, error, notice, pending, held, journalError, authBusy, submitting,
   canSend, canCreate, refresh, signIn, signOut, create, record, send, expired } = useWorkbench(page)
 const stockReceipt = computed(() => {
   const link = countLink.value
@@ -137,7 +137,7 @@ function openForm() {
           <div class="read-bar">
             <span class="read-state" role="status"><i :class="{ live: readState === 'ready' }" aria-hidden="true"></i>{{ status }}</span>
             <span v-if="page === 'receiving' && receiving">Last read {{ time(receiving.asOf) }}</span>
-            <span v-else-if="workspace && page !== 'receiving' && page !== 'inventory'">Last read {{ time(workspace.asOf) }}</span>
+            <span v-else-if="workspace && (referencePage || (page === 'activity' && activityWorkspace))">Last read {{ time(workspace.asOf) }}</span>
             <button :disabled="readState === 'loading' || submitting || authBusy" @click="refresh()">Refresh</button>
           </div>
           <p v-if="error && !dialogKind" class="warning" role="alert">{{ error }}</p>
@@ -178,7 +178,10 @@ function openForm() {
               <div><span>Locations</span><strong>{{ workspace.locations.length }}</strong></div>
               <div><span>Integration blocked</span><strong>{{ workspace.catalog.filter(row => !row.integrationEligible).length }}</strong></div>
             </div>
-            <Activity v-if="page === 'activity'" :workspace="workspace" :connected="readState === 'ready'" @failure="expired" />
+            <template v-if="page === 'activity'">
+              <Activity v-if="activityWorkspace" :key="session.workspaceId" :workspace="activityWorkspace" :connected="readState === 'ready'" @failure="expired" />
+              <p v-else role="status">{{ readState === 'loading' ? 'Loading audit history…' : 'Audit history is unavailable.' }}</p>
+            </template>
             <Inventory v-else-if="page === 'inventory'" :key="session.workspaceId" :workspace="workspace" :connected="readState !== 'disconnected'"
               :csrf="session.csrfToken" :controls="{ enabled: canCreate, pending: pending.length > 0, feedback: error || journalError, workspaceId: session.workspaceId, dispatch: record }" @failure="expired" @refresh="refresh()" />
             <template v-else-if="page === 'receiving'">
