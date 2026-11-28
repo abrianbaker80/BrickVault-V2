@@ -5,7 +5,9 @@ Open **Receiving** in the signed-in Workbench. Use an isolated V2 instance and f
 1. Record a purchase reference, source, currency and expected unit count. Record a purchase charge separately when it still needs allocation.
 2. Count each delivery into intake. Record its own reference, quantity and evidenced item cost. Leave the cost unknown when it has no evidence. An unidentified delivery stays in intake until identification and physical putaway.
 3. Select the delivery, item and destination. Enter the actual bin code and quantity. Each confirmation retains its source delivery, including when only part of the delivery is ready.
-4. Set a manual unit price and select how many free units each placement will back. The preview records an unpublished offer. Backing the offer leaves physical custody unchanged.
+4. In **Prepare offer**, select the item and check **Selling currency**. It starts with the purchase currency. To price the draft in another currency, enter its three-letter code, then enter the manual unit price in that currency. Changing the currency clears the price. Choose how many free units each placement will back and save the unpublished offer. Backing the offer leaves physical custody unchanged.
+
+For a delivery invoiced in USD, an operator can price its draft at JPY 225 per unit. **Price and publication** shows the JPY price and zero published units. **Cost coverage** and the delivery continue to show documented amounts in USD. Missing receipt costs stay unknown. [Draft offer currency](https://github.com/abrianbaker80/BrickVault-V2/issues/52)
 
 The reference case receives eight identified units at a total item cost of USD 8.00 and four units with unknown item cost. Eight go into B-12, three into C-03, and one remains in intake. Of eleven free units, eight have documented item cost. USD 0.60 remains a separate unapplied charge. An internal offer can use five units from B-12 and two from C-03 at USD 1.50 each, leaving four free units withheld. The case exercises an incorrect bin, replay after restart, overcommitted backing and recovery from an encrypted backup. [Issue #13](https://github.com/abrianbaker80/BrickVault-V2/issues/13)
 

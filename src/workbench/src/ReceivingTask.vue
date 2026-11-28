@@ -31,6 +31,8 @@ const moved = ref<number>()
 const targetRow=computed(()=>bins.rows.value.get(target.value))
 const tooFull=computed(()=>exceedsCapacity(targetRow.value,Number(moved.value || 0)))
 const offerItem = ref('')
+const sellingCurrency = ref(props.purchase.currency)
+const priceCurrency = computed(() => sellingCurrency.value.trim().toUpperCase())
 const price = ref('')
 const quantities = ref<Record<string, number | ''>>({})
 const selectedItem = computed(() => line.value?.catalogId || identifiedItem.value)
@@ -46,6 +48,7 @@ const itemsToOffer = computed(() => eligible.value.filter(c => available.value.s
 const positions = computed(() => available.value.filter(p => p.catalogId === offerItem.value))
 const backed = computed(() => positions.value.reduce((total, p) => total + Number(quantities.value[p.id] || 0), 0))
 const canBack = computed(() => positions.value.reduce((sum, p) => sum + p.freeToBackQuantity, 0))
+const withheld = computed(() => Math.max(0, canBack.value - backed.value))
 const location = computed(() => props.workspace.locations.find(l => l.id === target.value))
 const label = (id: string) => itemLabel(props.workspace.catalog, id)
 function clearBin() { scanned.value = ''; moved.value = undefined; issue.value = '' }
@@ -64,6 +67,7 @@ watch(() => currentItem.value?.revision, revision => {
 })
 watch(target, clearBin)
 watch(offerItem, () => { quantities.value = {}; issue.value = '' })
+watch(priceCurrency, () => { price.value = ''; issue.value = '' })
 function change(next: Step) {
   step.value = next
   baseRevision.value = props.purchase.revision
@@ -71,7 +75,7 @@ function change(next: Step) {
   clearPlacement()
   deliveryId.value = pendingLines.value[0]?.id || ''
   deliveryReference.value = ''; counted.value = undefined; identity.value = ''; receiptItem.value = ''; basis.value = ''; amount.value = ''
-  offerItem.value = ''; price.value = ''; quantities.value = {}
+  offerItem.value = ''; sellingCurrency.value = props.purchase.currency; price.value = ''; quantities.value = {}
 }
 async function save() {
   if (!props.enabled || stale.value) return
@@ -103,12 +107,15 @@ async function save() {
   } else {
     if (!offerItem.value || !backed.value) { issue.value = 'Enter the quantity to back from at least one position.'; return }
     let unitPriceMinor: number
-    try { unitPriceMinor = parseMoney(price.value, props.purchase.currency) }
+    try { unitPriceMinor = parseMoney(price.value, priceCurrency.value) }
     catch (error) { issue.value = (error as Error).message; return }
     if (unitPriceMinor <= 0) { issue.value = 'Enter a positive manual price.'; return }
     const backing = positions.value.filter(p => Number(quantities.value[p.id]) > 0)
       .map(p => ({ placementId: p.id, quantity: Number(quantities.value[p.id]) }))
-    const result = await props.dispatch({ kind: 'offer', workspaceId, body: { ...common, catalogId: offerItem.value, unitPriceMinor, backing } })
+    const result = await props.dispatch({ kind: 'offer', workspaceId, body: {
+      ...common, catalogId: offerItem.value, unitPriceMinor, backing,
+      ...(priceCurrency.value === props.purchase.currency ? {} : { currency: priceCurrency.value })
+    } })
     if (result) change('offer')
   }
 }
@@ -177,13 +184,16 @@ async function save() {
           <fieldset class="fields" :disabled="!enabled || stale">
             <label class="span">Offer item<select v-model="offerItem" required><option disabled value="">Choose eligible stock</option>
               <option v-for="c in itemsToOffer" :key="c.id" :value="c.id">{{ label(c.id) }}</option></select></label>
-            <label>Manual unit price ({{ purchase.currency }})<input v-model="price" required inputmode="decimal" /></label>
+            <label>Selling currency<input v-model="sellingCurrency" pattern="[A-Za-z]{3}" maxlength="3" required
+              aria-describedby="selling-currency-hint" autocapitalize="characters" spellcheck="false" @change="sellingCurrency = priceCurrency" /></label>
+            <label>Manual unit price{{ priceCurrency ? ' (' + priceCurrency + ')' : '' }}<input v-model="price" required inputmode="decimal" /></label>
+            <p id="selling-currency-hint" class="span field-hint">Use a three-letter currency code. Changing the currency clears the price.</p>
           </fieldset>
           <fieldset v-if="positions.length" class="backing-list" :disabled="!enabled || stale"><legend>Back from these positions</legend>
             <label v-for="p in positions" :key="p.id"><span><strong>{{ p.locationCode }}</strong> · {{ p.delivery }}<small>{{ p.freeToBackQuantity }} units available to back</small></span>
               <input v-model="quantities[p.id]" type="number" inputmode="numeric" min="0" :max="p.freeToBackQuantity" :aria-label="'Back units from ' + p.locationCode + ' · ' + p.delivery" /></label>
           </fieldset>
-          <p v-if="offerItem" class="preview" aria-live="polite">{{ backed }} units of backing · {{ Math.max(0, canBack - backed) }} eligible units withheld</p>
+          <p v-if="offerItem" class="preview" aria-live="polite">{{ backed }} {{ backed === 1 ? 'unit' : 'units' }} of backing · {{ withheld }} eligible {{ withheld === 1 ? 'unit' : 'units' }} withheld</p>
           <p class="field-hint">This internal offer keeps the physical stock in its bins. Published quantity is zero.</p>
           <button class="primary" :disabled="!enabled || stale || !backed || backed > canBack">Save unpublished offer</button>
         </template>

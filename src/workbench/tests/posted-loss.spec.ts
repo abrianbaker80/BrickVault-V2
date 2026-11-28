@@ -28,7 +28,7 @@ test('one cross-page loss decision reduces only the chosen offers at the selecte
   for(let n=0;n<27;n++) {
     const backing = [{placementId:positionId,quantity:1}]
     if(!n) backing.push({placementId:sibling,quantity:1})
-    const id = await f.write('receiving/offers',4+n,{purchaseId,catalogId:f.catalogId,unitPriceMinor:100+n,backing})
+    const id = await f.write('receiving/offers',4+n,{purchaseId,catalogId:f.catalogId,currency:'JPY',unitPriceMinor:100+n,backing})
     if(!n) shared=id
   }
   const base = {purchaseId,positionId,locationId:f.a.id,confirmedLocationCode:f.a.code}
@@ -44,6 +44,7 @@ test('one cross-page loss decision reduces only the chosen offers at the selecte
   await expect(work.getByRole('link',{name:'Latest witnessed count'})).toHaveAttribute('href',countReceiptLink(f.a.id,latest))
   const offerRows = work.getByRole('list',{name:'Offer backing on this position'})
   await expect(offerRows.getByRole('listitem')).toHaveCount(25)
+  await expect(offerRows.getByRole('listitem').first()).toContainText(/JPY\s*1\d\d per unit/)
   const ids: string[] = (await (await firstPage).json()).offers.map((o:{id:string}) => o.id)
   const first = ids.includes(shared) ? shared : ids[0]
   const input = (id:string) => work.getByLabel('Reduce units for offer ' + id,{exact:true})
@@ -103,6 +104,7 @@ test('one cross-page loss decision reduces only the chosen offers at the selecte
   await expect(receipt(page).getByRole('link',{name:'Witnessed count used for this posting'})).toHaveAttribute('href',countReceiptLink(f.a.id,latest))
   await page.reload()
   await expect(receipt(page)).toContainText('Owner selected the exact backing to reduce')
+  await expect(receipt(page).getByRole('listitem').first()).toContainText(/JPY\s*1\d\d per unit/)
   await page.setViewportSize({width:1440,height:900})
   await page.screenshot({path:info.outputPath('posted-stock-loss-desktop.png')})
   await audit(page)
