@@ -3,7 +3,7 @@ import { useBinRegistry } from "./useBinRegistry"
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, ContractFailure, explain, requiresFreshCount, type Location, type TransferControls } from './api'
 import { closureLink, countPositionLink, countReceiptLink, lossReceiptLink, type CountLink } from './countLinks'
-import { money } from './receiving'
+import { receiptCost } from './receiving'
 import { time } from './presentation'
 
 type Route = NonNullable<NonNullable<CountLink>['closure']>
@@ -146,7 +146,7 @@ async function submit() {
           <dl class="details" aria-label="Evidence for closure">
             <dt>Ledger quantity</dt><dd>{{ review.ledgerQuantity }}</dd><dt>Latest witnessed count</dt><dd>{{ review.latestObservation.countedQuantity }}</dd>
             <dt>In quarantine</dt><dd>{{ review.quarantinedQuantity }}</dd><dt>Held for builds</dt><dd>{{ review.protectedProjectQuantity }}</dd>
-            <dt>Backing offers</dt><dd>{{ review.offerBackedQuantity }}</dd><dt>Original delivery cost</dt><dd>{{ money(review.receipt.itemCostMinor,review.receipt.currency) }}</dd></dl>
+            <dt>Backing offers</dt><dd>{{ review.offerBackedQuantity }}</dd><dt>Original delivery cost</dt><dd>{{ receiptCost(review.receipt.itemCostMinor,review.receipt.currency) }}</dd></dl>
           <nav aria-label="Count evidence"><a :href="countReceiptLink(location.id,openingId)">Opening count receipt</a><a :href="countReceiptLink(location.id,route.id)">Witnessed recount receipt</a></nav>
           <form @submit.prevent="submit"><fieldset :disabled="!ready">
             <label>Confirm physical bin code<input v-model="bin" required maxlength="48" autocomplete="off" spellcheck="false" /></label>
@@ -164,7 +164,7 @@ async function submit() {
         <dl class="details" aria-label="Stock at closure"><dt>Ledger quantity</dt><dd>{{ receipt.ledgerQuantity }}</dd><dt>Opening witnessed count</dt><dd>{{ receipt.openingObservation.countedQuantity }}</dd>
           <dt>Exact witnessed recount</dt><dd>{{ receipt.recountObservation.countedQuantity }}</dd><dt>In quarantine</dt><dd>{{ receipt.quarantinedQuantity }}</dd>
           <dt>Held for builds</dt><dd>{{ receipt.heldQuantity }}</dd><dt>Backing offers</dt><dd>{{ receipt.offerBackedQuantity }}</dd>
-          <dt>Original delivery cost</dt><dd>{{ money(receipt.receipt.itemCostMinor,receipt.receipt.currency) }}</dd></dl>
+          <dt>Original delivery cost</dt><dd>{{ receiptCost(receipt.receipt.itemCostMinor,receipt.receipt.currency) }}</dd></dl>
         <p>The closure recorded zero stock loss. Quantities, commitments and cost were preserved.</p>
         <nav aria-label="Closure receipt navigation"><a :href="countReceiptLink(location.id,receipt.openingObservation.id)">Opening count receipt</a>
           <a :href="countReceiptLink(location.id,receipt.recountObservation.id)">Witnessed recount receipt</a>

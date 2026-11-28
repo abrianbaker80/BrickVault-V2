@@ -47,6 +47,13 @@ export function money(minor: number | string | null, currency: string) {
   const whole = digits ? amount.slice(0,-digits) : amount
   return format.formatToParts(BigInt(whole)).map(part=>part.type==='fraction' ? amount.slice(-digits) : part.value).join('')
 }
+
+export function receiptCost(minor: number | string | null, currency: string) {
+  const display = money(minor, currency)
+  if (minor === null || /^0+$/.test(String(minor)) || legacyPriceCompatible(currency)) return display
+  return display + ' at current precision (' + minor + ' recorded minor units)'
+}
+
 export function parseMoney(text: string, currency: string) {
   const digits = fractionDigits(currency)
   const parts = /^(\d+)(?:\.(\d+))?$/.exec(text.trim())

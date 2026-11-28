@@ -3,7 +3,7 @@ import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { api, ApiFailure, explain, requiresFreshCount } from './api'
 import { countReceiptLink, lossCaseLink } from './countLinks'
 import { time } from './presentation'
-import { money, recordedOfferPrice } from './receiving'
+import { receiptCost, recordedOfferPrice } from './receiving'
 
 const props = defineProps<{ bin: string; position: string; caseId: string; witnessId: string; asOf: string; connected: boolean; countReady: boolean }>()
 const emit = defineEmits<{ failure: [reason: unknown]; refreshCount: []; beginCount: [] }>()
@@ -97,7 +97,7 @@ function retryRead() {
           <dt>Capacity for offers after loss</dt><dd>{{ page.offerCapacityAfterLoss ?? 'Pending identification of missing pieces' }}</dd>
           <dt>Currently backing offers</dt><dd>{{ page.offerBackedQuantity }}</dd>
           <dt>Whole delivery cost ({{ page.receipt.deliveryQuantity }} units)</dt>
-          <dd>{{ money(page.receipt.itemCostMinor, page.receipt.currency) }}<template v-if="page.receipt.itemCostMinor === null"> ({{ page.receipt.currency }})</template></dd>
+          <dd>{{ receiptCost(page.receipt.itemCostMinor, page.receipt.currency) }}<template v-if="page.receipt.itemCostMinor === null"> ({{ page.receipt.currency }})</template></dd>
         </dl>
         <p v-if="page.quarantineBlocksLoss && page.candidateLossQuantity > 0" class="warning">{{ page.quarantinedQuantity }} quarantined in this position. Identify whether any missing pieces came from named quarantine records before reviewing commitments.</p>
         <p v-if="page.protectedProjectShortfall" class="warning">Build reservations exceed the proposed stock by {{ page.protectedProjectShortfall }}. Review the named holds.</p>

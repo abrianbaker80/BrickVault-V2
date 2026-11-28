@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
-import { money, parseMoney } from '../src/receiving'
+import { money, parseMoney, receiptCost } from '../src/receiving'
 import { audit, fixture, purchases } from './bin-fixture'
 import { test } from './trusted'
 
@@ -33,7 +33,25 @@ test('minor unit precision covers whole, fractional and unlisted currency codes'
     expect(money(String(minor), currency).replace(/\s/g, ' ')).toBe(currency + ' ' + text)
     expect(() => parseMoney(text.includes('.') ? text + '1' : text + '.1', currency)).toThrow()
   }
+  expect(receiptCost(10, 'HUF').replace(/\s/g, ' ')).toBe('HUF 0.10 at current precision (10 recorded minor units)')
+  expect(receiptCost('0', 'HUF').replace(/\s/g, ' ')).toBe('HUF 0.00')
+  expect(receiptCost(null, 'HUF')).toBe('Unknown')
   expect(money('90071992547409919', 'IQD').replace(/\s/g, ' ')).toBe('IQD 90,071,992,547,409.919')
+})
+
+test('receipt cost shows the recorded integer when older browsers disagree on precision', async ({ page }) => {
+  const f = await fixture(page)
+  const purchaseId = await f.write('receiving/purchases', 0, { reference: 'HUF-' + f.a.code,
+    source: 'Fictional receipt', currency: 'HUF', orderedQuantity: 1, pendingChargeMinor: null })
+  await f.write('receiving/deliveries', 1, { purchaseId, catalogId: f.catalogId, reference: 'Training delivery',
+    quantity: 1, itemCostMinor: 10 })
+  await page.setViewportSize({ width: 320, height: 800 })
+  await page.goto('/#receiving/' + purchaseId)
+  await expect(page.getByRole('region', { name: 'Stock balance' })).toContainText('HUF 0.10 at current precision (10 recorded minor units)')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  const [purchase] = await purchases(page, [purchaseId])
+  expect(purchase.deliveries[0].itemCostMinor).toBe(10)
+  expect(purchase.balances.publishedQuantity).toBe(0)
 })
 
 test('manual prices use fixed currency minor units on entry and readback', async ({ page }) => {

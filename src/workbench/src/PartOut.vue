@@ -4,7 +4,7 @@ import { useBinRegistry } from './useBinRegistry'
 import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { api, ContractFailure, explain, type PartOutCommand, type PartOutReview, type TransferControls, type Workspace } from './api'
 import { partOutLink } from './countLinks'
-import { itemLabel, money, parseMoney } from './receiving'
+import { itemLabel, receiptCost, parseMoney } from './receiving'
 import { time } from './presentation'
 import PartOutReceipt from './PartOutReceipt.vue'
 
@@ -142,7 +142,7 @@ async function save() {
       <div class="layout"><aside class="panel context" aria-label="Input receipt and commitments">
         <h3>Input receipt</h3><p><strong>{{ itemLabel([current],current.id) }}</strong><small>Current catalog revision {{ current.revision }} · Placed at revision {{ page.position.layer.catalogRevision }}</small></p>
         <p>{{ page.position.layer.purchaseReference }} · {{ page.position.layer.deliveryReference }}<small>Bin {{ page.position.location.code }} · {{ page.position.location.name }}</small></p>
-        <p>Original input lot · {{ page.position.layer.receiptQuantity }} units · {{ money(page.position.layer.receiptItemCostMinor,page.currency) }} item cost</p>
+        <p>Original input lot · {{ page.position.layer.receiptQuantity }} units · {{ receiptCost(page.position.layer.receiptItemCostMinor,page.currency) }} item cost</p>
         <a :href="'#inventory/lot/'+page.position.layer.deliveryId">Inspect input receipt lot</a>
         <dl class="details"><dt>On hand</dt><dd>{{ page.position.layer.quantity }}</dd><dt>Held for builds</dt><dd>{{ page.heldQuantity }}</dd>
           <dt>Backing offers</dt><dd>{{ page.position.layer.backedQuantity }}</dd><dt>Quarantined</dt><dd>{{ page.position.layer.quarantinedQuantity }}</dd>
@@ -199,7 +199,7 @@ async function save() {
           <button v-if="residualMode==='record'" type="button" @click="addResidual">Add another residual</button>
         </fieldset>
         <fieldset :disabled="!editable || !selected"><legend>Reconcile cost</legend>
-          <template v-if="selected"><dl class="details"><dt>Consumed input cost</dt><dd>{{ money(page.sourceItemCostMinor,page.currency) }}</dd><dt>Assigned to outputs</dt><dd>{{ money(known ? assigned : null,page.currency) }}</dd></dl>
+          <template v-if="selected"><dl class="details"><dt>Consumed input cost</dt><dd>{{ receiptCost(page.sourceItemCostMinor,page.currency) }}</dd><dt>Assigned to outputs</dt><dd>{{ receiptCost(known ? assigned : null,page.currency) }}</dd></dl>
             <label v-if="known">Unallocated residual ({{ page.currency }})<input v-model="residualCost" inputmode="decimal" required /><small>Enter zero when all input cost is assigned.</small></label>
             <small v-if="known && residualCost && !balanced" class="warning">Assigned output costs plus the unallocated residual must equal the consumed input cost.</small>
             <p v-if="!known">The input and unallocated residual have unknown cost.</p></template>
@@ -213,7 +213,7 @@ async function save() {
       <section class="panel history" aria-label="Input part-out history"><h3 ref="historyHeading" tabindex="-1">Part-outs from this position</h3>
         <p v-if="!page.partOuts.length && live">No part-outs on this page.</p>
         <div v-for="r in page.partOuts" :key="r.id"><a :href="partOutLink(source,r.id)">Part-out receipt {{ r.id }}</a>
-          <small>{{ time(r.recordedAt) }} · {{ r.quantity }} consumed · {{ r.outputCount }} output lines · Input cost {{ money(r.sourceItemCostMinor,page.currency) }}</small></div>
+          <small>{{ time(r.recordedAt) }} · {{ r.quantity }} consumed · {{ r.outputCount }} output lines · Input cost {{ receiptCost(r.sourceItemCostMinor,page.currency) }}</small></div>
         <div v-if="confirmed.length>1 || page.nextAfter" class="pager"><button :disabled="!live || confirmed.length<2" @click="requested=confirmed.slice(0,-1)">Newer part-outs</button>
           <button :disabled="!live || !page.nextAfter" @click="page.nextAfter && (requested=[...confirmed,page.nextAfter])">Older part-outs</button></div>
       </section>

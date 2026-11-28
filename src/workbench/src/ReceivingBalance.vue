@@ -2,13 +2,13 @@
 import { computed } from 'vue'
 import type { Catalog, Purchase } from './api'
 import { draftBackingLink, partOutLink } from './countLinks'
-import { itemLabel, money, recordedOfferPrice } from './receiving'
+import { itemLabel, receiptCost, recordedOfferPrice } from './receiving'
 const props = defineProps<{ purchase: Purchase; catalog: Catalog[] }>()
 const balances = computed(() => props.purchase.balances)
 const layers=computed(()=>[...props.purchase.deliveries,...(props.purchase.derivedLayers ?? [])])
 const positions = computed(() => new Map(layers.value.flatMap(d => d.placements.map(p =>
   [p.id, { bin:p.locationId, label:p.locationCode + ' · ' + d.reference }] as const))))
-const amount = (value: number | string | null) => money(value, props.purchase.currency)
+const amount = (value: number | string | null) => receiptCost(value, props.purchase.currency)
 </script>
 <template>
   <aside class="side-panels receiving-balances" aria-label="Purchase readback">

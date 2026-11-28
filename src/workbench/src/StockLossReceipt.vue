@@ -2,7 +2,7 @@
 import { nextTick, ref, shallowRef, watch } from 'vue'
 import { api, explain, type StockLoss } from './api'
 import { countReceiptLink, quarantineLink, recoveryLink } from './countLinks'
-import { money, recordedOfferPrice } from './receiving'
+import { receiptCost, recordedOfferPrice } from './receiving'
 import { time } from './presentation'
 
 const props = defineProps<{bin:string; position:string; posting:string; asOf:string; connected:boolean}>()
@@ -55,10 +55,10 @@ watch([()=>props.connected,()=>props.asOf,()=>requested.value,()=>quarantineRequ
       <dl class="details"><dt>Ledger before posting</dt><dd>{{ page.ledgerQuantityBefore }}</dd><dt>Witnessed count</dt><dd>{{ page.reviewedObservation.countedQuantity }}</dd>
         <dt>Ledger after posting</dt><dd>{{ page.ledgerQuantityAfter }}</dd><dt>Protected build holds</dt><dd>{{ page.protectedProjectQuantity }}</dd>
         <dt>Offer backing before</dt><dd>{{ page.offerBackedQuantityBefore }}</dd><dt>Offer backing after</dt><dd>{{ page.offerBackedQuantityAfter }}</dd>
-        <dt>Original delivery cost</dt><dd>{{ money(page.receipt.itemCostMinor,page.receipt.currency) }}</dd>
+        <dt>Original delivery cost</dt><dd>{{ receiptCost(page.receipt.itemCostMinor,page.receipt.currency) }}</dd>
         <template v-if="page.priorDeliveryLossQuantityMode==='active'"><dt>Still missing from earlier postings at that time</dt><dd>{{ page.priorDeliveryLossQuantity }}</dd></template>
-        <dt>Loss cost on this posting</dt><dd>{{ money(page.allocatedItemCostMinor,page.receipt.currency) }}</dd>
-        <dt>Remaining delivery cost</dt><dd>{{ money(page.remainingDeliveryItemCostMinor,page.receipt.currency) }}</dd></dl>
+        <dt>Loss cost on this posting</dt><dd>{{ receiptCost(page.allocatedItemCostMinor,page.receipt.currency) }}</dd>
+        <dt>Remaining delivery cost</dt><dd>{{ receiptCost(page.remainingDeliveryItemCostMinor,page.receipt.currency) }}</dd></dl>
       <a v-if="connected && !loading && !error" :href="recoveryLink(bin,position,posting)">Inspect recovered pieces and review prior recoveries</a>
       <a :href="countReceiptLink(bin,page.reviewedObservation.id)">Witnessed count used for this posting</a>
       <section v-if="page.quarantineAttributionRecorded" aria-label="Posted quarantine attribution">

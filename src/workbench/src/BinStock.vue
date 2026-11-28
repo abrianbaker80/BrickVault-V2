@@ -5,7 +5,7 @@ import type { BinTransferSnapshot, Catalog, Location, TransferControls, Transfer
 import TransferForm from './TransferForm.vue'
 import CountWorkspace from './CountWorkspace.vue'
 import { countPositionLink, holdPositionLink, draftBackingLink, quarantineLink, type CountLink } from './countLinks'
-import { itemLabel, money, recordedOfferPrice } from './receiving'
+import { itemLabel, receiptCost, recordedOfferPrice } from './receiving'
 import { time } from './presentation'
 
 const props = defineProps<{ location: Location; asOf: string; connected: boolean; workspaceLoading: boolean; locations: Location[]; catalog: Catalog[]; transfers: TransferControls; countLink?: CountLink }>()
@@ -230,7 +230,7 @@ watch(binScope,
             <small v-if="layer.locationCodeAtPutaway !== stock.location.code">Bin code at putaway {{ layer.locationCodeAtPutaway }}</small>
             <small>{{ layer.backedQuantity }} backed · {{ layer.unbackedQuantity }} unbacked · {{ layer.freeToBackQuantity }} available to back</small>
             <small v-if="layer.quarantinedQuantity">{{ layer.quarantinedQuantity }} quarantined in this bin</small>
-            <small>Whole delivery of {{ layer.receiptQuantity }} · Item cost {{ money(layer.receiptItemCostMinor, layer.currency) }}<template v-if="layer.receiptItemCostMinor === null"> ({{ layer.currency }})</template></small>
+            <small>Whole delivery of {{ layer.receiptQuantity }} · Item cost {{ receiptCost(layer.receiptItemCostMinor, layer.currency) }}<template v-if="layer.receiptItemCostMinor === null"> ({{ layer.currency }})</template></small>
             <details><summary>Placement details</summary><small>Placement {{ layer.placementId }}</small>
               <small>Receipt correlation ID {{ layer.receiptCorrelationId }}</small></details>
             <button type="button" class="move-stock" :disabled="!ready || !transfers.enabled || locations.length < 2 || checking || fenced.has(layer.placementId)"
