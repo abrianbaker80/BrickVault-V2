@@ -50,11 +50,12 @@ test('manual prices use fixed currency minor units on entry and readback', async
   await save.click()
   const reply = await sent
   expect(reply.status()).toBe(200)
+  expect(await reply.request().headerValue('X-BrickVault-Price-Scale')).toBe('1')
   expect(reply.request().postDataJSON()).toMatchObject({ currency: 'IQD', unitPriceMinor: 1234 })
   await page.reload()
   await expect(page.getByRole('list', { name: 'Unpublished offers' })).toContainText('IQD 1.234 per unit')
   const [purchase] = await purchases(page, [f.unknown.purchaseId])
-  expect(purchase.offers[0]).toMatchObject({ currency: 'IQD', unitPriceMinor: 1234 })
+  expect(purchase.offers[0]).toMatchObject({ currency: 'IQD', unitPriceMinor: 1234, priceScaleVerified: true })
   expect(purchase.currency).toBe('EUR')
 })
 

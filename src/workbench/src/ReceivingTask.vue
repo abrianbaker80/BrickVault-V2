@@ -3,7 +3,7 @@ import {capacityPreview,exceedsCapacity} from './binCapacity'
 import { useBinRegistry } from './useBinRegistry'
 import { computed, ref, watch } from 'vue'
 import type { Dispatch, Purchase, Workspace } from './api'
-import { itemLabel, parseMoney } from './receiving'
+import { itemLabel, legacyPriceCompatible, parseMoney } from './receiving'
 
 const props = defineProps<{ purchase: Purchase; workspace: Workspace; workspaceId: string; enabled: boolean; dispatch: Dispatch }>()
 type Step = 'receive' | 'putaway' | 'offer'
@@ -114,7 +114,8 @@ async function save() {
       .map(p => ({ placementId: p.id, quantity: Number(quantities.value[p.id]) }))
     const result = await props.dispatch({ kind: 'offer', workspaceId, body: {
       ...common, catalogId: offerItem.value, unitPriceMinor, backing,
-      ...(priceCurrency.value === props.purchase.currency ? {} : { currency: priceCurrency.value })
+      ...(priceCurrency.value === props.purchase.currency && legacyPriceCompatible(priceCurrency.value)
+        ? {} : { currency: priceCurrency.value })
     } })
     if (result) change('offer')
   }
