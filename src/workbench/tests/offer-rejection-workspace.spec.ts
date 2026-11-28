@@ -4,7 +4,6 @@ import { fixture } from './bin-fixture'
 import { test } from './trusted'
 
 const offers = '**/api/v1/receiving/offers'
-const session = '**/api/v1/session'
 const journal = (page: Page, key: string) => page.evaluate(k => localStorage.getItem(k), key)
 const pending = (page: Page) => page.getByRole('region', { name: 'Pending confirmations' })
 
@@ -34,38 +33,41 @@ for (const attempt of ['first attempt', 'retry']) {
           await expect(pending(page)).toBeVisible()
           await page.reload()
         }
-        const reject = gate(), auth = gate(), checkingSession = gate()
+        const reject = gate(), auth = gate(), checkingSession = gate(), writing = gate()
+        const signed = await (await page.request.get('/api/v1/session')).json()
+        let authenticatedId = active
         const sent = page.waitForRequest(r => r.method() === 'POST' && r.url().endsWith('/receiving/offers'))
-        await page.route(offers, async r => {
-          await reject.wait
-          await r.fulfill({ status: 400, json: {
-            code: 'invalid_json', message: 'The request must match the version 1 JSON contract.', correlationId: correlation
-          } })
-        }, { times: 1 })
+        await page.route('**/api/v1/**', async route => {
+          const r = route.request()
+          if (r.method() === 'POST' && r.url().endsWith('/receiving/offers')) {
+            writing.release()
+            await reject.wait
+            await route.fulfill({ status: 400, json: {
+              code: 'invalid_json', message: 'The request must match the version 1 JSON contract.', correlationId: correlation
+            } })
+          } else if (r.method() === 'GET' && r.url().endsWith('/session')) {
+            checkingSession.release()
+            await auth.wait
+            await route.fulfill({ json: { ...signed, workspaceId: authenticatedId } })
+          } else await route.continue()
+        })
         try {
           await (attempt === 'retry' ? pending(page).getByRole('button', { name: 'Retry command' }) : save).click()
+          await writing.wait
           const request = await sent, id = request.postDataJSON().commandId
-          const journalPath = (workspace: string) => 'brickvault.v2.pending.' + workspace + '.' + id
-          const issuingEntryPath = journalPath(issuer)
-          const otherEntryPath = journalPath(other)
-          const original = await journal(page, issuingEntryPath)
+          const issuerStoragePath = 'brickvault.v2.pending.' + issuer + '.' + id
+          const otherStoragePath = 'brickvault.v2.pending.' + other + '.' + id
+          const original = await journal(page, issuerStoragePath)
           expect(JSON.parse(original!).body).toMatchObject({ currency: 'JPY', commandId: id })
           // The same ID in another workspace identifies an independent journal entry.
           const otherEntry = JSON.stringify({ workspaceId: other, kind: 'location', body: {
             commandId: id, expectedRevision: 0, code: 'SPARE', name: 'Shelf in other workspace'
           } })
-          await page.evaluate(([key, value]) => localStorage.setItem(key, value), [otherEntryPath, otherEntry])
-          await page.route(session, async route => {
-            const response = await route.fetch()
-            try {
-              checkingSession.release()
-              await auth.wait
-              await route.fulfill({ response, json: { ...await response.json(), workspaceId: active } })
-            } finally { await response.dispose() }
-          }, { times: 1 })
+          await page.evaluate(([key, value]) => localStorage.setItem(key, value), [otherStoragePath, otherEntry])
           const directory = page.waitForResponse(r => new URL(r.url()).searchParams.get('audit') === 'all')
           await page.getByRole('link', { name: 'Activity', exact: true }).click()
           await checkingSession.wait
+          await expect(page.locator('.read-state')).toHaveText('Loading')
           if (timing === 'after refresh') {
             auth.release()
             await directory
@@ -75,7 +77,7 @@ for (const attempt of ['first attempt', 'retry']) {
           reject.release()
           await rejected
           if (timing === 'during refresh') {
-            if (attempt === 'first attempt') await expect.poll(() => journal(page, issuingEntryPath)).toBeNull()
+            if (attempt === 'first attempt') await expect.poll(() => journal(page, issuerStoragePath)).toBeNull()
             await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
             await expect(page.getByRole('alert').filter({ hasText: correlation })).toHaveCount(0)
             await expect(page.locator('.read-bar button')).toBeDisabled()
@@ -84,8 +86,8 @@ for (const attempt of ['first attempt', 'retry']) {
           }
           // The command handler has finished and the current workspace's state is visible.
           await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
-          expect(await journal(page, issuingEntryPath)).toBe(attempt === 'retry' ? original : null)
-          expect(await journal(page, otherEntryPath)).toBe(otherEntry)
+          expect(await journal(page, issuerStoragePath)).toBe(attempt === 'retry' ? original : null)
+          expect(await journal(page, otherStoragePath)).toBe(otherEntry)
           const alert = page.getByRole('alert')
           if (active === issuer) {
             await expect(alert).toContainText(correlation)
@@ -93,11 +95,7 @@ for (const attempt of ['first attempt', 'retry']) {
             await expect(page.getByText(attempt === 'retry' ? 'Disconnected' : 'Connected', { exact: true })).toBeVisible()
             if (attempt === 'retry') await expect(pending(page)).toContainText(id)
             if (attempt === 'first attempt' && timing === 'after refresh') {
-              await page.route(session, async r => {
-                const response = await r.fetch()
-                try { await r.fulfill({ response, json: { ...await response.json(), workspaceId: other } }) }
-                finally { await response.dispose() }
-              }, { times: 1 })
+              authenticatedId = other
               const replaced = page.waitForResponse(r => new URL(r.url()).searchParams.get('audit') === 'all')
               await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
               await replaced
