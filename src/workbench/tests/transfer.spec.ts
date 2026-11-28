@@ -100,7 +100,10 @@ test('a counted transfer replays the same receipt and carries the chosen offers 
   await totals(page, [4, 3, 1, 1])
   await expect(layers(page)).toContainText('Transferred from ' + f.b.code)
   await expect(layers(page)).toContainText(f.paid.delivery)
-  await page.screenshot({ path: info.outputPath('transfer-desktop.png'), fullPage: true })
+  const destinationHeading = stock(page).getByRole('heading', { name: 'Stock in this bin' })
+  await destinationHeading.scrollIntoViewIfNeeded()
+  await expect(destinationHeading).toBeInViewport()
+  await page.screenshot({ path: info.outputPath('transfer-desktop.png') })
   const after = await purchase()
   expect(after.balances).toEqual(before.balances)
   expect(after.offers.map(o => [o.id, o.backedQuantity, o.publishedQuantity])).toEqual(
