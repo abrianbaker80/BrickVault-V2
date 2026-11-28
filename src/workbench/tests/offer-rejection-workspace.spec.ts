@@ -1,0 +1,118 @@
+import { randomUUID } from 'node:crypto'
+import { expect, type Page } from '@playwright/test'
+import { fixture } from './bin-fixture'
+import { test } from './trusted'
+
+const offers = '**/api/v1/receiving/offers'
+const session = '**/api/v1/session'
+const journal = (page: Page, key: string) => page.evaluate(k => localStorage.getItem(k), key)
+const pending = (page: Page) => page.getByRole('region', { name: 'Pending confirmations' })
+
+function gate() {
+  let release!: () => void
+  const wait = new Promise<void>(resolve => { release = resolve })
+  return { wait, release }
+}
+
+for (const attempt of ['first attempt', 'retry']) {
+  for (const scope of ['issuing workspace', 'replacement workspace']) {
+    for (const timing of ['during refresh', 'after refresh']) {
+      test(attempt + ' rejected ' + timing + ' in the ' + scope, async ({ page }) => {
+        const f = await fixture(page), issuer = f.headers['X-Workspace-Id']
+        const other = randomUUID(), correlation = randomUUID()
+        const active = scope === 'issuing workspace' ? issuer : other
+        await page.goto('/#receiving/' + f.paid.purchaseId)
+        await page.getByRole('button', { name: 'Prepare offer', exact: true }).click()
+        await page.getByLabel('Offer item').selectOption(f.catalogId)
+        await page.getByLabel('Selling currency').fill('JPY')
+        await page.getByLabel('Manual unit price').fill('225')
+        await page.getByLabel('Back units from ' + f.a.code + ' · ' + f.paid.delivery).fill('1')
+        const save = page.getByRole('button', { name: 'Save unpublished offer' })
+        if (attempt === 'retry') {
+          await page.route(offers, r => r.abort('connectionreset'), { times: 1 })
+          await save.click()
+          await expect(pending(page)).toBeVisible()
+          await page.reload()
+        }
+        const reject = gate(), auth = gate(), checkingSession = gate()
+        const sent = page.waitForRequest(r => r.method() === 'POST' && r.url().endsWith('/receiving/offers'))
+        await page.route(offers, async r => {
+          await reject.wait
+          await r.fulfill({ status: 400, json: {
+            code: 'invalid_json', message: 'The request must match the version 1 JSON contract.', correlationId: correlation
+          } })
+        }, { times: 1 })
+        try {
+          await (attempt === 'retry' ? pending(page).getByRole('button', { name: 'Retry command' }) : save).click()
+          const request = await sent, id = request.postDataJSON().commandId
+          const sourceKey = 'brickvault.v2.pending.' + issuer + '.' + id
+          const otherKey = 'brickvault.v2.pending.' + other + '.' + id
+          const original = await journal(page, sourceKey)
+          expect(JSON.parse(original!).body).toMatchObject({ currency: 'JPY', commandId: id })
+          // The same ID in another workspace identifies an independent journal entry.
+          const otherEntry = JSON.stringify({ workspaceId: other, kind: 'location', body: {
+            commandId: id, expectedRevision: 0, code: 'SPARE', name: 'Shelf in other workspace'
+          } })
+          await page.evaluate(([key, value]) => localStorage.setItem(key, value), [otherKey, otherEntry])
+          await page.route(session, async route => {
+            const response = await route.fetch()
+            try {
+              checkingSession.release()
+              await auth.wait
+              await route.fulfill({ response, json: { ...await response.json(), workspaceId: active } })
+            } finally { await response.dispose() }
+          }, { times: 1 })
+          const directory = page.waitForResponse(r => new URL(r.url()).searchParams.get('audit') === 'all')
+          await page.getByRole('link', { name: 'Activity', exact: true }).click()
+          await checkingSession.wait
+          if (timing === 'after refresh') {
+            auth.release()
+            await directory
+            await expect(page.getByText('Connected', { exact: true })).toBeVisible()
+          }
+          const rejected = page.waitForResponse(r => r.request() === request)
+          reject.release()
+          await rejected
+          if (timing === 'during refresh') {
+            if (attempt === 'first attempt') await expect.poll(() => journal(page, sourceKey)).toBeNull()
+            await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+            await expect(page.getByRole('alert').filter({ hasText: correlation })).toHaveCount(0)
+            await expect(page.locator('.read-bar button')).toBeDisabled()
+            auth.release()
+            await directory
+          }
+          // The command handler has finished and the current workspace's state is visible.
+          await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled()
+          expect(await journal(page, sourceKey)).toBe(attempt === 'retry' ? original : null)
+          expect(await journal(page, otherKey)).toBe(otherEntry)
+          const alert = page.getByRole('alert')
+          if (active === issuer) {
+            await expect(alert).toContainText(correlation)
+            await expect(alert).toContainText('JPY')
+            await expect(page.getByText(attempt === 'retry' ? 'Disconnected' : 'Connected', { exact: true })).toBeVisible()
+            if (attempt === 'retry') await expect(pending(page)).toContainText(id)
+            if (attempt === 'first attempt' && timing === 'after refresh') {
+              await page.route(session, async r => {
+                const response = await r.fetch()
+                try { await r.fulfill({ response, json: { ...await response.json(), workspaceId: other } }) }
+                finally { await response.dispose() }
+              }, { times: 1 })
+              const replaced = page.waitForResponse(r => new URL(r.url()).searchParams.get('audit') === 'all')
+              await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+              await replaced
+              await expect(pending(page)).toContainText('Shelf in other workspace')
+              await expect(alert).toHaveCount(0)
+            }
+          } else {
+            await expect(alert).toHaveCount(0)
+            await expect(page.getByText('Connected', { exact: true })).toBeVisible()
+            await expect(pending(page)).toContainText('Shelf in other workspace')
+          }
+        } finally {
+          reject.release()
+          auth.release()
+        }
+      })
+    }
+  }
+}
